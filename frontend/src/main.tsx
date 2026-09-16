@@ -16,6 +16,7 @@ import { CalendarBookingPage } from "./public-booking/CalendarBookingPage";
 import { ConfirmationPage } from "./public-booking/ConfirmationPage";
 import { StripeReturnPage } from "./settings/StripeReturnPage";
 import { WaiverPage } from "./waivers/WaiverPage";
+import { IntegrationResultPage } from "./IntegrationResultPage";
 import "./styles.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: true } } });
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
   { path: "/book/:operatorSlug/category/:categorySlug", element: <CategoryBookingPage /> },
   { path: "/book/:operatorSlug/:calendarSlug", element: <CalendarBookingPage /> },
   { path: "/booking/:publicReference/confirmation", element: <ConfirmationPage /> },
+  { path: "/integration-result", element: <IntegrationResultPage /> },
   { path: "/stripe/connect/return", element: <StripeReturnPage /> },
   { path: "/stripe/connect/refresh", element: <StripeReturnPage refresh /> },
   { path: "/waiver/:token", element: <WaiverPage /> },

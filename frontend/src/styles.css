@@ -99,6 +99,7 @@ a { color: inherit; text-decoration: none; }
 .state-card h1 { margin: 7px 0 0; font-size: 18px; }
 .state-card p { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 0 0 8px; }
 .spinner { width: 27px; height: 27px; border: 3px solid #dfe9e7; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+.result-error-icon { color: #a13a32; background: #fdecea; }
 
 .booking-layout { display: grid; grid-template-columns: 214px minmax(0, 1fr); gap: 12px; align-items: start; }
 .filter-panel { padding: 12px; position: sticky; top: 24px; }
