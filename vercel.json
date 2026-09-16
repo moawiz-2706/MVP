@@ -1,0 +1,51 @@
+{
+    "services": {
+        "frontend": {
+            "root": "frontend",
+            "framework": "vite",
+            "rewrites": [
+                { "source": "/(.*)", "destination": "/index.html" }
+            ]
+        },
+        "backend": {
+            "root": "backend",
+            "framework": "fastapi",
+            "entrypoint": "api/index.py"
+        }
+    },
+    "rewrites": [
+        {
+            "source": "/api(/.*)?",
+            "destination": {
+                "type": "service",
+                "service": "backend"
+            }
+        },
+        {
+            "source": "/(.*)",
+            "destination": {
+                "type": "service",
+                "service": "frontend"
+            }
+        }
+    ],
+    "crons": [
+        {
+            "path": "/api/v1/internal/cron/daily",
+            "schedule": "0 11 * * *"
+        }
+    ],
+    "headers": [
+        {
+            "source": "/(.*)",
+            "headers": [
+                {
+                    "key": "Content-Security-Policy",
+                    "value": "frame-ancestors https:"
+                },
+                { "key": "X-Content-Type-Options", "value": "nosniff" },
+                { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+            ]
+        }
+    ]
+}

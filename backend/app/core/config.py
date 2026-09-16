@@ -1,0 +1,63 @@
+from functools import lru_cache
+from typing import Annotated
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
+
+    app_name: str = "Passport API"
+    environment: str = "development"
+    api_prefix: str = "/api/v1"
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/postgres"
+    # Session-pooler engine tuning: one pooled connection per warm instance, plus
+    # a transient overflow. The GHL client refreshes rotating tokens in its own
+    # locked transaction, so a request already holding a connection needs a second
+    # one briefly; overflow connections are closed on return, not pooled.
+    db_pool_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    db_pool_recycle_seconds: int = Field(default=300, ge=60, le=3600)
+    db_max_overflow: int = Field(default=1, ge=0, le=10)
+
+    ghl_client_id: str = ""
+    ghl_client_secret: str = ""
+    ghl_app_id: str = ""
+    ghl_app_shared_secret: str = ""
+    ghl_token_encryption_key: str = ""
+    ghl_oauth_redirect_uri: str = ""
+    ghl_api_base_url: str = "https://services.leadconnectorhq.com"
+
+    app_session_secret: str = "development-only-change-me"
+    app_session_minutes: int = Field(default=15, ge=5, le=60)
+
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_publishable_key: str = ""
+    frontend_url: str = "http://localhost:5173"
+    # NoDecode stops pydantic-settings from JSON-decoding the env value, so a
+    # plain comma-separated string reaches split_origins() below.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
+    booking_hold_minutes: int = Field(default=10, ge=2, le=30)
+    cron_secret: str = ""
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def split_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("database_url")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

@@ -1,0 +1,103 @@
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+
+from app.schemas.availability import ResourceAvailability
+from app.schemas.waiver import WaiverSummary
+
+
+class BookingListItem(BaseModel):
+    id: uuid.UUID
+    booking_order_id: uuid.UUID
+    public_reference: str
+    calendar_id: uuid.UUID
+    calendar_name: str
+    category_id: uuid.UUID | None
+    category_name: str | None
+    category_color: str | None
+    customer_name: str
+    customer_email: EmailStr
+    start_at: datetime
+    end_at: datetime
+    units: int
+    status: str
+
+
+class SlotStaff(BaseModel):
+    id: uuid.UUID
+    staff_id: uuid.UUID
+    staff_name: str
+    role: str | None
+
+
+class SlotCalendar(BaseModel):
+    """One calendar's share of a dashboard time slot."""
+
+    calendar_id: uuid.UUID
+    calendar_name: str
+    category_color: str | None
+    end_at: datetime
+    pushed: bool
+    bookings: list[BookingListItem]
+    staff: list[SlotStaff]
+
+
+class DashboardSlot(BaseModel):
+    """Everything starting at one instant, grouped by calendar."""
+
+    start_at: datetime
+    calendars: list[SlotCalendar]
+
+
+class BookingResourceDetail(BaseModel):
+    resource_id: uuid.UUID
+    name: str
+    quantity: int
+
+
+class BookingNoteRead(BaseModel):
+    id: uuid.UUID
+    author_user_id: uuid.UUID | None
+    author_name: str | None
+    body: str
+    created_at: datetime
+
+
+class BookingNoteCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def strip_body(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class BookingDetail(BookingListItem):
+    customer_phone: str | None
+    location_name: str | None
+    location_address: str | None
+    payment_status: str
+    subtotal_minor: int
+    platform_fee_and_taxes_minor: int
+    customer_total_minor: int
+    ghl_contact_sync_status: str
+    ghl_confirmation_email_status: str
+    resources: list[BookingResourceDetail]
+    created_at: datetime
+    waiver: WaiverSummary
+    notes: list[BookingNoteRead]
+
+
+class BookingUpdate(BaseModel):
+    start_at: datetime | None = None
+    units: int | None = Field(default=None, gt=0, le=100_000)
+
+    @model_validator(mode="after")
+    def validate_change(self) -> "BookingUpdate":
+        if self.start_at is not None and self.start_at.tzinfo is None:
+            raise ValueError("start_at must include an offset")
+        if self.start_at is None and self.units is None:
+            raise ValueError("At least one field must be supplied")
+        return self
+

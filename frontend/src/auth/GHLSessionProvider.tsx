@@ -1,0 +1,61 @@
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { api, json, setSessionToken } from "../api/client";
+import type { UserContext } from "../api/types";
+
+interface SessionState { me: UserContext; refresh: () => Promise<void> }
+const SessionContext = createContext<SessionState | null>(null);
+
+function requestEncryptedContext(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", handler);
+      reject(new Error("Open Passport from your GoHighLevel sub-account."));
+    }, 8000);
+    const handler = (event: MessageEvent) => {
+      if (event.source !== window.parent) return;
+      if (event.data?.message !== "REQUEST_USER_DATA_RESPONSE" || typeof event.data.payload !== "string") return;
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", handler);
+      resolve(event.data.payload);
+    };
+    window.addEventListener("message", handler);
+    window.parent.postMessage({ message: "REQUEST_USER_DATA" }, "*");
+  });
+}
+
+export function GHLSessionProvider({ children }: { children: ReactNode }) {
+  const [me, setMe] = useState<UserContext | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setError(null);
+    setMe(null);
+    setSessionToken(null);
+    try {
+      const encryptedData = await requestEncryptedContext();
+      const session = await api<{ access_token: string }>("/auth/ghl-session", json("POST", { encryptedData }));
+      setSessionToken(session.access_token);
+      setMe(await api<UserContext>("/me"));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to establish a secure session.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const expired = () => void refresh();
+    window.addEventListener("passport:session-expired", expired);
+    return () => window.removeEventListener("passport:session-expired", expired);
+  }, [refresh]);
+
+  if (error) return <div className="center-state"><div className="state-card"><div className="brand-mark">P</div><h1>Passport</h1><p>{error}</p><button className="button secondary" onClick={() => void refresh()}>Try again</button></div></div>;
+  if (!me) return <div className="center-state"><div className="state-card"><div className="spinner" /><h1>Opening Passport</h1><p>Verifying your HighLevel workspace…</p></div></div>;
+  return <SessionContext.Provider value={{ me, refresh }}>{children}</SessionContext.Provider>;
+}
+
+export function useSession() {
+  const value = useContext(SessionContext);
+  if (!value) throw new Error("useSession must be used inside GHLSessionProvider");
+  return value;
+}
+

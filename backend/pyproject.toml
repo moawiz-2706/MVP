@@ -1,0 +1,41 @@
+[project]
+name = "passport-backend"
+version = "1.0.0"
+description = "Passport rental scheduling platform API"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.10,<3",
+    "sqlalchemy>=2.0.41,<3",
+    "psycopg[binary]>=3.2.9,<4",
+    "cryptography>=45,<47",
+    "PyJWT>=2.10,<3",
+    "httpx>=0.28,<1",
+    "stripe>=12,<14",
+    "email-validator>=2.2,<3",
+    "python-multipart>=0.0.20,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4,<9",
+    "pytest-asyncio>=1,<2",
+]
+
+[tool.uv]
+# This is an application, not a distributable package: install dependencies only,
+# do not try to build the project itself (there is no [build-system]).
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
