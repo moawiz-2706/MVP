@@ -55,6 +55,7 @@ class OrderCreateResponse(BaseModel):
     public_reference: str
     status: str
     client_secret: str | None
+    access_token: str | None = None
     hold_expires_at: datetime | None
     quote: OrderQuoteResponse
 
@@ -67,6 +68,7 @@ class PublicOrderItem(QuotedItem):
 
 class PublicOrderStatus(BaseModel):
     public_reference: str
+    access_token: str | None = None
     status: str
     # Operator IANA zone: customer-facing times are always rendered in it.
     time_zone: str
@@ -78,4 +80,3 @@ class PublicOrderStatus(BaseModel):
     platform_fee_and_taxes_minor: int
     customer_total_minor: int
     items: list[PublicOrderItem]
-

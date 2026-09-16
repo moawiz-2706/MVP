@@ -6,6 +6,7 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
@@ -18,7 +19,9 @@ from app.models.entities import (
     CalendarPushedSlot,
     CalendarResource,
     DepartureLocation,
+    GHLCalendarMapping,
     Operator,
+    OutboxJob,
     Resource,
 )
 from app.schemas.configuration import (
@@ -38,7 +41,6 @@ from app.schemas.configuration import (
     ResourceUpdate,
 )
 from app.utils.timezone import local_datetime, require_timezone, wall_time_exists
-
 
 ModelT = TypeVar("ModelT")
 
@@ -275,6 +277,7 @@ class ConfigurationService:
         self.db.add(entity)
         self.db.commit()
         self.db.refresh(entity)
+        self._queue_ghl_calendar_sync(entity)
         return entity
 
     def get_calendar(self, entity_id: uuid.UUID, *, active: bool = False) -> Calendar:
@@ -289,7 +292,39 @@ class ConfigurationService:
         _apply(entity, values)
         self.db.commit()
         self.db.refresh(entity)
+        self._queue_ghl_calendar_sync(entity)
         return entity
+
+    def _queue_ghl_calendar_sync(self, calendar: Calendar) -> None:
+        if not get_settings().ghl_calendar_sync_enabled:
+            return
+        mapping = self.db.scalar(
+            select(GHLCalendarMapping).where(
+                GHLCalendarMapping.operator_id == self.operator_id,
+                GHLCalendarMapping.calendar_id == calendar.id,
+            )
+        )
+        if mapping is None:
+            mapping = GHLCalendarMapping(
+                operator_id=self.operator_id,
+                calendar_id=calendar.id,
+                desired_revision=1,
+                status="pending",
+            )
+            self.db.add(mapping)
+        else:
+            mapping.desired_revision += 1
+            mapping.status = "pending"
+        self.db.add(
+            OutboxJob(
+                operator_id=self.operator_id,
+                job_type="ghl_sync_calendar",
+                idempotency_key=f"calendar:{calendar.id}:revision:{mapping.desired_revision}",
+                payload={"calendar_id": str(calendar.id)},
+                status="pending",
+            )
+        )
+        self.db.commit()
 
     def delete_calendar(self, entity_id: uuid.UUID) -> None:
         entity = self.get_calendar(entity_id)

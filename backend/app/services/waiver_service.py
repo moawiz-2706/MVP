@@ -9,7 +9,7 @@ any later change to a signed waiver.
 
 import secrets
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -60,6 +60,7 @@ class WaiverService:
                     booking_id=booking.id,
                     token=secrets.token_urlsafe(24),
                     status="pending",
+                    public_expires_at=datetime.now(UTC) + timedelta(days=get_settings().waiver_public_days),
                 )
                 .on_conflict_do_nothing(index_elements=[BookingWaiver.booking_id])
             )
@@ -108,7 +109,12 @@ class WaiverService:
         return row
 
     def public_view(self, token: str) -> dict[str, Any]:
-        return self._view(*self._row(token))
+        row = self._row(token)
+        waiver = row[0]
+        expires_at = waiver.public_expires_at or (waiver.created_at + timedelta(days=get_settings().waiver_public_days))
+        if expires_at <= datetime.now(UTC):
+            raise NotFoundError("Waiver link has expired")
+        return self._view(*row)
 
     def _view(self, waiver, booking, order, operator, settings) -> dict[str, Any]:
         base = {
@@ -128,10 +134,8 @@ class WaiverService:
                 "activity_name": waiver.activity_name or booking.calendar_name_snapshot,
                 "activity_start_at": waiver.activity_start_at or booking.start_at,
                 "waiver_text": waiver.waiver_text,
-                "opt_in_label": (waiver.details or {}).get("opt_in_label"),
+                "opt_in_label": None,
                 "signed_at": waiver.signed_at,
-                "details": waiver.details,
-                "signature_png": waiver.signature_png,
             }
         common = {
             **base,
@@ -164,6 +168,11 @@ class WaiverService:
     ) -> dict[str, Any]:
         # The row lock serializes two people signing the same link at once.
         waiver, booking, order, operator, settings = self._row(token, lock=True)
+        expires_at = waiver.public_expires_at or (
+            waiver.created_at + timedelta(days=get_settings().waiver_public_days)
+        )
+        if expires_at <= datetime.now(UTC):
+            raise NotFoundError("Waiver link has expired")
         if waiver.status == "signed":
             raise ConflictError("This waiver has already been signed")
         if not _has_text(settings):

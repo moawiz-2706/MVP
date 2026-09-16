@@ -7,8 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models.entities import BookingOrder, OutboxJob
+from app.services.ghl_appointment_service import GHLAppointmentService
+from app.services.ghl_calendar_service import GHLCalendarService
 from app.services.ghl_contact_service import GHLContactService
 from app.services.ghl_email_service import GHLEmailService
+from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
+from app.services.stripe_refund_service import StripeRefundService
+from app.services.stripe_transfer_reversal_service import StripeTransferReversalService
 from app.services.stripe_transfer_service import StripeTransferService
 
 
@@ -19,7 +24,8 @@ class OutboxService:
 
     def process(self, limit: int = 20) -> dict[str, int]:
         now = datetime.now(UTC)
-        stale = now - timedelta(minutes=15)
+        stale = now - timedelta(minutes=self.settings.outbox_lease_minutes)
+        worker_id = str(uuid.uuid4())
         jobs = list(
             self.db.scalars(
                 select(OutboxJob)
@@ -29,7 +35,9 @@ class OutboxService:
                             OutboxJob.status.in_(["pending", "failed"])
                             & or_(OutboxJob.next_attempt_at.is_(None), OutboxJob.next_attempt_at <= now)
                         ),
-                        (OutboxJob.status == "processing") & (OutboxJob.updated_at < stale),
+                        (OutboxJob.status == "processing")
+                        & or_(OutboxJob.lease_expires_at.is_(None), OutboxJob.lease_expires_at < now)
+                        & (OutboxJob.updated_at < stale),
                     )
                 )
                 .order_by(OutboxJob.created_at)
@@ -42,6 +50,9 @@ class OutboxService:
             job.status = "processing"
             job.attempt_count += 1
             job.updated_at = now
+            job.lease_owner = worker_id
+            job.lease_expires_at = now + timedelta(minutes=self.settings.outbox_lease_minutes)
+            job.fencing_token += 1
         self.db.commit()
 
         completed = failed = 0
@@ -54,16 +65,22 @@ class OutboxService:
                 job.status = "completed"
                 job.last_error = None
                 job.next_attempt_at = None
+                job.lease_owner = None
+                job.lease_expires_at = None
                 completed += 1
             except Exception as exc:
                 self.db.rollback()
                 job = self.db.get(OutboxJob, job_id)
                 if job is None:
                     continue
-                job.status = "failed"
+                job.status = (
+                    "dead" if job.attempt_count >= self.settings.outbox_max_attempts else "failed"
+                )
                 job.last_error = str(exc)[:2000]
                 delay_minutes = min(24 * 60, 2 ** min(job.attempt_count, 10))
                 job.next_attempt_at = datetime.now(UTC) + timedelta(minutes=delay_minutes)
+                job.lease_owner = None
+                job.lease_expires_at = None
                 failed += 1
                 if job.booking_order_id:
                     order = self.db.get(BookingOrder, job.booking_order_id)
@@ -117,10 +134,27 @@ class OutboxService:
             raise RuntimeError("Outbox job has no booking order")
         if job.job_type == "stripe_create_transfer":
             StripeTransferService(self.db, self.settings).create_for_order(job.booking_order_id)
+        elif job.job_type == "stripe_create_refund":
+            StripeRefundService(self.db, self.settings).create_for_attempt(
+                uuid.UUID(payload["refund_attempt_id"])
+            )
+        elif job.job_type == "stripe_create_transfer_reversal":
+            StripeTransferReversalService(self.db, self.settings).create_for_attempt(
+                uuid.UUID(payload["reversal_attempt_id"])
+            )
+        elif job.job_type == "stripe_reconcile_payment_intent":
+            StripePaymentReconciliationService(self.db, self.settings).reconcile(
+                uuid.UUID(payload["payment_id"])
+            )
+        elif job.job_type == "ghl_sync_calendar":
+            GHLCalendarService(self.db, job.operator_id).sync(uuid.UUID(payload["calendar_id"]))
+        elif job.job_type == "ghl_sync_appointment":
+            GHLAppointmentService(self.db, job.operator_id).sync(uuid.UUID(payload["booking_id"]))
+        elif job.job_type == "ghl_cancel_appointment":
+            GHLAppointmentService(self.db, job.operator_id).cancel(uuid.UUID(payload["booking_id"]))
         elif job.job_type == "ghl_upsert_contact":
             GHLContactService(self.db, job.operator_id).sync(job.booking_order_id)
         elif job.job_type == "ghl_send_confirmation_email":
             GHLEmailService(self.db, job.operator_id).send(job.booking_order_id)
         else:
             raise RuntimeError(f"Unsupported outbox job type: {job.job_type}")
-

@@ -5,7 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models.entities import BookingOrder, Payment, StripeConnection, StripeTransfer
+from app.models.entities import (
+    BookingOrder,
+    OutboxJob,
+    Payment,
+    StripeConnection,
+    StripeTransfer,
+    TransferReversalAttempt,
+)
 
 
 class StripeTransferService:
@@ -27,6 +34,8 @@ class StripeTransferService:
         payment, order, connection = row
         if payment.status != "succeeded":
             raise RuntimeError("Payment has not succeeded")
+        if order.status in {"cancelled", "exception", "expired"}:
+            raise RuntimeError("Cancelled or exceptional orders cannot create operator transfers")
         if not payment.stripe_charge_id or not payment.stripe_charge_id.startswith("ch_"):
             raise RuntimeError("Transfer source_transaction must be a successful Charge ID")
         transfer = self.db.scalar(
@@ -70,6 +79,27 @@ class StripeTransferService:
         transfer.stripe_transfer_id = created.id
         transfer.status = "created"
         transfer.last_error = None
+        self.db.flush()
+        if order.status in {"cancelled", "exception", "expired"}:
+            reversal = TransferReversalAttempt(
+                operator_id=order.operator_id,
+                transfer_id=transfer.id,
+                scope_key="order-cancelled-before-transfer-complete",
+                amount_minor=transfer.amount_minor,
+                idempotency_key=f"transfer:{transfer.id}:reversal:order-cancelled",
+                status="requested",
+            )
+            self.db.add(reversal)
+            self.db.flush()
+            self.db.add(
+                OutboxJob(
+                    operator_id=order.operator_id,
+                    booking_order_id=order.id,
+                    job_type="stripe_create_transfer_reversal",
+                    idempotency_key=f"transfer:{transfer.id}:reversal-job:order-cancelled",
+                    payload={"reversal_attempt_id": str(reversal.id)},
+                    status="pending",
+                )
+            )
         self.db.commit()
         return created.id
-

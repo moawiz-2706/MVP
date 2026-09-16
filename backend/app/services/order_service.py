@@ -1,8 +1,10 @@
+import hashlib
+import json
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,6 +21,7 @@ from app.models.entities import (
     Operator,
     OutboxJob,
     Payment,
+    PaymentIntentRequest,
     Resource,
     StripeConnection,
 )
@@ -31,6 +34,7 @@ from app.schemas.order import (
 )
 from app.services.availability_service import AvailabilityService
 from app.services.capacity import CapacityInterval, batch_fits
+from app.services.public_access_service import PublicAccessService
 from app.services.stripe_payment_service import StripePaymentService
 from app.utils.identifiers import public_reference
 from app.utils.money import PaymentBreakdown, calculate_payment
@@ -178,8 +182,93 @@ class OrderService:
         prepared = self._prepare(operator, request.items)
         return self._quote(prepared)[0]
 
-    def create(self, operator_slug: str, request: OrderCreateRequest) -> OrderCreateResponse:
+    @staticmethod
+    def _request_hash(request: OrderCreateRequest) -> str:
+        payload = request.model_dump(mode="json")
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _existing_response(
+        self, order: BookingOrder, payment: Payment, checkout_hash: str
+    ) -> OrderCreateResponse:
+        if order.checkout_request_hash and order.checkout_request_hash != checkout_hash:
+            raise ConflictError("Checkout key was already used with different booking details")
+        items = [
+            QuotedItem(
+                calendar_id=booking.calendar_id,
+                calendar_name=booking.calendar_name_snapshot,
+                start_at=booking.start_at,
+                end_at=booking.end_at,
+                units=booking.units,
+                base_price_minor=booking.base_price_minor,
+                line_subtotal_minor=booking.base_price_minor * booking.units,
+                departure_location_name=booking.departure_location_name_snapshot,
+                departure_location_address=booking.departure_location_address_snapshot,
+            )
+            for booking in self.db.scalars(
+                select(Booking).where(Booking.booking_order_id == order.id).order_by(Booking.start_at)
+            )
+        ]
+        quote = OrderQuoteResponse(
+            currency=order.currency,
+            items=items,
+            subtotal_minor=order.subtotal_minor,
+            platform_fee_and_taxes_minor=order.platform_fee_and_taxes_minor,
+            customer_total_minor=order.customer_total_minor,
+        )
+        client_secret = None
+        if payment.stripe_payment_intent_id:
+            try:
+                intent = StripePaymentService(self.settings).retrieve_payment_intent(
+                    payment.stripe_payment_intent_id
+                )
+                client_secret = intent.client_secret
+            except Exception:
+                client_secret = None
+        token = PublicAccessService(self.db).issue(
+            operator_id=order.operator_id,
+            order_id=order.id,
+            purpose="order_status",
+            lifetime=timedelta(minutes=self.settings.public_access_minutes),
+        )
+        self.db.commit()
+        return OrderCreateResponse(
+            public_reference=order.public_reference,
+            status=order.status,
+            client_secret=client_secret,
+            access_token=token,
+            hold_expires_at=next(
+                (booking.hold_expires_at for booking in self.db.scalars(
+                    select(Booking).where(Booking.booking_order_id == order.id)
+                ) if booking.hold_expires_at is not None),
+                None,
+            ),
+            quote=quote,
+        )
+
+    def create(
+        self,
+        operator_slug: str,
+        request: OrderCreateRequest,
+        *,
+        checkout_key: str | None = None,
+    ) -> OrderCreateResponse:
         operator = self._operator(operator_slug)
+        checkout_key = checkout_key or f"legacy:{uuid.uuid4()}"
+        if len(checkout_key) > 160:
+            raise ConflictError("Checkout key is too long")
+        request_hash = self._request_hash(request)
+        existing = self.db.scalar(
+            select(BookingOrder).where(
+                BookingOrder.operator_id == operator.id,
+                BookingOrder.checkout_key == checkout_key,
+            )
+        )
+        if existing is not None:
+            payment = self.db.scalar(select(Payment).where(Payment.booking_order_id == existing.id))
+            if payment is None:
+                raise ConflictError("Existing checkout is missing its payment record")
+            return self._existing_response(existing, payment, request_hash)
         # Reads above started SQLAlchemy's autobegin transaction; lock and write in it.
         prepared = self._prepare(operator, request.items)
         self._lock_resources(prepared)
@@ -216,6 +305,8 @@ class OrderService:
             customer_total_minor=money.customer_total_minor,
             operator_transfer_minor=money.operator_transfer_minor,
             platform_gross_retained_minor=money.platform_gross_retained_minor,
+            checkout_key=checkout_key,
+            checkout_request_hash=request_hash,
             status="pending_payment" if paid else "confirmed",
         )
         self.db.add(order)
@@ -261,8 +352,36 @@ class OrderService:
             paid_at=None if paid else now,
         )
         self.db.add(payment)
+        self.db.flush()
+        payment_request = None
+        if paid:
+            payment_request = PaymentIntentRequest(
+                operator_id=operator.id,
+                payment_id=payment.id,
+                checkout_key=checkout_key,
+                request_hash=request_hash,
+                idempotency_key=f"booking_order:{order.id}:payment_intent",
+                amount_minor=money.customer_total_minor,
+                currency=quote.currency,
+                request_payload={
+                    "amount": money.customer_total_minor,
+                    "currency": quote.currency,
+                    "receipt_email": order.customer_email,
+                    "order_id": str(order.id),
+                    "operator_id": str(operator.id),
+                    "public_reference": reference,
+                },
+                status="pending",
+            )
+            self.db.add(payment_request)
         if not paid:
             self._enqueue_confirmation_jobs(operator.id, order.id)
+        access_token = PublicAccessService(self.db).issue(
+            operator_id=operator.id,
+            order_id=order.id,
+            purpose="order_status",
+            lifetime=timedelta(minutes=self.settings.public_access_minutes),
+        )
         self.db.commit()
 
         client_secret = None
@@ -275,27 +394,47 @@ class OrderService:
                     amount_minor=money.customer_total_minor,
                     currency=quote.currency,
                     receipt_email=order.customer_email,
+                    idempotency_key=payment_request.idempotency_key if payment_request else None,
                 )
                 payment.stripe_payment_intent_id = intent_id
                 payment.status = "processing"
+                if payment_request:
+                    payment_request.status = "processing"
+                    payment_request.stripe_payment_intent_id = intent_id
                 self.db.commit()
-            except Exception:
-                payment.status = "failed"
+            except Exception as exc:
+                payment.status = "processing"
+                payment.reconciliation_status = "provider_unknown"
+                payment.provider_unknown_at = datetime.now(UTC)
+                if payment_request:
+                    payment_request.status = "provider_unknown"
+                    payment_request.last_error = str(exc)[:2000]
+                    payment_request.provider_unknown_at = datetime.now(UTC)
+                    self.db.add(
+                        OutboxJob(
+                            operator_id=operator.id,
+                            booking_order_id=order.id,
+                            job_type="stripe_reconcile_payment_intent",
+                            idempotency_key=f"payment:{payment.id}:reconcile",
+                            payload={"payment_id": str(payment.id)},
+                            status="pending",
+                        )
+                    )
                 self.db.commit()
                 raise ConflictError(
-                    "Payment setup failed; no charge was created. Please try again."
-                )
+                    "Payment setup could not be confirmed. Your checkout is reserved; refresh this page or contact support before retrying."
+                ) from exc
         return OrderCreateResponse(
             public_reference=reference,
             status=order.status,
             client_secret=client_secret,
+            access_token=access_token,
             hold_expires_at=hold_expires,
             quote=quote,
         )
 
     def _enqueue_confirmation_jobs(self, operator_id: uuid.UUID, order_id: uuid.UUID) -> None:
-        self.db.add_all(
-            [
+        jobs = [
                 OutboxJob(
                     operator_id=operator_id,
                     booking_order_id=order_id,
@@ -311,4 +450,16 @@ class OrderService:
                     status="pending",
                 ),
             ]
+        bookings = list(self.db.scalars(select(Booking).where(Booking.booking_order_id == order_id)))
+        jobs.extend(
+            OutboxJob(
+                operator_id=operator_id,
+                booking_order_id=order_id,
+                job_type="ghl_sync_appointment",
+                idempotency_key=f"booking:{booking.id}:ghl_appointment:{booking.updated_at.isoformat()}",
+                payload={"booking_id": str(booking.id)},
+                status="pending",
+            )
+            for booking in bookings
         )
+        self.db.add_all(jobs)

@@ -7,12 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.entities import (
     Booking,
     BookingOrder,
     BookingResource,
     OutboxJob,
     Payment,
+    PaymentIntentRequest,
+    PaymentRefundAttempt,
     Resource,
     StripeConnection,
     StripeWebhookEvent,
@@ -52,7 +55,7 @@ class StripeWebhookService:
         data = event.get("data", {}).get("object", {})
         try:
             if event_type == "payment_intent.succeeded":
-                self._payment_succeeded(data)
+                self._payment_succeeded(data, event)
             elif event_type == "payment_intent.payment_failed":
                 self._payment_failed(data)
             elif event_type == "account.updated":
@@ -80,7 +83,7 @@ class StripeWebhookService:
             self.db.commit()
             raise
 
-    def _payment_succeeded(self, intent: dict[str, Any]) -> None:
+    def _payment_succeeded(self, intent: dict[str, Any], event: dict[str, Any]) -> None:
         intent_id = str(intent["id"])
         payment = self.db.scalar(
             select(Payment)
@@ -97,6 +100,20 @@ class StripeWebhookService:
         if order is None:
             raise RuntimeError("Payment order not found")
         if payment.status == "succeeded" and order.status == "confirmed":
+            return
+
+        mismatches = self._payment_mismatches(payment, order, intent, event)
+        if mismatches:
+            payment.reconciliation_status = "quarantined"
+            payment.observed_amount_minor = self._int_or_none(intent.get("amount"))
+            payment.observed_amount_received_minor = self._int_or_none(
+                intent.get("amount_received")
+            )
+            payment.observed_currency = str(intent.get("currency") or "").lower() or None
+            payment.stripe_livemode = bool(intent.get("livemode"))
+            payment.stripe_account_id = str(event.get("account")) if event.get("account") else None
+            order.status = "exception"
+            payment.provider_unknown_at = datetime.now(UTC)
             return
 
         latest_charge = intent.get("latest_charge")
@@ -123,6 +140,7 @@ class StripeWebhookService:
             payment.status = "succeeded"
             payment.stripe_charge_id = charge_id
             payment.paid_at = datetime.now(UTC)
+            self._enqueue_refund(payment, order, scope_key="late-invalid-booking")
             return
 
         now = datetime.now(UTC)
@@ -154,6 +172,7 @@ class StripeWebhookService:
             payment.status = "succeeded"
             payment.stripe_charge_id = charge_id
             payment.paid_at = now
+            self._enqueue_refund(payment, order, scope_key="late-unavailable")
             return
 
         for booking in bookings:
@@ -162,8 +181,55 @@ class StripeWebhookService:
         payment.status = "succeeded"
         payment.stripe_charge_id = charge_id
         payment.paid_at = now
+        request_row = self.db.scalar(
+            select(PaymentIntentRequest).where(PaymentIntentRequest.payment_id == payment.id)
+        )
+        if request_row:
+            request_row.status = "succeeded"
+            request_row.stripe_payment_intent_id = intent_id
         order.status = "confirmed"
         self._enqueue(order, payment)
+
+    @staticmethod
+    def _int_or_none(value: Any) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _payment_mismatches(
+        payment: Payment,
+        order: BookingOrder,
+        intent: dict[str, Any],
+        event: dict[str, Any],
+    ) -> list[str]:
+        mismatches: list[str] = []
+        if str(intent.get("status")) != "succeeded":
+            mismatches.append("status")
+        if StripeWebhookService._int_or_none(intent.get("amount")) != payment.customer_total_minor:
+            mismatches.append("amount")
+        amount_received = StripeWebhookService._int_or_none(intent.get("amount_received"))
+        if amount_received is not None and amount_received != payment.customer_total_minor:
+            mismatches.append("amount_received")
+        if str(intent.get("currency") or "").lower() != payment.currency.lower():
+            mismatches.append("currency")
+        metadata = intent.get("metadata") or {}
+        if metadata.get("booking_order_id") and str(metadata["booking_order_id"]) != str(order.id):
+            mismatches.append("booking_order_id")
+        if metadata.get("operator_id") and str(metadata["operator_id"]) != str(order.operator_id):
+            mismatches.append("operator_id")
+        if metadata.get("public_reference") and metadata["public_reference"] != order.public_reference:
+            mismatches.append("public_reference")
+        settings = get_settings()
+        if settings.stripe_platform_account_id and event.get("account"):
+            if event.get("account") != settings.stripe_platform_account_id:
+                mismatches.append("account")
+        if intent.get("livemode") is not None:
+            expected_live = settings.stripe_secret_key.startswith("sk_live_")
+            if bool(intent.get("livemode")) != expected_live:
+                mismatches.append("livemode")
+        return mismatches
 
     def _expired_order_still_fits(self, bookings, resource_rows, resources) -> bool:
         booking_lookup = {booking.id: booking for booking in bookings}
@@ -212,6 +278,53 @@ class StripeWebhookService:
                 )
                 .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
             )
+        for booking in self.db.scalars(
+            select(Booking).where(Booking.booking_order_id == order.id)
+        ):
+            self.db.execute(
+                insert(OutboxJob)
+                .values(
+                    operator_id=order.operator_id,
+                    booking_order_id=order.id,
+                    job_type="ghl_sync_appointment",
+                    idempotency_key=f"booking:{booking.id}:ghl_appointment:{booking.updated_at.isoformat()}",
+                    payload={"booking_id": str(booking.id)},
+                    status="pending",
+                )
+                .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
+            )
+
+    def _enqueue_refund(self, payment: Payment, order: BookingOrder, *, scope_key: str) -> None:
+        attempt_id = self.db.scalar(
+            insert(PaymentRefundAttempt)
+            .values(
+                operator_id=payment.operator_id,
+                payment_id=payment.id,
+                scope_key=scope_key,
+                amount_minor=payment.customer_total_minor,
+                currency=payment.currency,
+                idempotency_key=f"payment:{payment.id}:refund:{scope_key}",
+                status="requested",
+            )
+            .on_conflict_do_nothing(
+                index_elements=[PaymentRefundAttempt.payment_id, PaymentRefundAttempt.scope_key]
+            )
+            .returning(PaymentRefundAttempt.id)
+        )
+        payment.reconciliation_status = "refund_pending"
+        if attempt_id is not None:
+            self.db.execute(
+                insert(OutboxJob)
+                .values(
+                    operator_id=order.operator_id,
+                    booking_order_id=order.id,
+                    job_type="stripe_create_refund",
+                    idempotency_key=f"payment:{payment.id}:refund-job:{scope_key}",
+                    payload={"refund_attempt_id": str(attempt_id)},
+                    status="pending",
+                )
+                .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
+            )
 
     def _payment_failed(self, intent: dict[str, Any]) -> None:
         payment = self.db.scalar(
@@ -221,7 +334,18 @@ class StripeWebhookService:
         )
         if payment is None or payment.status == "succeeded":
             return
+        if str(intent.get("status")) == "requires_payment_method":
+            payment.status = "requires_payment"
+            order = self.db.get(BookingOrder, payment.booking_order_id)
+            if order and order.status == "pending_payment":
+                order.status = "pending_payment"
+            return
         payment.status = "failed"
+        request_row = self.db.scalar(
+            select(PaymentIntentRequest).where(PaymentIntentRequest.payment_id == payment.id)
+        )
+        if request_row:
+            request_row.status = "failed"
         order = self.db.get(BookingOrder, payment.booking_order_id)
         if order:
             order.status = "expired"
@@ -272,4 +396,3 @@ class StripeWebhookService:
             order = self.db.get(BookingOrder, payment.booking_order_id)
             if order:
                 order.status = "exception"
-

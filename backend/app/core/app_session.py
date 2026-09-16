@@ -7,8 +7,12 @@ import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.database import get_db
+from app.models.entities import GHLInstallation, Operator, OperatorUser
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +22,7 @@ class SessionPrincipal:
     ghl_location_id: str
     role: str
     is_agency_owner: bool
+    authz_version: int = 1
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -33,6 +38,7 @@ def create_app_session(principal: SessionPrincipal, settings: Settings) -> tuple
             "ghl_location_id": principal.ghl_location_id,
             "role": principal.role,
             "is_agency_owner": principal.is_agency_owner,
+            "authz_version": principal.authz_version,
             "iat": now,
             "exp": now + lifetime,
             "aud": "passport",
@@ -60,6 +66,7 @@ def decode_app_session(token: str, settings: Settings) -> SessionPrincipal:
             ghl_location_id=claims["ghl_location_id"],
             role=claims["role"],
             is_agency_owner=bool(claims.get("is_agency_owner", False)),
+            authz_version=int(claims.get("authz_version", 1)),
         )
     except (InvalidTokenError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired application session") from exc
@@ -68,11 +75,37 @@ def decode_app_session(token: str, settings: Settings) -> SessionPrincipal:
 def get_current_principal(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> SessionPrincipal:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Application session required")
-    return decode_app_session(credentials.credentials, settings)
+    principal = decode_app_session(credentials.credentials, settings)
+    row = db.execute(
+        select(GHLInstallation, OperatorUser, Operator)
+        .join(OperatorUser, OperatorUser.operator_id == GHLInstallation.operator_id)
+        .join(Operator, Operator.id == GHLInstallation.operator_id)
+        .where(
+            GHLInstallation.operator_id == principal.operator_id,
+            GHLInstallation.location_id == principal.ghl_location_id,
+            GHLInstallation.is_installed.is_(True),
+            GHLInstallation.lifecycle_status == "active",
+            Operator.is_active.is_(True),
+            OperatorUser.user_id == principal.app_user_id,
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=401, detail="Application session is no longer valid")
+    installation, membership, _operator = row
+    if installation.authz_version != principal.authz_version:
+        raise HTTPException(status_code=401, detail="Application session requires refresh")
+    return SessionPrincipal(
+        app_user_id=principal.app_user_id,
+        operator_id=principal.operator_id,
+        ghl_location_id=principal.ghl_location_id,
+        role=membership.ghl_role or principal.role,
+        is_agency_owner=membership.is_agency_owner,
+        authz_version=installation.authz_version,
+    )
 
 
 CurrentPrincipal = Annotated[SessionPrincipal, Depends(get_current_principal)]
-

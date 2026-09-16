@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.app_session import CurrentPrincipal
@@ -18,12 +18,16 @@ DB = Annotated[Session, Depends(get_db)]
 
 
 @router.get("/public/waivers/{token}", response_model=PublicWaiver)
-def public_waiver(token: str, db: DB):
+def public_waiver(token: str, db: DB, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
     return WaiverService(db).public_view(token)
 
 
 @router.post("/public/waivers/{token}/sign", response_model=PublicWaiver)
-def sign_waiver(token: str, data: WaiverSignRequest, request: Request, db: DB):
+def sign_waiver(token: str, data: WaiverSignRequest, request: Request, db: DB, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
     forwarded = request.headers.get("x-forwarded-for", "")
     ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else None)
     return WaiverService(db).sign(token, data, ip=ip, user_agent=request.headers.get("user-agent"))

@@ -6,6 +6,10 @@ interface SessionState { me: UserContext; refresh: () => Promise<void> }
 const SessionContext = createContext<SessionState | null>(null);
 
 function requestEncryptedContext(): Promise<string> {
+  const allowedOrigins = (import.meta.env.VITE_GHL_PARENT_ORIGINS || "")
+    .split(",")
+    .map((origin: string) => origin.trim().replace(/\/$/, ""))
+    .filter(Boolean);
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       window.removeEventListener("message", handler);
@@ -13,6 +17,7 @@ function requestEncryptedContext(): Promise<string> {
     }, 8000);
     const handler = (event: MessageEvent) => {
       if (event.source !== window.parent) return;
+      if (allowedOrigins.length > 0 && !allowedOrigins.includes(event.origin)) return;
       if (event.data?.message !== "REQUEST_USER_DATA_RESPONSE" || typeof event.data.payload !== "string") return;
       window.clearTimeout(timeout);
       window.removeEventListener("message", handler);
@@ -58,4 +63,3 @@ export function useSession() {
   if (!value) throw new Error("useSession must be used inside GHLSessionProvider");
   return value;
 }
-

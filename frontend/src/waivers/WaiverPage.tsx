@@ -63,7 +63,9 @@ function WaiverHeader({ waiver }: { waiver: PublicWaiver }) {
 function SignedView({ waiver }: { waiver: PublicWaiver }) {
   const tz = waiver.time_zone;
   const details = waiver.details;
-  if (!details || !waiver.signed_at) return null;
+  if (!details || !waiver.signed_at) {
+    return <div className="waiver-signed-banner"><CheckCircle2 size={18} /><span>Signed {waiver.signed_at ? `${formatLongDate(waiver.signed_at, tz)} at ${formatTime(waiver.signed_at, tz)}` : "successfully"}. This waiver is locked. The signed legal record is retained securely by the operator.</span></div>;
+  }
   const signedAt = `${formatLongDate(waiver.signed_at, tz)} at ${formatTime(waiver.signed_at, tz)}`;
   const minors = details.participants.filter((person) => person.minor);
   const adults = details.participants.filter((person) => !person.minor);

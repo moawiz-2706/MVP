@@ -10,6 +10,7 @@ from app.api.v1 import (
     bookings,
     configuration,
     ghl_oauth,
+    ghl_webhooks,
     internal_jobs,
     orders,
     public,
@@ -21,15 +22,28 @@ from app.api.v1 import (
 from app.core.config import get_settings
 from app.core.exceptions import DomainError, domain_error_handler
 
-
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="1.0.0")
+
+
+@app.on_event("startup")
+async def validate_runtime_settings() -> None:
+    settings.validate_runtime()
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Stripe-Signature", "X-Cron-Secret"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Stripe-Signature",
+        "X-Cron-Secret",
+        "X-GHL-Signature",
+        "X-Checkout-Key",
+    ],
 )
 app.add_exception_handler(DomainError, domain_error_handler)
 
@@ -65,6 +79,7 @@ for router in (
     bookings.router,
     configuration.router,
     ghl_oauth.router,
+    ghl_webhooks.router,
     internal_jobs.router,
     orders.router,
     public.router,

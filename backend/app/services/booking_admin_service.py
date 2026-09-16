@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, DomainError, NotFoundError
 from app.models.entities import (
     AppUser,
     Booking,
+    BookingFinancialAllocation,
     BookingNote,
     BookingOrder,
     BookingResource,
@@ -22,9 +24,12 @@ from app.models.entities import (
     CalendarResource,
     OutboxJob,
     Payment,
+    PaymentRefundAttempt,
     Resource,
     Staff,
     StaffAssignment,
+    StripeTransfer,
+    TransferReversalAttempt,
 )
 from app.schemas.booking import BookingUpdate
 from app.services.availability_service import AvailabilityService
@@ -257,6 +262,24 @@ class BookingAdminService:
             raise NotFoundError("Booking not found")
         if booking.status in {"cancelled", "failed"}:
             return
+        order = self.db.scalar(
+            select(BookingOrder).where(BookingOrder.id == booking.booking_order_id).with_for_update()
+        )
+        payment = self.db.scalar(
+            select(Payment).where(Payment.booking_order_id == booking.booking_order_id).with_for_update()
+        )
+        if order is None or payment is None:
+            raise NotFoundError("Booking payment not found")
+        bookings = list(
+            self.db.scalars(
+                select(Booking)
+                .where(Booking.booking_order_id == order.id)
+                .order_by(Booking.id)
+                .with_for_update()
+            )
+        )
+        self._ensure_financial_allocations(order, payment, bookings)
+        self.db.flush()
         booking.status = "cancelled"
         booking.hold_expires_at = None
         remaining = self.db.scalar(
@@ -267,10 +290,122 @@ class BookingAdminService:
             )
         )
         if not remaining:
-            order = self.db.get(BookingOrder, booking.booking_order_id)
-            if order:
-                order.status = "cancelled"
+            order.status = "cancelled"
+        allocation = self.db.scalar(
+            select(BookingFinancialAllocation).where(
+                BookingFinancialAllocation.booking_id == booking.id
+            )
+        )
+        if payment.status == "succeeded" and allocation and allocation.customer_refund_minor > 0:
+            attempt_id = self.db.scalar(
+                insert(PaymentRefundAttempt)
+                .values(
+                    operator_id=self.operator_id,
+                    payment_id=payment.id,
+                    scope_key=f"booking:{booking.id}",
+                    amount_minor=allocation.customer_refund_minor,
+                    currency=payment.currency,
+                    idempotency_key=f"payment:{payment.id}:refund:booking:{booking.id}",
+                    status="requested",
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[PaymentRefundAttempt.payment_id, PaymentRefundAttempt.scope_key]
+                )
+                .returning(PaymentRefundAttempt.id)
+            )
+            if attempt_id is not None:
+                self.db.add(
+                    OutboxJob(
+                        operator_id=self.operator_id,
+                        booking_order_id=order.id,
+                        job_type="stripe_create_refund",
+                        idempotency_key=f"payment:{payment.id}:refund-job:booking:{booking.id}",
+                        payload={"refund_attempt_id": str(attempt_id)},
+                        status="pending",
+                    )
+                )
+        transfer = self.db.scalar(select(StripeTransfer).where(StripeTransfer.payment_id == payment.id))
+        if transfer and allocation and allocation.operator_recovery_minor > 0 and transfer.stripe_transfer_id:
+            reversal_id = self.db.scalar(
+                insert(TransferReversalAttempt)
+                .values(
+                    operator_id=self.operator_id,
+                    transfer_id=transfer.id,
+                    scope_key=f"booking:{booking.id}",
+                    amount_minor=allocation.operator_recovery_minor,
+                    idempotency_key=f"transfer:{transfer.id}:reversal:booking:{booking.id}",
+                    status="requested",
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[TransferReversalAttempt.transfer_id, TransferReversalAttempt.scope_key]
+                )
+                .returning(TransferReversalAttempt.id)
+            )
+            if reversal_id is not None:
+                self.db.add(
+                    OutboxJob(
+                        operator_id=self.operator_id,
+                        booking_order_id=order.id,
+                        job_type="stripe_create_transfer_reversal",
+                        idempotency_key=f"transfer:{transfer.id}:reversal-job:booking:{booking.id}",
+                        payload={"reversal_attempt_id": str(reversal_id)},
+                        status="pending",
+                    )
+                )
+        self.db.add(
+            OutboxJob(
+                operator_id=self.operator_id,
+                booking_order_id=order.id,
+                job_type="ghl_cancel_appointment",
+                idempotency_key=f"booking:{booking.id}:ghl_cancel",
+                payload={"booking_id": str(booking.id)},
+                status="pending",
+            )
+        )
         self.db.commit()
+
+    def _ensure_financial_allocations(
+        self, order: BookingOrder, payment: Payment, bookings: list[Booking]
+    ) -> None:
+        existing = list(
+            self.db.scalars(
+                select(BookingFinancialAllocation).where(
+                    BookingFinancialAllocation.payment_id == payment.id
+                )
+            )
+        )
+        if len(existing) == len(bookings):
+            return
+        subtotal_total = sum(booking.base_price_minor * booking.units for booking in bookings)
+        if subtotal_total <= 0:
+            subtotal_total = len(bookings)
+        allocated_customer = 0
+        allocated_operator = 0
+        for index, booking in enumerate(bookings):
+            subtotal = booking.base_price_minor * booking.units
+            if index == len(bookings) - 1:
+                customer = order.customer_total_minor - allocated_customer
+                operator = order.operator_transfer_minor - allocated_operator
+            else:
+                customer = (order.customer_total_minor * subtotal) // subtotal_total
+                operator = (order.operator_transfer_minor * subtotal) // subtotal_total
+            self.db.add(
+                BookingFinancialAllocation(
+                    operator_id=self.operator_id,
+                    booking_id=booking.id,
+                    payment_id=payment.id,
+                    subtotal_minor=subtotal,
+                    customer_refund_minor=max(0, customer),
+                    operator_recovery_minor=max(0, operator),
+                    source_snapshot={
+                        "calendar_id": str(booking.calendar_id),
+                        "base_price_minor": booking.base_price_minor,
+                        "units": booking.units,
+                    },
+                )
+            )
+            allocated_customer += max(0, customer)
+            allocated_operator += max(0, operator)
 
     def update(self, booking_id: uuid.UUID, data: BookingUpdate) -> dict:
         booking = self.db.scalar(
@@ -343,6 +478,17 @@ class BookingAdminService:
                     quantity=units * mapping.default_quantity_per_unit,
                 )
             )
+        self.db.commit()
+        self.db.add(
+            OutboxJob(
+                operator_id=self.operator_id,
+                booking_order_id=booking.booking_order_id,
+                job_type="ghl_sync_appointment",
+                idempotency_key=f"booking:{booking.id}:ghl_appointment:{booking.updated_at.isoformat()}",
+                payload={"booking_id": str(booking.id)},
+                status="pending",
+            )
+        )
         self.db.commit()
         return self.detail(booking.id)
 
@@ -427,4 +573,3 @@ class BookingAdminService:
         order.ghl_contact_sync_status = "pending"
         order.ghl_confirmation_email_status = "pending"
         self.db.commit()
-

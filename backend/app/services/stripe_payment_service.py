@@ -18,6 +18,7 @@ class StripePaymentService:
         amount_minor: int,
         currency: str,
         receipt_email: str,
+        idempotency_key: str | None = None,
     ) -> tuple[str, str]:
         intent = self.client.v1.payment_intents.create(
             {
@@ -32,7 +33,7 @@ class StripePaymentService:
                     "public_reference": public_reference,
                 },
             },
-            {"idempotency_key": f"booking_order:{order_id}:payment_intent"},
+            {"idempotency_key": idempotency_key or f"booking_order:{order_id}:payment_intent"},
         )
         if not intent.client_secret:
             raise RuntimeError("Stripe did not return a PaymentIntent client secret")
@@ -40,4 +41,3 @@ class StripePaymentService:
 
     def retrieve_payment_intent(self, payment_intent_id: str):
         return self.client.v1.payment_intents.retrieve(payment_intent_id, {"expand": ["latest_charge"]})
-

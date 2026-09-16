@@ -1,5 +1,7 @@
+import hashlib
 import logging
 import re
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -16,11 +18,11 @@ from app.core.ghl_context import decrypt_ghl_user_context
 from app.models.entities import (
     AppUser,
     GHLInstallation,
+    GHLOAuthState,
     Operator,
     OperatorSettings,
     OperatorUser,
 )
-
 
 logger = logging.getLogger("passport.ghl_auth")
 
@@ -57,6 +59,31 @@ class GHLAuthService:
         self.db = db
         self.settings = settings
 
+    def create_oauth_state(self, *, expected_location_id: str | None = None) -> str:
+        state = secrets.token_urlsafe(32)
+        self.db.add(
+            GHLOAuthState(
+                state_digest=hashlib.sha256(state.encode()).hexdigest(),
+                flow="app_start",
+                expected_location_id=expected_location_id,
+                expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            )
+        )
+        self.db.commit()
+        return state
+
+    def consume_oauth_state(self, state: str) -> GHLOAuthState:
+        row = self.db.scalar(
+            select(GHLOAuthState)
+            .where(GHLOAuthState.state_digest == hashlib.sha256(state.encode()).hexdigest())
+            .with_for_update()
+        )
+        if row is None or row.consumed_at is not None or row.expires_at <= datetime.now(UTC):
+            raise ValueError("Invalid or expired HighLevel OAuth state")
+        row.consumed_at = datetime.now(UTC)
+        self.db.commit()
+        return row
+
     def exchange_code(self, code: str) -> dict[str, Any]:
         response = httpx.post(
             f"{self.settings.ghl_api_base_url.rstrip('/')}/oauth/token",
@@ -73,22 +100,16 @@ class GHLAuthService:
         )
         response.raise_for_status()
         payload = response.json()
-        # A locationId is the only thing actually required to provision a sub-account.
-        # GHL labels tokens inconsistently across install flows, so accept any token
-        # that identifies a location and only reject one that identifies none.
         if not payload.get("locationId"):
             raise ValueError(
                 "Passport must be installed for a GHL sub-account "
                 f"(userType={payload.get('userType')!r}, has_locationId=False, "
                 f"has_companyId={bool(payload.get('companyId'))})"
             )
-        if str(payload.get("userType", "Location")).lower() != "location":
-            logger.warning(
-                "GHL returned userType=%r alongside a locationId; provisioning the location.",
-                payload.get("userType"),
-            )
+        if str(payload.get("userType", "")).lower() != "location":
+            raise ValueError("Passport requires a HighLevel Location token")
         granted = set(str(payload.get("scope", "")).split())
-        if granted and not REQUIRED_SCOPES.issubset(granted):
+        if not granted or not REQUIRED_SCOPES.issubset(granted):
             missing = ", ".join(sorted(REQUIRED_SCOPES - granted))
             raise ValueError(f"Required HighLevel scopes were not granted: {missing}")
         for required in ("access_token", "refresh_token", "userId"):
@@ -145,6 +166,9 @@ class GHLAuthService:
             refresh_token_encrypted=cipher.encrypt(token_payload["refresh_token"]),
             access_token_expires_at=expires,
             is_installed=True,
+            lifecycle_status="active",
+            granted_scopes=list(str(token_payload.get("scope", "")).split()),
+            last_verified_at=datetime.now(UTC),
             uninstalled_at=None,
         )
         statement = statement.on_conflict_do_update(
@@ -157,6 +181,11 @@ class GHLAuthService:
                 "refresh_token_encrypted": cipher.encrypt(token_payload["refresh_token"]),
                 "access_token_expires_at": expires,
                 "is_installed": True,
+                "lifecycle_status": "active",
+                "authz_version": GHLInstallation.authz_version + 1,
+                "generation": GHLInstallation.generation + 1,
+                "granted_scopes": list(str(token_payload.get("scope", "")).split()),
+                "last_verified_at": datetime.now(UTC),
                 "uninstalled_at": None,
                 "updated_at": datetime.now(UTC),
             },
@@ -171,6 +200,7 @@ class GHLAuthService:
             select(GHLInstallation).where(
                 GHLInstallation.location_id == context.active_location,
                 GHLInstallation.is_installed.is_(True),
+                GHLInstallation.lifecycle_status == "active",
             )
         )
         if installation is None:
@@ -216,6 +246,7 @@ class GHLAuthService:
                 ghl_location_id=context.active_location,
                 role=context.role,
                 is_agency_owner=context.is_agency_owner,
+                authz_version=installation.authz_version,
             ),
             self.settings,
         )
