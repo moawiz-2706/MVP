@@ -81,10 +81,8 @@ class GHLCalendarService:
             )
             self.db.add(mapping)
             self.db.flush()
-        body = {
-            "locationId": operator.ghl_location_id,
+        common_body = {
             "name": f"(PASSPORT) {calendar.name}",
-            "calendarType": "event",
             "isActive": calendar.is_active,
             "description": f"Passport calendar: {calendar.id}",
             "locationConfigurations": (
@@ -106,14 +104,27 @@ class GHLCalendarService:
         }
         try:
             if mapping.ghl_calendar_id:
+                # HighLevel's Update Calendar schema does not accept
+                # locationId; the subaccount location is immutable after
+                # creation. The Passport departure location is represented
+                # by locationConfigurations and can be updated here.
                 result = self.client.request(
                     "PUT",
                     f"/calendars/{mapping.ghl_calendar_id}",
                     version="v3",
-                    json=body,
+                    json=common_body,
                 )
             else:
-                result = self.client.request("POST", "/calendars/", version="v3", json=body)
+                result = self.client.request(
+                    "POST",
+                    "/calendars/",
+                    version="v3",
+                    json={
+                        "locationId": operator.ghl_location_id,
+                        "calendarType": "event",
+                        **common_body,
+                    },
+                )
             remote = result.get("calendar", result)
             remote_id = remote.get("id") if isinstance(remote, dict) else None
             if not remote_id and mapping.ghl_calendar_id:

@@ -112,8 +112,12 @@ class GHLClient:
                 token = self._load_token(force_refresh=True)
                 continue
             if response.is_error:
+                try:
+                    detail = response.json()
+                except ValueError:
+                    detail = response.text[:1000]
                 raise GHLAPIError(
-                    f"HighLevel request failed ({response.status_code})",
+                    f"HighLevel request failed ({response.status_code}): {detail}",
                     status_code=response.status_code,
                     permanent=response.status_code in {401, 403, 404},
                 )
