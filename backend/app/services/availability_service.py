@@ -285,7 +285,11 @@ class AvailabilityService:
         return starts
 
     def public_day(
-        self, operator_slug: str, calendar_slug: str, day: date
+        self,
+        operator_slug: str,
+        calendar_slug: str,
+        day: date,
+        display_timezone: str | None = None,
     ) -> PublicAvailabilityResponse:
         row = self.db.execute(
             select(Calendar, Operator, DepartureLocation)
@@ -304,12 +308,84 @@ class AvailabilityService:
         if row is None:
             raise NotFoundError("Public calendar not found")
         calendar, operator, location = row
+        operator_zone = require_timezone(operator.time_zone)
+        display_zone = require_timezone(display_timezone or operator.time_zone)
+        if display_timezone:
+            display_start = local_datetime(day, time(0), display_timezone)
+            display_end = local_datetime(day + timedelta(days=1), time(0), display_timezone)
+            first_operator_day = display_start.astimezone(operator_zone).date() - timedelta(days=1)
+            last_operator_day = display_end.astimezone(operator_zone).date() + timedelta(days=1)
+            source_days = [
+                first_operator_day + timedelta(days=offset)
+                for offset in range((last_operator_day - first_operator_day).days + 1)
+            ]
+        else:
+            source_days = [day]
+        now = datetime.now(UTC)
+        slots: list[AvailabilitySlot] = []
+        for source_day in source_days:
+            for candidate in self._candidate_starts(calendar, operator, source_day):
+                if candidate.astimezone(UTC) <= now:
+                    continue
+                if candidate.astimezone(display_zone).date() != day:
+                    continue
+                result = self.check(calendar.id, candidate, 1, public=True)
+                slots.append(
+                    AvailabilitySlot(
+                        start_at=result.start_at,
+                        end_at=result.end_at,
+                        max_bookable_units=result.max_bookable_units,
+                        available=result.available and result.max_bookable_units > 0,
+                    )
+                )
+        slots.sort(key=lambda item: item.start_at)
+        return PublicAvailabilityResponse(
+            date=day,
+            time_zone=display_timezone or operator.time_zone,
+            calendar=PublicCalendarSummary(
+                id=calendar.id,
+                operator_name=operator.name,
+                operator_slug=operator.slug,
+                calendar_name=calendar.name,
+                calendar_slug=calendar.slug,
+                description=calendar.description,
+                duration_minutes=calendar.duration_minutes,
+                base_price_minor=calendar.base_price_minor,
+                currency=calendar.currency,
+                departure_location_name=location.name if location else None,
+                departure_location_address=location.address if location else None,
+            ),
+            slots=slots,
+        )
+
+    def calendar_day(
+        self, calendar_id: uuid.UUID, operator_id: uuid.UUID, day: date
+    ) -> PublicAvailabilityResponse:
+        """Return live slots for an authenticated calendar page.
+
+        This deliberately uses the same candidate generation and ``check`` calls
+        as the public booking link. The calendar page may view a calendar that is
+        not publicly exposed, but it must never implement a second availability
+        algorithm.
+        """
+        calendar, operator = self._calendar(calendar_id, operator_id=operator_id)
+        location = self.db.scalar(
+            select(DepartureLocation).where(
+                DepartureLocation.id == calendar.departure_location_id,
+                DepartureLocation.operator_id == operator_id,
+            )
+        )
         now = datetime.now(UTC)
         slots: list[AvailabilitySlot] = []
         for candidate in self._candidate_starts(calendar, operator, day):
             if candidate.astimezone(UTC) <= now:
                 continue
-            result = self.check(calendar.id, candidate, 1, public=True)
+            result = self.check(
+                calendar.id,
+                candidate,
+                1,
+                operator_id=operator_id,
+            )
             slots.append(
                 AvailabilitySlot(
                     start_at=result.start_at,

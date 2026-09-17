@@ -1,3 +1,4 @@
+import uuid
 from datetime import date
 from typing import Annotated
 
@@ -29,6 +30,26 @@ def check_availability(data: AvailabilityCheckRequest, principal: CurrentPrincip
     "/public/{operator_slug}/calendars/{calendar_slug}/availability",
     response_model=PublicAvailabilityResponse,
 )
-def public_availability(operator_slug: str, calendar_slug: str, date: date, db: DB):
-    return AvailabilityService(db).public_day(operator_slug, calendar_slug, date)
+def public_availability(
+    operator_slug: str,
+    calendar_slug: str,
+    date: date,
+    db: DB,
+    timezone: str | None = None,
+):
+    return AvailabilityService(db).public_day(
+        operator_slug, calendar_slug, date, display_timezone=timezone
+    )
 
+
+@router.get(
+    "/calendars/{calendar_id}/availability",
+    response_model=PublicAvailabilityResponse,
+)
+def calendar_availability(
+    calendar_id: uuid.UUID,
+    date: date,
+    principal: CurrentPrincipal,
+    db: DB,
+):
+    return AvailabilityService(db).calendar_day(calendar_id, principal.operator_id, date)
