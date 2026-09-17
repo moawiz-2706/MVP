@@ -12,7 +12,9 @@ function PaymentForm({ publicReference, accessToken, embed }: { publicReference:
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const suffix = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : "";
+  const params = new URLSearchParams({ reconcile: "true" });
+  if (accessToken) params.set("access_token", accessToken);
+  const suffix = `?${params.toString()}`;
   const confirmationPath = withEmbed(`/booking/${publicReference}/confirmation${suffix}`, embed);
   const submit = async (event: FormEvent) => {
     event.preventDefault();

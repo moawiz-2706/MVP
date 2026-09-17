@@ -25,6 +25,7 @@ from app.schemas.order import (
 from app.services.order_service import OrderService
 from app.services.outbox_service import OutboxService
 from app.services.public_rate_limit_service import enforce_public_rate_limit
+from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.services.waiver_service import SIGNABLE_STATUSES, WaiverService, waiver_url
 
 router = APIRouter(tags=["public orders"])
@@ -74,6 +75,7 @@ def order_status(
     response: Response,
     request: Request,
     access_token: Annotated[str | None, Query(min_length=20, max_length=512)] = None,
+    reconcile: Annotated[bool, Query()] = False,
 ):
     enforce_public_rate_limit(request, db, get_settings(), scope=f"status:{public_reference}")
     response.headers["Cache-Control"] = "no-store"
@@ -87,6 +89,22 @@ def order_status(
     if row is None:
         raise NotFoundError("Order not found")
     order, payment, operator = row
+    if reconcile and payment.status == "processing" and payment.stripe_payment_intent_id:
+        try:
+            StripePaymentReconciliationService(db, get_settings()).reconcile(payment.id)
+            row = db.execute(
+                select(BookingOrder, Payment, Operator)
+                .join(Payment, Payment.booking_order_id == BookingOrder.id)
+                .join(Operator, Operator.id == BookingOrder.operator_id)
+                .where(BookingOrder.public_reference == public_reference)
+            ).one_or_none()
+            if row is None:
+                raise NotFoundError("Order not found")
+            order, payment, operator = row
+        except Exception:
+            # Status polling must remain available even when Stripe is temporarily
+            # unreachable. The scheduled reconciliation job remains the fallback.
+            db.rollback()
     if access_token:
         from app.services.public_access_service import PublicAccessService
 

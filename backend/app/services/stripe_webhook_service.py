@@ -340,6 +340,7 @@ class StripeWebhookService:
             if order and order.status == "pending_payment":
                 order.status = "pending_payment"
             return
+        # A canceled PaymentIntent is terminal and must release the booking hold.
         payment.status = "failed"
         request_row = self.db.scalar(
             select(PaymentIntentRequest).where(PaymentIntentRequest.payment_id == payment.id)

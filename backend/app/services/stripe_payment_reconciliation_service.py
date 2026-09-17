@@ -26,7 +26,7 @@ class StripePaymentReconciliationService:
         data = intent.to_dict_recursive() if hasattr(intent, "to_dict_recursive") else dict(intent)
         status = str(data.get("status") or getattr(intent, "status", ""))
         event = {
-            "id": f"reconcile:{payment.id}:{payment.stripe_payment_intent_id}",
+            "id": f"reconcile:{payment.id}:{payment.stripe_payment_intent_id}:{status}",
             "type": "payment_intent.succeeded" if status == "succeeded" else "payment_intent.payment_failed",
             "data": {"object": data},
         }
