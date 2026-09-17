@@ -72,6 +72,13 @@ class StaffRead(EntityModel):
     ghl_permissions_verified_at: datetime | None = None
 
 
+class GHLStaffDirectoryResponse(BaseModel):
+    synced: int
+    created: int
+    updated: int
+    error: str | None = None
+
+
 class StaffAssignmentCreate(BaseModel):
     staff_id: uuid.UUID
     calendar_id: uuid.UUID

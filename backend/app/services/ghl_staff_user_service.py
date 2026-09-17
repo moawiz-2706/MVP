@@ -104,7 +104,9 @@ class GHLStaffUserService:
             raise NotFoundError("Staff member not found")
         return staff
 
-    def _installation(self) -> tuple[GHLInstallation, Operator]:
+    def _installation(
+        self, required_scopes: set[str] | None = None
+    ) -> tuple[GHLInstallation, Operator]:
         row = self.db.execute(
             select(GHLInstallation, Operator)
             .join(Operator, Operator.id == GHLInstallation.operator_id)
@@ -119,10 +121,11 @@ class GHLStaffUserService:
         installation, operator = row
         if not installation.company_id:
             raise ConflictError("HighLevel installation is missing company ID")
-        required = {"users.readonly", "users.write"}
+        required = required_scopes or {"users.readonly"}
         granted = {str(scope) for scope in (installation.granted_scopes or [])}
         if not required.issubset(granted):
-            raise ConflictError("HighLevel users scopes are not granted for this installation")
+            missing = ", ".join(sorted(required - granted))
+            raise ConflictError(f"HighLevel users scopes are not granted: {missing}")
         return installation, operator
 
     @staticmethod
@@ -206,6 +209,114 @@ class GHLStaffUserService:
             and str(user.get("email", "")).casefold() == email.casefold()
         ]
 
+    def _list_remote_users(self, company_id: str, location_id: str) -> list[dict[str, Any]]:
+        """List account-level users in this installed sub-account.
+
+        HighLevel's OAuth-compatible search endpoint is paginated and returns
+        users across the company unless locationId and role are supplied. Keep
+        the final location/role filter locally as a tenant-safety boundary.
+        """
+        users: list[dict[str, Any]] = []
+        skip = 0
+        page_size = 100
+        while skip < 1000:
+            result = self.client.request(
+                "GET",
+                "/users/search",
+                version="2021-07-28",
+                params={
+                    "companyId": company_id,
+                    "locationId": location_id,
+                    "type": "account",
+                    "role": "user",
+                    "skip": skip,
+                    "limit": page_size,
+                },
+            )
+            page = result.get("users", []) if isinstance(result, dict) else []
+            page = [user for user in page if isinstance(user, dict)]
+            users.extend(
+                user
+                for user in page
+                if self._is_same_location_user(user, location_id)
+            )
+            if len(page) < page_size:
+                break
+            skip += page_size
+        return users
+
+    @staticmethod
+    def _remote_profile(remote: dict[str, Any]) -> tuple[str, str | None, str | None]:
+        first = str(remote.get("firstName") or "").strip()
+        last = str(remote.get("lastName") or "").strip()
+        name = str(remote.get("name") or " ".join(part for part in (first, last) if part)).strip()
+        email = str(remote.get("email") or "").strip().lower() or None
+        phone = str(remote.get("phone") or "").strip() or None
+        return name or email or "GHL Staff", email, phone
+
+    def sync_directory(self) -> dict[str, int | str | None]:
+        """Import all existing GHL account users into the local staff roster.
+
+        This deliberately never creates a remote user. Passport stores the GHL
+        user ID and uses it for appointment assignment; operational roles remain
+        per-booking StaffAssignment.role so one person can have different roles
+        on different bookings.
+        """
+        if not self.settings.ghl_staff_user_sync_enabled:
+            raise ConflictError("GHL staff directory sync is disabled")
+        installation, operator = self._installation({"users.readonly"})
+        remote_users = self._list_remote_users(installation.company_id, operator.ghl_location_id)
+        local_staff = list(
+            self.db.scalars(
+                select(Staff).where(
+                    Staff.operator_id == self.operator_id,
+                    Staff.deleted_at.is_(None),
+                )
+            )
+        )
+        by_ghl_id = {staff.ghl_user_id: staff for staff in local_staff if staff.ghl_user_id}
+        by_email = {
+            str(staff.email).casefold(): staff
+            for staff in local_staff
+            if staff.email and not staff.ghl_user_id
+        }
+        created = updated = 0
+        for remote in remote_users:
+            remote_id = _remote_user_id(remote)
+            if not remote_id:
+                continue
+            name, email, phone = self._remote_profile(remote)
+            staff = by_ghl_id.get(remote_id) or (by_email.get(email.casefold()) if email else None)
+            if staff is None:
+                staff = Staff(
+                    operator_id=self.operator_id,
+                    name=name,
+                    email=email,
+                    phone=phone,
+                    is_active=not bool(remote.get("deleted")),
+                    ghl_user_id=remote_id,
+                    ghl_user_sync_status=NEEDS_PERMISSION_REVIEW,
+                )
+                self.db.add(staff)
+                created += 1
+            else:
+                staff.ghl_user_id = remote_id
+                staff.name = name
+                staff.email = email
+                staff.phone = phone
+                staff.is_active = not bool(remote.get("deleted"))
+                if staff.ghl_user_sync_status in {"not_requested", SYNC_FAILED, MANUAL_REVIEW}:
+                    staff.ghl_user_sync_status = NEEDS_PERMISSION_REVIEW
+                updated += 1
+            by_ghl_id[remote_id] = staff
+        self.db.commit()
+        return {
+            "synced": created + updated,
+            "created": created,
+            "updated": updated,
+            "error": None,
+        }
+
     @staticmethod
     def _error_message(exc: Exception) -> str:
         if isinstance(exc, GHLAPIError):
@@ -227,7 +338,7 @@ class GHLStaffUserService:
             self._mark(staff, SYNC_FAILED, "Staff email is required to create a HighLevel user")
             self.db.commit()
             return None
-        installation, operator = self._installation()
+        installation, operator = self._installation({"users.readonly"})
         email = str(staff.email)
         try:
             if staff.ghl_user_id:
@@ -258,35 +369,15 @@ class GHLStaffUserService:
                 return staff.ghl_user_id
 
             existing = self._search_exact_email(email, installation.company_id, operator.ghl_location_id)
-            if existing:
-                self._mark(
-                    staff,
-                    MANUAL_REVIEW,
-                    "A HighLevel user already uses this email; automatic linking or password reset is disabled",
-                )
-                self.db.commit()
-                return None
-
-            first_name, last_name = _split_name(staff.name)
-            body = {
-                "companyId": installation.company_id,
-                "email": email,
-                "password": _temporary_password(),
-                "phone": staff.phone,
-                "type": "account",
-                "role": "user",
-                "locationIds": [operator.ghl_location_id],
-                "permissions": self._least_privilege_permissions(),
-                "scopes": [],
-                "scopesAssignedToOnly": [],
-                "firstName": first_name,
-                "lastName": last_name,
-            }
-            result = self.client.request("POST", "/users/", version="v3", json=body)
-            remote = result.get("user", result) if isinstance(result, dict) else {}
-            remote_id = _remote_user_id(remote) if isinstance(remote, dict) else None
+            remote_id = _remote_user_id(existing[0]) if len(existing) == 1 else None
             if not remote_id:
-                self._mark(staff, MANUAL_REVIEW, "HighLevel create returned no user ID; manual reconciliation is required")
+                message = (
+                    "No matching HighLevel account user was found; add the user in HighLevel "
+                    "and sync the staff directory"
+                    if not existing
+                    else "Multiple HighLevel users match this email; manual reconciliation is required"
+                )
+                self._mark(staff, MANUAL_REVIEW, message)
                 self.db.commit()
                 return None
             staff.ghl_user_id = remote_id

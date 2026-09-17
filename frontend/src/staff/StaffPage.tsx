@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, json } from "../api/client";
 import type { Staff } from "../api/types";
 import { DestructiveConfirmationDialog } from "../components/DestructiveConfirmationDialog";
@@ -56,6 +56,17 @@ export function StaffPage() {
   const { data = [], isLoading, error } = useQuery({ queryKey: ["staff"], queryFn: () => api<Staff[]>("/staff") });
   const [editing, setEditing] = useState<Staff | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<Staff | null>(null);
+  const syncStarted = useRef(false);
+  const directorySync = useMutation({
+    mutationFn: () => api<{ synced: number; created: number; updated: number; error: string | null }>("/staff-ghl/directory/sync", json("POST", {})),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["staff"] }),
+  });
+  useEffect(() => {
+    if (!syncStarted.current) {
+      syncStarted.current = true;
+      directorySync.mutate();
+    }
+  }, []);
   const remove = useMutation({
     mutationFn: (id: string) => api<void>(`/staff/${id}`, { method: "DELETE" }),
     onSuccess: async () => { setDeleting(null); await Promise.all([client.invalidateQueries({ queryKey: ["staff"] }), client.invalidateQueries({ queryKey: ["bookings"] }), client.invalidateQueries({ queryKey: ["booking-notifications"] }), client.invalidateQueries({ queryKey: ["staff-candidates"] })]); },
@@ -71,8 +82,10 @@ export function StaffPage() {
   });
   return (
     <div className="page">
-      <PageHeader title="Staff" description="Captains, guides, and crew who can be assigned to calendar time slots." action={<button className="button" onClick={() => setEditing(null)}><Plus size={16} />Add staff</button>} />
+      <PageHeader title="Staff" description="Existing GHL sub-account users are synced here. Assign their role per booking time slot." action={<div className="toolbar"><button className="button secondary" disabled={directorySync.isPending} onClick={() => directorySync.mutate()}><RefreshCw size={16} />{directorySync.isPending ? "Syncing GHL…" : "Sync GHL staff"}</button><button className="button" onClick={() => setEditing(null)}><Plus size={16} />Add local staff</button></div>} />
       {error && <div className="error-banner">{error.message}</div>}
+      {directorySync.error && <div className="error-banner">GHL staff directory sync failed: {directorySync.error.message}</div>}
+      {directorySync.isSuccess && <div className="success-banner">GHL staff directory synchronized. Assign roles per booking from the Bookings page.</div>}
       <div className="card table-card">
         {isLoading ? <div className="loading">Loading staff…</div> : data.length === 0 ? <EmptyState title="No staff yet" copy="Add the people who run your trips, then assign them to time slots from the Bookings calendar." /> : (
           <table className="data-table">

@@ -41,7 +41,7 @@ REQUIRED_SCOPES = {
 def required_scopes(settings: Settings) -> set[str]:
     scopes = set(REQUIRED_SCOPES)
     if settings.ghl_staff_user_sync_enabled:
-        scopes.update({"users.readonly", "users.write"})
+        scopes.add("users.readonly")
     return scopes
 
 

@@ -13,6 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.permissions import Permission, require_permission
 from app.models.entities import OutboxJob, Staff
+from app.schemas.staff import GHLStaffDirectoryResponse
 from app.services.ghl_staff_user_service import GHLStaffUserService
 
 router = APIRouter(tags=["staff-ghl"])
@@ -22,6 +23,12 @@ AppSettings = Annotated[Settings, Depends(get_settings)]
 
 class PermissionVerification(BaseModel):
     confirmed: bool
+
+
+@router.post("/staff-ghl/directory/sync", response_model=GHLStaffDirectoryResponse)
+def sync_staff_directory(principal: CurrentPrincipal, db: DB):
+    require_permission(principal, Permission.MANAGE_CONFIGURATION)
+    return GHLStaffUserService(db, principal.operator_id).sync_directory()
 
 
 def _staff(db: Session, operator_id: uuid.UUID, staff_id: uuid.UUID) -> Staff:

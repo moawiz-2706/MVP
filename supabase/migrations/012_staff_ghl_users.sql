@@ -1,5 +1,5 @@
--- Staff GHL login provisioning is opt-in via GHL_STAFF_USER_SYNC_ENABLED.
--- Passwords are generated only for the remote create request and are never stored.
+-- Existing GHL account users are imported and linked by GHL user ID.
+-- Passport does not create remote users or store staff passwords.
 ALTER TABLE staff
   ADD COLUMN IF NOT EXISTS ghl_user_id text,
   ADD COLUMN IF NOT EXISTS ghl_user_sync_status text NOT NULL DEFAULT 'not_requested',

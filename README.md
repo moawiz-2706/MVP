@@ -41,10 +41,11 @@ and `POST /api/v1/staff` can fail with HTTP 500 because PostgreSQL cannot find
 the new `staff.ghl_user_*` columns.
 
 Keep `GHL_STAFF_USER_SYNC_ENABLED=true` after the migration is applied and the
-HighLevel Marketplace app has `users.readonly` and `users.write`. Reinstall or
-reauthorize the app in each sub-account so the installation stores those
-scopes. New staff with an email address are then provisioned automatically and
-the created HighLevel user ID is returned in the Staff response. Existing staff
-records can be provisioned with the Retry GHL button on the Staff page. If the
-scopes are missing, the staff record remains local and shows a visible
-manual-review error instead of silently failing.
+HighLevel Marketplace app has `users.readonly`. Reinstall or reauthorize the
+app in each sub-account so the installation stores that scope. The Staff page
+then imports existing account users from the sub-account and stores their GHL
+user IDs locally; Passport does not create duplicate GHL users. Roles are
+assigned per booking time slot, so the same person can have different roles on
+different bookings and multiple staff members can share a role. If the scope
+is missing, the local roster remains visible and shows a sync error instead of
+silently failing.
