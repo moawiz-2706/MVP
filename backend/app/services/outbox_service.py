@@ -130,6 +130,19 @@ class OutboxService:
         if job.job_type == "ghl_staff_unassigned_email":
             GHLEmailService(self.db, job.operator_id).send_staff_unassigned(payload)
             return
+        if job.job_type == "ghl_sync_calendar":
+            GHLCalendarService(self.db, job.operator_id).sync(uuid.UUID(payload["calendar_id"]))
+            return
+        if job.job_type == "ghl_sync_appointment":
+            if job.booking_order_id is None:
+                raise RuntimeError("Appointment sync job has no booking order")
+            GHLAppointmentService(self.db, job.operator_id).sync(uuid.UUID(payload["booking_id"]))
+            return
+        if job.job_type == "ghl_cancel_appointment":
+            if job.booking_order_id is None:
+                raise RuntimeError("Appointment cancellation job has no booking order")
+            GHLAppointmentService(self.db, job.operator_id).cancel(uuid.UUID(payload["booking_id"]))
+            return
         if job.booking_order_id is None:
             raise RuntimeError("Outbox job has no booking order")
         if job.job_type == "stripe_create_transfer":
@@ -146,12 +159,6 @@ class OutboxService:
             StripePaymentReconciliationService(self.db, self.settings).reconcile(
                 uuid.UUID(payload["payment_id"])
             )
-        elif job.job_type == "ghl_sync_calendar":
-            GHLCalendarService(self.db, job.operator_id).sync(uuid.UUID(payload["calendar_id"]))
-        elif job.job_type == "ghl_sync_appointment":
-            GHLAppointmentService(self.db, job.operator_id).sync(uuid.UUID(payload["booking_id"]))
-        elif job.job_type == "ghl_cancel_appointment":
-            GHLAppointmentService(self.db, job.operator_id).cancel(uuid.UUID(payload["booking_id"]))
         elif job.job_type == "ghl_upsert_contact":
             GHLContactService(self.db, job.operator_id).sync(job.booking_order_id)
         elif job.job_type == "ghl_send_confirmation_email":
