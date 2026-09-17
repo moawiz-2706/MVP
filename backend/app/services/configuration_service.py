@@ -361,6 +361,14 @@ class ConfigurationService:
 
     def delete_calendar(self, entity_id: uuid.UUID) -> None:
         entity = self.get_calendar(entity_id)
+        if entity.deleted_at is not None:
+            raise NotFoundError("Calendar not found")
+        calendar_mapping = self.db.scalar(
+            select(GHLCalendarMapping).where(
+                GHLCalendarMapping.operator_id == self.operator_id,
+                GHLCalendarMapping.calendar_id == entity.id,
+            )
+        )
         booking_rows = self.db.execute(
             select(Booking.id, Booking.booking_order_id).where(Booking.calendar_id == entity.id)
         ).all()
@@ -406,10 +414,35 @@ class ConfigurationService:
                         ),
                     )
                 )
+        self.db.execute(
+            delete(OutboxJob).where(
+                OutboxJob.operator_id == self.operator_id,
+                OutboxJob.job_type == "ghl_sync_calendar",
+                OutboxJob.payload["calendar_id"].astext == str(entity.id),
+                OutboxJob.status.in_(("pending", "failed")),
+            )
+        )
         entity.deleted_at = datetime.now(UTC)
         entity.is_active = False
         entity.public_booking_enabled = False
+        if calendar_mapping is not None and calendar_mapping.ghl_calendar_id:
+            self.db.add(
+                OutboxJob(
+                    operator_id=self.operator_id,
+                    job_type="ghl_delete_calendar",
+                    idempotency_key=f"calendar:{entity.id}:delete",
+                    payload={
+                        "calendar_id": str(entity.id),
+                        "ghl_calendar_id": calendar_mapping.ghl_calendar_id,
+                    },
+                    status="pending",
+                )
+            )
         self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=5)
+        except Exception:
+            pass
 
     def list_hours(self, calendar_id: uuid.UUID) -> list[CalendarHour]:
         self.get_calendar(calendar_id)

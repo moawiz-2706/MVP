@@ -132,3 +132,24 @@ class GHLCalendarService:
             mapping.last_error = str(exc)[:2000]
             self.db.commit()
             raise
+
+    def delete(self, calendar_id: uuid.UUID, remote_id: str | None = None) -> None:
+        mapping = self.db.scalar(
+            select(GHLCalendarMapping).where(
+                GHLCalendarMapping.operator_id == self.operator_id,
+                GHLCalendarMapping.calendar_id == calendar_id,
+            )
+        )
+        remote_id = remote_id or (mapping.ghl_calendar_id if mapping else None)
+        if not remote_id:
+            return
+        try:
+            self.client.request("DELETE", f"/calendars/{remote_id}", version="v3")
+        except GHLAPIError as exc:
+            if exc.status_code != 404:
+                raise
+        if mapping is not None:
+            mapping.ghl_calendar_id = None
+            mapping.status = "deleted"
+            mapping.last_error = None
+            self.db.commit()

@@ -133,6 +133,11 @@ class OutboxService:
         if job.job_type == "ghl_sync_calendar":
             GHLCalendarService(self.db, job.operator_id).sync(uuid.UUID(payload["calendar_id"]))
             return
+        if job.job_type == "ghl_delete_calendar":
+            GHLCalendarService(self.db, job.operator_id).delete(
+                uuid.UUID(payload["calendar_id"]), payload.get("ghl_calendar_id")
+            )
+            return
         if job.job_type == "ghl_sync_appointment":
             if job.booking_order_id is None:
                 raise RuntimeError("Appointment sync job has no booking order")
