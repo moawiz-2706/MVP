@@ -80,6 +80,9 @@ export interface BookingDetail extends Booking {
   customer_total_minor: number;
   ghl_contact_sync_status: string;
   ghl_confirmation_email_status: string;
+  ghl_appointment_sync_status: string;
+  ghl_appointment_event_id: string | null;
+  ghl_appointment_last_error: string | null;
   resources: { resource_id: Id; name: string; quantity: number }[];
   created_at: string;
   waiver: WaiverSummary;

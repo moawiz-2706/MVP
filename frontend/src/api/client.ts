@@ -13,6 +13,7 @@ export function setSessionToken(token: string | null) {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method || "GET").toUpperCase();
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
@@ -24,7 +25,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     let body: { detail?: string; error?: { message?: string; details?: unknown } } = {};
     try { body = await response.json(); } catch { /* non-JSON upstream error */ }
-    throw new ApiError(response.status, body.error?.message || body.detail || "Request failed", body.error?.details);
+    const message = body.error?.message || body.detail || "Request failed";
+    window.dispatchEvent(new CustomEvent("passport:operation", {
+      detail: { method, path, success: false, message },
+    }));
+    throw new ApiError(response.status, message, body.error?.details);
+  }
+  if (method !== "GET" && method !== "HEAD") {
+    window.dispatchEvent(new CustomEvent("passport:operation", {
+      detail: { method, path, success: true },
+    }));
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -33,4 +43,3 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export function json(method: string, body: unknown): RequestInit {
   return { method, body: JSON.stringify(body) };
 }
-

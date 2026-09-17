@@ -83,6 +83,9 @@ class BookingDetail(BookingListItem):
     customer_total_minor: int
     ghl_contact_sync_status: str
     ghl_confirmation_email_status: str
+    ghl_appointment_sync_status: str
+    ghl_appointment_event_id: str | None
+    ghl_appointment_last_error: str | None
     resources: list[BookingResourceDetail]
     created_at: datetime
     waiver: WaiverSummary
@@ -100,4 +103,3 @@ class BookingUpdate(BaseModel):
         if self.start_at is None and self.units is None:
             raise ValueError("At least one field must be supplied")
         return self
-

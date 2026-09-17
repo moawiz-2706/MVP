@@ -6,7 +6,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,7 @@ from app.models.entities import (
     CalendarCategory,
     CalendarPushedSlot,
     CalendarResource,
+    GHLAppointmentMapping,
     OutboxJob,
     Payment,
     PaymentRefundAttempt,
@@ -216,16 +217,17 @@ class BookingAdminService:
 
     def detail(self, booking_id: uuid.UUID) -> dict:
         row = self.db.execute(
-            select(Booking, BookingOrder, Payment, CalendarCategory)
+            select(Booking, BookingOrder, Payment, CalendarCategory, GHLAppointmentMapping)
             .join(BookingOrder, BookingOrder.id == Booking.booking_order_id)
             .join(Payment, Payment.booking_order_id == BookingOrder.id)
             .join(Calendar, Calendar.id == Booking.calendar_id)
             .outerjoin(CalendarCategory, CalendarCategory.id == Calendar.calendar_category_id)
+            .outerjoin(GHLAppointmentMapping, GHLAppointmentMapping.booking_id == Booking.id)
             .where(Booking.id == booking_id, Booking.operator_id == self.operator_id)
         ).one_or_none()
         if row is None:
             raise NotFoundError("Booking not found")
-        booking, order, payment, category = row
+        booking, order, payment, category, appointment_mapping = row
         resources = self.db.execute(
             select(BookingResource.resource_id, Resource.name, BookingResource.quantity)
             .join(Resource, Resource.id == BookingResource.resource_id)
@@ -243,6 +245,15 @@ class BookingAdminService:
             "customer_total_minor": order.customer_total_minor,
             "ghl_contact_sync_status": order.ghl_contact_sync_status,
             "ghl_confirmation_email_status": order.ghl_confirmation_email_status,
+            "ghl_appointment_sync_status": (
+                appointment_mapping.status if appointment_mapping else "pending"
+            ),
+            "ghl_appointment_event_id": (
+                appointment_mapping.ghl_event_id if appointment_mapping else None
+            ),
+            "ghl_appointment_last_error": (
+                appointment_mapping.last_error if appointment_mapping else None
+            ),
             "resources": [
                 {"resource_id": resource_id, "name": name, "quantity": quantity}
                 for resource_id, name, quantity in resources
@@ -573,7 +584,14 @@ class BookingAdminService:
         for job in self.db.scalars(
             select(OutboxJob).where(
                 OutboxJob.booking_order_id == order_id,
-                OutboxJob.job_type.in_(["ghl_upsert_contact", "ghl_send_confirmation_email"]),
+                OutboxJob.job_type.in_(
+                    (
+                    "ghl_upsert_contact",
+                    "ghl_send_confirmation_email",
+                    "ghl_sync_appointment",
+                    "ghl_cancel_appointment",
+                    )
+                ),
             )
         ):
             job.status = "pending"
@@ -581,4 +599,13 @@ class BookingAdminService:
             job.last_error = None
         order.ghl_contact_sync_status = "pending"
         order.ghl_confirmation_email_status = "pending"
+        self.db.execute(
+            update(GHLAppointmentMapping)
+            .where(
+                GHLAppointmentMapping.booking_id.in_(
+                    select(Booking.id).where(Booking.booking_order_id == order_id)
+                )
+            )
+            .values(status="pending", last_error=None)
+        )
         self.db.commit()

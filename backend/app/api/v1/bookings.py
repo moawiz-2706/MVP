@@ -84,7 +84,12 @@ def create_booking(
 ):
     require_permission(principal, Permission.OPERATE_BOOKINGS)
     operator_slug = db.scalar(select(Operator.slug).where(Operator.id == principal.operator_id))
-    return OrderService(db, settings).create(operator_slug, data)
+    result = OrderService(db, settings).create(operator_slug, data)
+    try:
+        OutboxService(db, settings).process(limit=10)
+    except Exception:
+        logger.exception("Inline GHL booking sync failed; job remains queued for retry")
+    return result
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingDetail)
@@ -142,4 +147,3 @@ def retry_ghl(
     except Exception:
         logger.exception("Inline outbox processing failed during manual GHL retry")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
