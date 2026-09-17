@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from collections import defaultdict
-from datetime import UTC, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,9 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.entities import (
     Calendar,
-    CalendarDateHour,
-    CalendarHour,
-    CalendarPushedSlot,
+    DepartureLocation,
     GHLCalendarMapping,
     Operator,
 )
@@ -28,22 +23,17 @@ class GHLCalendarService:
         self.settings = get_settings()
         self.client = GHLClient(operator_id)
 
-    def _schedule_rules(self, calendar: Calendar) -> list[dict[str, Any]]:
-        if calendar.availability_mode == "day_wise":
-            by_day: dict[int, list[dict[str, str]]] = defaultdict(list)
-            rows = self.db.scalars(
-                select(CalendarHour)
-                .where(CalendarHour.calendar_id == calendar.id)
-                .order_by(CalendarHour.day_of_week, CalendarHour.start_time)
-            )
-            for row in rows:
-                by_day[row.day_of_week].append(
-                    {
-                        "from": row.start_time.strftime("%H:%M"),
-                        "to": row.end_time.strftime("%H:%M"),
-                    }
-                )
-            weekdays = [
+    @staticmethod
+    def _schedule_rules() -> list[dict[str, Any]]:
+        """Keep HighLevel open 24/7; Passport remains the slot authority."""
+        return [
+            {
+                "type": "wday",
+                "day": day,
+                # HighLevel represents a full 24-hour day as 00:00 -> 00:00.
+                "intervals": [{"from": "00:00", "to": "00:00"}],
+            }
+            for day in (
                 "monday",
                 "tuesday",
                 "wednesday",
@@ -51,62 +41,11 @@ class GHLCalendarService:
                 "friday",
                 "saturday",
                 "sunday",
-            ]
-            return [
-                {"type": "wday", "day": weekdays[day], "intervals": intervals}
-                for day, intervals in sorted(by_day.items())
-            ]
-
-        if calendar.availability_mode == "date_wise":
-            rows = self.db.scalars(
-                select(CalendarDateHour)
-                .where(CalendarDateHour.calendar_id == calendar.id)
-                .order_by(CalendarDateHour.start_date, CalendarDateHour.start_time)
             )
-            by_date: dict[str, list[dict[str, str]]] = defaultdict(list)
-            for row in rows:
-                current = row.start_date
-                while current <= row.end_date:
-                    by_date[current.isoformat()].append(
-                        {
-                            "from": row.start_time.strftime("%H:%M"),
-                            "to": row.end_time.strftime("%H:%M"),
-                        }
-                    )
-                    current += timedelta(days=1)
-            return [
-                {"type": "date", "date": day, "intervals": intervals}
-                for day, intervals in sorted(by_date.items())
-            ]
-
-        rows = self.db.scalars(
-            select(CalendarPushedSlot)
-            .where(
-                CalendarPushedSlot.calendar_id == calendar.id,
-                CalendarPushedSlot.start_at >= datetime.now(UTC),
-            )
-            .order_by(CalendarPushedSlot.start_at)
-        )
-        rules: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for row in rows:
-            local_start = row.start_at.astimezone(ZoneInfo(self._operator_zone(calendar)))
-            local_end = local_start + timedelta(minutes=calendar.duration_minutes)
-            rules[local_start.date().isoformat()].append(
-                {"from": local_start.strftime("%H:%M"), "to": local_end.strftime("%H:%M")}
-            )
-        return [
-            {"type": "date", "date": day, "intervals": intervals}
-            for day, intervals in sorted(rules.items())
         ]
 
-    def _operator_zone(self, calendar: Calendar) -> str:
-        return str(
-            self.db.scalar(select(Operator.time_zone).where(Operator.id == calendar.operator_id))
-            or "UTC"
-        )
-
     def _sync_schedule(self, calendar: Calendar, operator: Operator, remote_id: str) -> None:
-        body = {"rules": self._schedule_rules(calendar), "timezone": operator.time_zone}
+        body = {"rules": self._schedule_rules(), "timezone": operator.time_zone}
         path = f"/calendars/schedules/event-calendar/{remote_id}"
         try:
             self.client.request("PUT", path, version="v3", json=body)
@@ -119,13 +58,14 @@ class GHLCalendarService:
         if not self.settings.ghl_calendar_sync_enabled:
             return None
         row = self.db.execute(
-            select(Calendar, Operator)
+            select(Calendar, Operator, DepartureLocation)
             .join(Operator, Operator.id == Calendar.operator_id)
+            .outerjoin(DepartureLocation, DepartureLocation.id == Calendar.departure_location_id)
             .where(Calendar.id == calendar_id, Calendar.operator_id == self.operator_id)
         ).one_or_none()
         if row is None:
             raise RuntimeError("GHL calendar source not found")
-        calendar, operator = row
+        calendar, operator, departure_location = row
         mapping = self.db.scalar(
             select(GHLCalendarMapping).where(
                 GHLCalendarMapping.operator_id == self.operator_id,
@@ -147,6 +87,16 @@ class GHLCalendarService:
             "calendarType": "event",
             "isActive": calendar.is_active,
             "description": f"Passport calendar: {calendar.id}",
+            "locationConfigurations": (
+                [
+                    {
+                        "kind": "custom",
+                        "location": f"{departure_location.name} — {departure_location.address}",
+                    }
+                ]
+                if departure_location is not None
+                else []
+            ),
             "slotDuration": calendar.duration_minutes,
             "slotDurationUnit": "mins",
             "slotInterval": calendar.slot_interval_minutes,

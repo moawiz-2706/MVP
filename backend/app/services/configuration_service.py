@@ -10,7 +10,10 @@ from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
+    BookingFinancialAllocation,
+    BookingNote,
     BookingResource,
+    BookingWaiver,
     Calendar,
     CalendarBlock,
     CalendarCategory,
@@ -20,6 +23,7 @@ from app.models.entities import (
     CalendarResource,
     DepartureLocation,
     GHLCalendarMapping,
+    GHLAppointmentMapping,
     Operator,
     OutboxJob,
     Resource,
@@ -97,9 +101,20 @@ class ConfigurationService:
 
     def update_location(self, entity_id: uuid.UUID, data: LocationUpdate) -> DepartureLocation:
         entity = self.get_location(entity_id)
+        calendars = list(
+            self.db.scalars(
+                select(Calendar).where(
+                    Calendar.operator_id == self.operator_id,
+                    Calendar.departure_location_id == entity_id,
+                    Calendar.deleted_at.is_(None),
+                )
+            )
+        )
         _apply(entity, data.model_dump(exclude_unset=True))
         self.db.commit()
         self.db.refresh(entity)
+        for calendar in calendars:
+            self._queue_ghl_calendar_sync(calendar)
         return entity
 
     def delete_location(self, entity_id: uuid.UUID) -> None:
@@ -107,6 +122,15 @@ class ConfigurationService:
         now = datetime.now(UTC)
         entity.deleted_at = now
         entity.is_active = False
+        calendars = list(
+            self.db.scalars(
+                select(Calendar).where(
+                    Calendar.operator_id == self.operator_id,
+                    Calendar.departure_location_id == entity_id,
+                    Calendar.deleted_at.is_(None),
+                )
+            )
+        )
         self.db.execute(
             update(Calendar)
             .where(
@@ -116,6 +140,8 @@ class ConfigurationService:
             .values(departure_location_id=None)
         )
         self.db.commit()
+        for calendar in calendars:
+            self._queue_ghl_calendar_sync(calendar)
 
     def list_resources(self) -> list[dict[str, Any]]:
         count = (
@@ -335,6 +361,51 @@ class ConfigurationService:
 
     def delete_calendar(self, entity_id: uuid.UUID) -> None:
         entity = self.get_calendar(entity_id)
+        booking_rows = self.db.execute(
+            select(Booking.id, Booking.booking_order_id).where(Booking.calendar_id == entity.id)
+        ).all()
+        booking_ids = [booking_id for booking_id, _ in booking_rows]
+        booking_order_ids = [order_id for _, order_id in booking_rows]
+        signed_waiver = self.db.scalar(
+            select(BookingWaiver.booking_id).where(
+                BookingWaiver.booking_id.in_(booking_ids), BookingWaiver.status == "signed"
+            )
+        ) if booking_ids else None
+        if signed_waiver is not None:
+            raise ConflictError(
+                "This calendar has a signed waiver and cannot be physically deleted. "
+                "Preserve the booking record or remove the signed waiver under your legal-retention policy."
+            )
+        if booking_ids:
+            self.db.execute(
+                delete(GHLAppointmentMapping).where(
+                    GHLAppointmentMapping.booking_id.in_(booking_ids)
+                )
+            )
+            self.db.execute(
+                delete(BookingResource).where(BookingResource.booking_id.in_(booking_ids))
+            )
+            self.db.execute(
+                delete(BookingWaiver).where(BookingWaiver.booking_id.in_(booking_ids))
+            )
+            self.db.execute(
+                delete(BookingNote).where(BookingNote.booking_id.in_(booking_ids))
+            )
+            self.db.execute(
+                delete(BookingFinancialAllocation).where(
+                    BookingFinancialAllocation.booking_id.in_(booking_ids)
+                )
+            )
+            self.db.execute(delete(Booking).where(Booking.id.in_(booking_ids)))
+            if booking_order_ids:
+                self.db.execute(
+                    delete(OutboxJob).where(
+                        OutboxJob.booking_order_id.in_(booking_order_ids),
+                        OutboxJob.job_type.in_(
+                            ("ghl_sync_appointment", "ghl_cancel_appointment")
+                        ),
+                    )
+                )
         entity.deleted_at = datetime.now(UTC)
         entity.is_active = False
         entity.public_booking_enabled = False
