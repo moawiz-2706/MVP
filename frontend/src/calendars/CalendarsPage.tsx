@@ -1,48 +1,100 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, Clock3, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { ArrowLeft, Clock3, MapPin, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, json } from "../api/client";
-import type { Calendar, CalendarBlock, CalendarHour, CalendarResource, Category, Location, Resource } from "../api/types";
-import { useSession } from "../auth/GHLSessionProvider";
-import { BookingLinkPanel } from "../components/BookingLinkPanel";
-import { DestructiveConfirmationDialog } from "../components/DestructiveConfirmationDialog";
-import { EmptyState } from "../components/EmptyState";
-import { Modal } from "../components/Modal";
-import { MutationNotice } from "../components/MutationNotice";
-import { PageHeader } from "../components/PageHeader";
-import { AvailabilityEditor } from "./AvailabilityEditor";
-import { BlocksEditor } from "./BlocksEditor";
-import { CalendarBookingModal } from "./CalendarBookingModal";
+import type { AvailabilityResponse, AvailabilitySlot, PublicCalendar, PublicCatalog } from "../api/types";
+import { PaymentPanel } from "./PaymentPanel";
+import { PublicFrame } from "./OperatorBookingPage";
+import { useEmbed, withEmbed } from "./embed";
+import { formatDay, formatTime, tomorrowInZone, zoneLabel } from "../lib/datetime";
 
-const days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-const price = (minor:number,currency:string) => new Intl.NumberFormat(undefined,{style:"currency",currency:currency.toUpperCase()}).format(minor/100);
-const duration = (minutes:number) => minutes % 60 ? `${Math.floor(minutes/60)}h ${minutes%60}m` : `${minutes/60}h`;
+interface CartItem { calendar_id: string; start_at: string; units: number; slot: AvailabilitySlot }
+interface Quote { currency: string; subtotal_minor: number; platform_fee_and_taxes_minor: number; customer_total_minor: number }
+interface Created extends Quote { public_reference: string; status: string; client_secret: string | null; access_token?: string | null; quote: Quote }
+const formatMoney = (value: number, currency = "usd") => new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(value / 100);
 
-function GeneralForm({ calendar, categories, locations, onSaved, onCancel }:{calendar:Calendar|null;categories:Category[];locations:Location[];onSaved:(calendar:Calendar)=>void;onCancel:()=>void}) {
-  const [name,setName]=useState(calendar?.name||""); const [slug,setSlug]=useState(calendar?.slug||""); const [description,setDescription]=useState(calendar?.description||"");
-  const [category,setCategory]=useState(calendar?.calendar_category_id||""); const [location,setLocation]=useState(calendar?.departure_location_id||""); const [minutes,setMinutes]=useState(calendar?.duration_minutes||120); const [interval,setInterval]=useState(calendar?.slot_interval_minutes||30); const [maxUnits,setMaxUnits]=useState(calendar?.max_units_per_booking?.toString()||""); const [priceMinor,setPriceMinor]=useState(calendar?.base_price_minor||0); const [active,setActive]=useState(calendar?.is_active??true); const [publicEnabled,setPublicEnabled]=useState(calendar?.public_booking_enabled??true);
-  const [success,setSuccess]=useState<string|null>(null);
-  const mutation=useMutation({mutationFn:()=>api<Calendar>(calendar?`/calendars/${calendar.id}`:"/calendars",json(calendar?"PATCH":"POST",{name,slug,description:description||null,calendar_category_id:category||null,departure_location_id:location||null,duration_minutes:minutes,slot_interval_minutes:interval,max_units_per_booking:maxUnits?Number(maxUnits):null,base_price_minor:priceMinor,currency:"usd",is_active:active,public_booking_enabled:publicEnabled})),onSuccess:(saved)=>{setSuccess(calendar?"Calendar updated successfully.":"Calendar created successfully.");onSaved(saved);}});
-  const nameChange=(value:string)=>{setName(value);if(!calendar)setSlug(value.toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""));};
-  return <form onSubmit={(e)=>{e.preventDefault();setSuccess(null);mutation.mutate();}}><div className="form-grid"><label className="field"><span>Name</span><input autoFocus required value={name} onChange={(e)=>nameChange(e.target.value)} /></label><label className="field"><span>Public URL slug</span><input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(e)=>setSlug(e.target.value)} /></label><label className="field full"><span>Description</span><textarea value={description} onChange={(e)=>setDescription(e.target.value)} /></label><label className="field"><span>Category</span><select value={category} onChange={(e)=>setCategory(e.target.value)}><option value="">Uncategorized</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="field"><span>Departure location</span><select value={location} onChange={(e)=>setLocation(e.target.value)}><option value="">No location</option>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label><label className="field"><span>Duration (minutes)</span><input type="number" min={1} required value={minutes} onChange={(e)=>setMinutes(Number(e.target.value))}/></label><label className="field"><span>Slot interval (minutes)</span><input type="number" min={1} required value={interval} onChange={(e)=>setInterval(Number(e.target.value))}/></label><label className="field"><span>Base price (minor units)</span><input type="number" min={0} required value={priceMinor} onChange={(e)=>setPriceMinor(Number(e.target.value))}/></label><label className="field"><span>Maximum units (optional)</span><input type="number" min={1} value={maxUnits} onChange={(e)=>setMaxUnits(e.target.value)}/></label><label className="check-field"><input type="checkbox" checked={active} onChange={(e)=>setActive(e.target.checked)}/>Active</label><label className="check-field"><input type="checkbox" checked={publicEnabled} onChange={(e)=>setPublicEnabled(e.target.checked)}/>Public booking enabled</label></div><MutationNotice success={success} error={mutation.error}/><div className="dialog-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancel</button><button className="button" disabled={mutation.isPending}>{mutation.isPending?"Saving…":"Save calendar"}</button></div></form>;
+const COMMON_TIME_ZONES = [
+  "UTC", "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
+  "America/Toronto", "America/Sao_Paulo", "Atlantic/Reykjavik", "Europe/London", "Europe/Paris",
+  "Europe/Berlin", "Europe/Athens", "Africa/Cairo", "Africa/Johannesburg", "Asia/Dubai",
+  "Asia/Karachi", "Asia/Kolkata", "Asia/Bangkok", "Asia/Singapore", "Asia/Tokyo",
+  "Australia/Sydney", "Pacific/Auckland",
+];
+
+function timeZoneOptions(defaultZone: string): string[] {
+  const intlWithZones = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
+  const supported = intlWithZones.supportedValuesOf?.("timeZone") || COMMON_TIME_ZONES;
+  return Array.from(new Set([defaultZone, ...supported])).sort((a, b) => a.localeCompare(b));
 }
 
-function ResourceEditor({calendar,allResources}:{calendar:Calendar;allResources:Resource[]}) {
-  const client=useQueryClient(); const query=useQuery({queryKey:["calendar-resources",calendar.id],queryFn:()=>api<CalendarResource[]>(`/calendars/${calendar.id}/resources`)}); const [selected,setSelected]=useState<Record<string,number>>({}); const [success,setSuccess]=useState<string|null>(null);
-  useEffect(()=>{if(query.data)setSelected(Object.fromEntries(query.data.map(m=>[m.resource_id,m.default_quantity_per_unit])));},[query.data]);
-  const save=useMutation({mutationFn:()=>api<CalendarResource[]>(`/calendars/${calendar.id}/resources`,json("PUT",{resources:Object.entries(selected).map(([resource_id,default_quantity_per_unit])=>({resource_id,default_quantity_per_unit}))})),onSuccess:()=>{setSuccess("Calendar resources updated successfully.");void client.invalidateQueries({queryKey:["calendar-resources",calendar.id]});}});
-  return <div><p style={{fontSize:12,color:"#697386"}}>Each booking unit consumes the configured quantity from every selected shared pool.</p>{allResources.length?allResources.map(resource=><div key={resource.id} style={{display:"grid",gridTemplateColumns:"1fr 140px",gap:12,alignItems:"center",padding:"11px 0",borderTop:"1px solid #eef0f2"}}><label className="check-field"><input type="checkbox" checked={resource.id in selected} onChange={(e)=>{const next={...selected};if(e.target.checked)next[resource.id]=1;else delete next[resource.id];setSelected(next);setSuccess(null);}}/><span><strong>{resource.name}</strong><br/><small>{resource.quantity} total</small></span></label>{resource.id in selected&&<label className="field"><span>Per booking unit</span><input type="number" min={1} value={selected[resource.id]} onChange={(e)=>setSelected({...selected,[resource.id]:Number(e.target.value)})}/></label>}</div>):<EmptyState title="No resources" copy="Create a resource pool before mapping inventory."/>}<MutationNotice success={success} error={save.error}/><div className="dialog-actions"><button className="button" onClick={()=>{setSuccess(null);save.mutate();}} disabled={save.isPending}>Save resources</button></div></div>;
-}
+export function CalendarBookingPage() {
+  const { operatorSlug = "", calendarSlug = "" } = useParams();
+  const navigate = useNavigate();
+  const embed = useEmbed();
+  const catalog = useQuery({ queryKey: ["public-catalog", operatorSlug], queryFn: () => api<PublicCatalog>(`/public/${operatorSlug}`) });
+  const calendar = catalog.data?.calendars.find((item) => item.slug === calendarSlug);
+  const defaultTimeZone = catalog.data?.time_zone ?? "";
+  const [selectedTimeZone, setSelectedTimeZone] = useState("");
+  const [day, setDay] = useState("");
+  const [slot, setSlot] = useState<AvailabilitySlot | null>(null);
+  const [units, setUnits] = useState(1);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [created, setCreated] = useState<Created | null>(null);
+  const [checkoutKey] = useState(() => crypto.randomUUID());
 
-function CalendarEditor({calendar,categories,locations,resources,onClose}:{calendar:Calendar|null;categories:Category[];locations:Location[];resources:Resource[];onClose:()=>void}) {
-  const client=useQueryClient();const {me}=useSession();const [current,setCurrent]=useState(calendar);const [tab,setTab]=useState<"general"|"hours"|"resources"|"blocks">("general");
-  return <><div className="tabs"><button className={`tab ${tab==="general"?"active":""}`} onClick={()=>setTab("general")}>General</button><button disabled={!current} className={`tab ${tab==="hours"?"active":""}`} onClick={()=>setTab("hours")}>Availability</button><button disabled={!current} className={`tab ${tab==="resources"?"active":""}`} onClick={()=>setTab("resources")}>Resources</button><button disabled={!current} className={`tab ${tab==="blocks"?"active":""}`} onClick={()=>setTab("blocks")}>Blocked dates</button></div>{tab==="general"&&<GeneralForm calendar={current} categories={categories} locations={locations} onCancel={onClose} onSaved={(saved)=>{setCurrent(saved);void client.invalidateQueries({queryKey:["calendars"]});if(!current)setTab("hours");}}/>}{current&&tab==="hours"&&<AvailabilityEditor calendar={current} onCalendarChange={setCurrent}/>} {current&&tab==="resources"&&<ResourceEditor calendar={current} allResources={resources}/>} {current&&tab==="blocks"&&<BlocksEditor calendar={current}/>}{current&&<BookingLinkPanel entityType="calendar" operatorSlug={me.operator.slug} entitySlug={current.slug}/>}</>;
-}
+  useEffect(() => {
+    if (defaultTimeZone && !selectedTimeZone) setSelectedTimeZone(defaultTimeZone);
+  }, [defaultTimeZone, selectedTimeZone]);
 
-function Categories({categories}:{categories:Category[]}) { const client=useQueryClient();const {me}=useSession();const [editing,setEditing]=useState<Category|null|undefined>(undefined);const [deleting,setDeleting]=useState<Category|null>(null);const [name,setName]=useState("");const [slug,setSlug]=useState("");const [color,setColor]=useState("#527a73");const [success,setSuccess]=useState<string|null>(null);
-  useEffect(()=>{setName(editing?.name||"");setSlug(editing?.slug||"");setColor(editing?.display_color||"#527a73");},[editing]);const save=useMutation({mutationFn:()=>api<Category>(editing?`/calendar-categories/${editing.id}`:"/calendar-categories",json(editing?"PATCH":"POST",{name,slug,display_color:color})),onSuccess:()=>{setSuccess(editing?"Category updated successfully.":"Category created successfully.");setEditing(undefined);void client.invalidateQueries({queryKey:["categories"]});}});const remove=useMutation({mutationFn:(id:string)=>api<void>(`/calendar-categories/${id}`,{method:"DELETE"}),onSuccess:()=>{setSuccess("Category deleted successfully.");setDeleting(null);void Promise.all([client.invalidateQueries({queryKey:["categories"]}),client.invalidateQueries({queryKey:["calendars"]})]);}});
-  return <><div className="toolbar" style={{justifyContent:"flex-end",marginBottom:12}}><button className="button" onClick={()=>setEditing(null)}><Plus size={15}/>Add category</button></div><div className="card table-card">{categories.length?<table className="data-table"><thead><tr><th>Category</th><th>Calendars</th><th>Color</th><th/></tr></thead><tbody>{categories.map(category=><tr key={category.id}><td><strong>{category.name}</strong></td><td>{category.calendars_count}</td><td><i style={{display:"inline-block",width:18,height:18,borderRadius:5,background:category.display_color||"#7b8792"}}/></td><td><div className="toolbar"><button className="icon-button" onClick={()=>setEditing(category)}><Pencil size={14}/></button><button className="icon-button" onClick={()=>setDeleting(category)}><Trash2 size={14}/></button></div></td></tr>)}</tbody></table>:<EmptyState title="No categories" copy="Group related calendars for navigation and filtering."/>}</div><Modal open={editing!==undefined} onOpenChange={(open)=>!open&&setEditing(undefined)} title={editing?`Edit ${editing.name}`:"Add category"}><form onSubmit={(e)=>{e.preventDefault();save.mutate();}}><div className="form-grid"><label className="field"><span>Name</span><input autoFocus required value={name} onChange={(e)=>{const v=e.target.value;setName(v);if(!editing)setSlug(v.toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""));}}/></label><label className="field"><span>Public URL slug</span><input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(e)=>setSlug(e.target.value)}/></label><label className="field"><span>Display color</span><input type="color" value={color} onChange={(e)=>setColor(e.target.value)}/></label></div>{save.error&&<div className="error-banner" style={{marginTop:12}}>{save.error.message}</div>}{editing&&<BookingLinkPanel entityType="category" operatorSlug={me.operator.slug} entitySlug={editing.slug}/>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={()=>setEditing(undefined)}>Cancel</button><button className="button">Save category</button></div></form></Modal>{deleting&&<DestructiveConfirmationDialog open itemName={deleting.name} consequences={`This category contains ${deleting.calendars_count} calendar${deleting.calendars_count===1?"":"s"}. Deleting it will also remove every calendar in the category from active use.`} onOpenChange={(open)=>!open&&setDeleting(null)} onConfirm={()=>remove.mutate(deleting.id)} busy={remove.isPending}/>}</>;
-}
+  useEffect(() => {
+    if (selectedTimeZone && !day) setDay(tomorrowInZone(selectedTimeZone));
+  }, [selectedTimeZone, day]);
 
-export function CalendarsPage(){const [view,setView]=useState<"calendars"|"categories">("calendars");const [editing,setEditing]=useState<Calendar|null|undefined>(undefined);const [bookingCalendar,setBookingCalendar]=useState<Calendar|null>(null);const [deleting,setDeleting]=useState<Calendar|null>(null);const client=useQueryClient();const calendars=useQuery({queryKey:["calendars"],queryFn:()=>api<Calendar[]>("/calendars")});const categories=useQuery({queryKey:["categories"],queryFn:()=>api<Category[]>("/calendar-categories")});const locations=useQuery({queryKey:["locations"],queryFn:()=>api<Location[]>("/locations")});const resources=useQuery({queryKey:["resources"],queryFn:()=>api<Resource[]>("/resources")});const remove=useMutation({mutationFn:(id:string)=>api<void>(`/calendars/${id}`,{method:"DELETE"}),onSuccess:()=>{setDeleting(null);void client.invalidateQueries({queryKey:["calendars"]});}});const cat=(id:string|null)=>categories.data?.find(c=>c.id===id)?.name||"Uncategorized";const loc=(id:string|null)=>locations.data?.find(l=>l.id===id)?.name||"—";
-  return <div className="page"><PageHeader title="Calendars" description="Services, weekly hours, resource mappings, and booking exceptions." action={view==="calendars"?<button className="button" onClick={()=>setEditing(null)}><Plus size={16}/>Add calendar</button>:undefined}/><div className="tabs"><button className={`tab ${view==="calendars"?"active":""}`} onClick={()=>setView("calendars")}>Calendars</button><button className={`tab ${view==="categories"?"active":""}`} onClick={()=>setView("categories")}>Categories</button></div>{view==="categories"?<Categories categories={categories.data||[]}/>:<div className="card table-card">{calendars.isLoading?<div className="loading">Loading calendars…</div>:!calendars.data?.length?<EmptyState title="No calendars yet" copy="Create a bookable service, then configure its hours and resources."/>:<table className="data-table"><thead><tr><th>Calendar</th><th>Category</th><th>Location</th><th>Duration</th><th>Price</th><th>Status</th><th/></tr></thead><tbody>{calendars.data.map(calendar=><tr key={calendar.id}><td><div className="cell-title"><strong>{calendar.name}</strong><span>/{calendar.slug} · {calendar.availability_mode==="pushed"?"pushed times":`every ${calendar.slot_interval_minutes} min`}</span></div></td><td>{cat(calendar.calendar_category_id)}</td><td>{loc(calendar.departure_location_id)}</td><td><span style={{display:"inline-flex",alignItems:"center",gap:6}}><Clock3 size={13}/>{duration(calendar.duration_minutes)}</span></td><td>{price(calendar.base_price_minor,calendar.currency)}</td><td><span className={`badge ${calendar.is_active?"success":""}`}><i className="status-dot"/>{calendar.is_active?"Active":"Inactive"}</span></td><td><div className="toolbar"><button className="button secondary small" disabled={!calendar.is_active} onClick={()=>setBookingCalendar(calendar)}>Book</button><button className="icon-button" onClick={()=>setEditing(calendar)}><Pencil size={14}/></button><button className="icon-button" onClick={()=>setDeleting(calendar)}><Trash2 size={14}/></button></div></td></tr>)}</tbody></table>}</div>}<Modal open={editing!==undefined} onOpenChange={(open)=>!open&&setEditing(undefined)} title={editing?`Edit ${editing.name}`:"Add calendar"} description="Configuration is saved independently from historical booking snapshots."><CalendarEditor calendar={editing||null} categories={categories.data||[]} locations={locations.data||[]} resources={resources.data||[]} onClose={()=>setEditing(undefined)}/></Modal><Modal open={bookingCalendar!==null} onOpenChange={(open)=>!open&&setBookingCalendar(null)} title={bookingCalendar?`Book ${bookingCalendar.name}`:"Book calendar"} description="Choose an available date and time; this calendar is already selected.">{bookingCalendar&&<CalendarBookingModal calendar={bookingCalendar} onDone={()=>setBookingCalendar(null)}/>}</Modal>{deleting&&<DestructiveConfirmationDialog open itemName={deleting.name} consequences="Warning: this removes the calendar and permanently deletes every appointment and booking associated with it. Type DELETE only if you are sure." onOpenChange={(open)=>!open&&setDeleting(null)} onConfirm={()=>remove.mutate(deleting.id)} busy={remove.isPending}/>}</div>}
+  const availability = useQuery({
+    queryKey: ["availability", operatorSlug, calendarSlug, day, selectedTimeZone],
+    queryFn: () => api<AvailabilityResponse>(`/public/${operatorSlug}/calendars/${calendarSlug}/availability?${new URLSearchParams({ date: day, timezone: selectedTimeZone })}`),
+    enabled: Boolean(calendar && day && selectedTimeZone),
+  });
+  const requestItems = useMemo(() => cart.map(({ calendar_id, start_at, units: itemUnits }) => ({ calendar_id, start_at, units: itemUnits })), [cart]);
+  const quote = useQuery({ queryKey: ["quote", operatorSlug, JSON.stringify(requestItems)], queryFn: () => api<Quote>(`/public/${operatorSlug}/orders/quote`, json("POST", { items: requestItems })), enabled: cart.length > 0 });
+  const create = useMutation({
+    mutationFn: () => api<Created>(`/public/${operatorSlug}/orders`, { ...json("POST", { items: requestItems, customer: { first_name: first, last_name: last, email, phone: phone || null } }), headers: { "X-Checkout-Key": checkoutKey } }),
+    onSuccess: (result) => {
+      setCreated(result);
+      const suffix = result.access_token ? `?access_token=${encodeURIComponent(result.access_token)}` : "";
+      if (!result.client_secret) navigate(withEmbed(`/booking/${result.public_reference}/confirmation${suffix}`, embed));
+    },
+  });
+
+  if (catalog.isLoading) return <div className="center-state"><div className="spinner" /></div>;
+  if (!catalog.data || !calendar) return <div className="center-state"><div className="state-card"><h1>Calendar unavailable</h1><p>This booking calendar may be inactive or the link is incorrect.</p></div></div>;
+
+  const add = () => {
+    if (!slot) return;
+    setCart([...cart, { calendar_id: calendar.id, start_at: slot.start_at, units, slot }]);
+    setSlot(null);
+    setUnits(1);
+  };
+  const zones = timeZoneOptions(defaultTimeZone);
+
+  return <PublicFrame name={catalog.data.name} embed={embed}>
+    <div style={{ marginBottom: 20 }}><Link to={withEmbed(`/book/${operatorSlug}`, embed)} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#61706d" }}><ArrowLeft size={14} />All experiences</Link></div>
+    <div className="public-hero" style={{ marginBottom: 25 }}><span className="eyebrow">{calendar.category_name || "Online booking"}</span><h1 style={{ fontSize: "clamp(27px,4vw,39px)" }}>{calendar.name}</h1><p>{calendar.description}</p><div className="service-meta" style={{ marginTop: 15, display: "flex", gap: 18 }}><span><Clock3 size={15} />{calendar.duration_minutes} minutes</span>{calendar.location && <span><MapPin size={15} />{calendar.location.name} · {calendar.location.address}</span>}</div></div>
+    {created?.client_secret ? <div className="public-card" style={{ maxWidth: 620 }}><h2>Complete secure payment</h2><PaymentPanel clientSecret={created.client_secret} publicReference={created.public_reference} accessToken={created.access_token} embed={embed} /></div> : <div className="booking-panel">
+      <section className="public-card"><h2>Choose a date and time</h2>
+        <p style={{ fontSize: 12, color: "#78827f", marginTop: -6, marginBottom: 12 }}>Times are shown in your selected timezone. Availability remains governed by the operator's calendar and resources.</p>
+        <label className="field" style={{ marginBottom: 12 }}><span>Time zone</span><select value={selectedTimeZone} onChange={(event) => { setSelectedTimeZone(event.target.value); setSlot(null); }}><option value="" disabled>Select a time zone</option>{zones.map((zone) => <option key={zone} value={zone}>{zone.replaceAll("_", " ")} {zone === defaultTimeZone ? "(operator default)" : ""}</option>)}</select></label>
+        <label className="field" style={{ maxWidth: 220, marginBottom: 17 }}><span>Date</span><input type="date" min={tomorrowInZone(selectedTimeZone)} value={day} onChange={(event) => { setDay(event.target.value); setSlot(null); }} /></label>
+        {availability.isLoading ? <div className="loading">Checking live availability…</div> : availability.error ? <div className="error-banner">{availability.error.message}</div> : <div className="slot-grid">{availability.data?.slots.map((item) => <button key={item.start_at} disabled={!item.available} className={`slot ${slot?.start_at === item.start_at ? "selected" : ""}`} onClick={() => { setSlot(item); setUnits(1); }}>{formatTime(item.start_at, selectedTimeZone)}<span>{item.available ? `${item.max_bookable_units} available` : "Sold out"}</span></button>)}</div>}
+        {availability.data && !availability.data.slots.length && <div className="empty-state"><strong>No times on this date</strong><span>Choose another date to continue.</span></div>}
+        {slot && <div style={{ marginTop: 20, paddingTop: 17, borderTop: "1px solid #e6e9e8" }}><div className="summary-row"><span>Quantity</span><div className="quantity"><button onClick={() => setUnits(Math.max(1, units - 1))}><Minus size={14} /></button><strong>{units}</strong><button onClick={() => setUnits(Math.min(slot.max_bookable_units, units + 1))}><Plus size={14} /></button></div></div><div className="summary-row"><span>Base price</span><strong>{formatMoney(calendar.base_price_minor, calendar.currency)} each</strong></div><button className="button" style={{ width: "100%", marginTop: 12 }} onClick={add}><ShoppingBag size={15} />Add booking</button></div>}
+      </section>
+      <aside className="public-card"><h2>Your booking</h2>{cart.length === 0 ? <p style={{ fontSize: 12, color: "#78827f" }}>Select a time to begin.</p> : <>{cart.map((item, index) => <div key={`${item.start_at}-${index}`} style={{ padding: "10px 0", borderBottom: "1px solid #edf0ef", display: "flex", justifyContent: "space-between", gap: 10 }}><div className="cell-title"><strong>{formatDay(item.start_at, selectedTimeZone)} · {formatTime(item.start_at, selectedTimeZone)}</strong><span>{item.units} × {calendar.name}</span></div><button className="icon-button" onClick={() => setCart(cart.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={14} /></button></div>)}{quote.data && <div style={{ marginTop: 10 }}><div className="summary-row"><span>Subtotal</span><span>{formatMoney(quote.data.subtotal_minor, quote.data.currency)}</span></div><div className="summary-row"><span>Platform Fee &amp; Taxes</span><span>{formatMoney(quote.data.platform_fee_and_taxes_minor, quote.data.currency)}</span></div><div className="summary-row total"><span>Total</span><span>{formatMoney(quote.data.customer_total_minor, quote.data.currency)}</span></div></div>}<form onSubmit={(event: FormEvent) => { event.preventDefault(); create.mutate(); }} style={{ marginTop: 17 }}><div className="form-grid"><label className="field"><span>First name</span><input required value={first} onChange={(event) => setFirst(event.target.value)} /></label><label className="field"><span>Last name</span><input required value={last} onChange={(event) => setLast(event.target.value)} /></label><label className="field full"><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field full"><span>Phone (optional)</span><input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></div>{create.error && <div className="error-banner" style={{ marginTop: 12 }}>{create.error.message}</div>}<button className="button" style={{ width: "100%", marginTop: 15 }} disabled={create.isPending || quote.isLoading}>{create.isPending ? "Reserving inventory…" : "Continue to payment"}</button></form></>}</aside>
+    </div>}
+  </PublicFrame>;
+}
