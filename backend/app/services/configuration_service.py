@@ -40,6 +40,7 @@ from app.schemas.configuration import (
     ResourceCreate,
     ResourceUpdate,
 )
+from app.services.outbox_service import OutboxService
 from app.utils.timezone import local_datetime, require_timezone, wall_time_exists
 
 ModelT = TypeVar("ModelT")
@@ -325,6 +326,12 @@ class ConfigurationService:
             )
         )
         self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=5)
+        except Exception:
+            # The configuration change has already been committed. Keep the
+            # outbox job available for the scheduled worker to retry.
+            pass
 
     def delete_calendar(self, entity_id: uuid.UUID) -> None:
         entity = self.get_calendar(entity_id)
@@ -346,11 +353,12 @@ class ConfigurationService:
     def replace_hours(
         self, calendar_id: uuid.UUID, data: CalendarHoursReplace
     ) -> list[CalendarHour]:
-        self.get_calendar(calendar_id)
+        calendar = self.get_calendar(calendar_id)
         self.db.execute(delete(CalendarHour).where(CalendarHour.calendar_id == calendar_id))
         entities = [CalendarHour(calendar_id=calendar_id, **item.model_dump()) for item in data.hours]
         self.db.add_all(entities)
         self.db.commit()
+        self._queue_ghl_calendar_sync(calendar)
         return self.list_hours(calendar_id)
 
     def list_date_hours(self, calendar_id: uuid.UUID) -> list[CalendarDateHour]:
@@ -366,7 +374,7 @@ class ConfigurationService:
     def replace_date_hours(
         self, calendar_id: uuid.UUID, data: CalendarDateHoursReplace
     ) -> list[CalendarDateHour]:
-        self.get_calendar(calendar_id)
+        calendar = self.get_calendar(calendar_id)
         self.db.execute(
             delete(CalendarDateHour).where(CalendarDateHour.calendar_id == calendar_id)
         )
@@ -374,6 +382,7 @@ class ConfigurationService:
             [CalendarDateHour(calendar_id=calendar_id, **item.model_dump()) for item in data.hours]
         )
         self.db.commit()
+        self._queue_ghl_calendar_sync(calendar)
         return self.list_date_hours(calendar_id)
 
     def list_pushed_slots(self, calendar_id: uuid.UUID) -> list[dict[str, Any]]:
@@ -392,7 +401,7 @@ class ConfigurationService:
 
     def push_slots(self, calendar_id: uuid.UUID, data: PushedSlotsCreate) -> list[dict[str, Any]]:
         """Offer explicit start times. Wall times are interpreted in the operator's zone."""
-        self.get_calendar(calendar_id)
+        calendar = self.get_calendar(calendar_id)
         zone_name = str(self._operator_zone())
         now = datetime.now(UTC)
         starts: set[datetime] = set()
@@ -419,11 +428,12 @@ class ConfigurationService:
             [CalendarPushedSlot(calendar_id=calendar_id, start_at=start) for start in starts]
         )
         self.db.commit()
+        self._queue_ghl_calendar_sync(calendar)
         return self.list_pushed_slots(calendar_id)
 
     def delete_pushed_slot(self, calendar_id: uuid.UUID, slot_id: uuid.UUID) -> None:
         """Stops offering the time. Bookings already made for it are kept."""
-        self.get_calendar(calendar_id)
+        calendar = self.get_calendar(calendar_id)
         result = self.db.execute(
             delete(CalendarPushedSlot).where(
                 CalendarPushedSlot.id == slot_id, CalendarPushedSlot.calendar_id == calendar_id
@@ -432,6 +442,7 @@ class ConfigurationService:
         if result.rowcount != 1:
             raise NotFoundError()
         self.db.commit()
+        self._queue_ghl_calendar_sync(calendar)
 
     def replace_blocks(
         self, calendar_id: uuid.UUID, data: CalendarBlocksReplace

@@ -138,7 +138,13 @@ class CalendarCategory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Calendar(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "calendars"
     __table_args__ = (
-        UniqueConstraint("operator_id", "slug"),
+        Index(
+            "uq_calendars_active_slug",
+            "operator_id",
+            "slug",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         CheckConstraint("duration_minutes > 0", name="duration_positive"),
         CheckConstraint("slot_interval_minutes > 0", name="slot_interval_positive"),
         CheckConstraint(
