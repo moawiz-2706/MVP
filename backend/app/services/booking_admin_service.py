@@ -369,7 +369,10 @@ class BookingAdminService:
                 booking_order_id=order.id,
                 job_type="ghl_cancel_appointment",
                 idempotency_key=f"booking:{booking.id}:ghl_cancel",
-                payload={"booking_id": str(booking.id)},
+                payload={
+                    "booking_id": str(booking.id),
+                    "booking_order_id": str(booking.booking_order_id),
+                },
                 status="pending",
             )
         )
@@ -442,13 +445,8 @@ class BookingAdminService:
             )
         start_at = data.start_at or booking.start_at
         units = data.units or booking.units
-        calendar = self.db.scalar(
-            select(Calendar).where(
-                Calendar.id == booking.calendar_id, Calendar.operator_id == self.operator_id
-            )
-        )
-        if calendar is None:
-            raise NotFoundError("Calendar not found")
+        from app.services.staffing_service import lock_calendar
+        calendar = lock_calendar(self.db, self.operator_id, booking.calendar_id)
         resource_ids = set(
             self.db.scalars(
                 select(BookingResource.resource_id).where(BookingResource.booking_id == booking.id)
@@ -506,7 +504,10 @@ class BookingAdminService:
                 booking_order_id=booking.booking_order_id,
                 job_type="ghl_sync_appointment",
                 idempotency_key=f"booking:{booking.id}:ghl_appointment:update:{booking.updated_at.isoformat()}",
-                payload={"booking_id": str(booking.id)},
+                payload={
+                    "booking_id": str(booking.id),
+                    "booking_order_id": str(booking.booking_order_id),
+                },
                 status="pending",
             )
         )

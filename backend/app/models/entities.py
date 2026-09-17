@@ -277,6 +277,12 @@ class CalendarResource(Base):
 
 class Staff(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "staff"
+    __table_args__ = (
+        Index(
+            "uq_staff_operator_ghl_user", "operator_id", "ghl_user_id",
+            unique=True, postgresql_where=text("ghl_user_id IS NOT NULL"),
+        ),
+    )
 
     operator_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
@@ -287,6 +293,12 @@ class Staff(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ghl_contact_id: Mapped[str | None] = mapped_column(Text)
+    ghl_user_id: Mapped[str | None] = mapped_column(Text)
+    ghl_user_sync_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="not_requested", server_default="not_requested"
+    )
+    ghl_user_last_error: Mapped[str | None] = mapped_column(Text)
+    ghl_permissions_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class StaffHour(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -806,6 +818,7 @@ class OutboxJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "job_type IN ('stripe_create_transfer','ghl_upsert_contact',"
             "'ghl_send_confirmation_email','ghl_booking_reminder','ghl_upsert_staff_contact',"
             "'ghl_staff_assigned_email','ghl_staff_reminder','ghl_staff_unassigned_email',"
+            "'ghl_sync_staff_user',"
             "'stripe_create_refund','stripe_create_transfer_reversal','stripe_reconcile_payment_intent',"
             "'ghl_sync_calendar','ghl_delete_calendar','ghl_sync_appointment','ghl_cancel_appointment')",
             name="job_type_valid",

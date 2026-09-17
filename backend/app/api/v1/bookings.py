@@ -15,6 +15,7 @@ from app.models.entities import Operator
 from app.schemas.booking import (
     BookingDetail,
     BookingListItem,
+    BookingNotificationsResponse,
     BookingNoteCreate,
     BookingNoteRead,
     BookingUpdate,
@@ -22,6 +23,7 @@ from app.schemas.booking import (
 )
 from app.schemas.order import OrderCreateRequest, OrderCreateResponse
 from app.services.booking_admin_service import BookingAdminService
+from app.services.booking_notification_service import BookingNotificationService
 from app.services.order_service import OrderService
 from app.services.outbox_service import OutboxService
 
@@ -29,6 +31,12 @@ logger = logging.getLogger("passport.bookings")
 
 router = APIRouter(tags=["bookings"])
 DB = Annotated[Session, Depends(get_db)]
+
+
+@router.get("/booking-notifications", response_model=BookingNotificationsResponse)
+def booking_notifications(principal: CurrentPrincipal, db: DB):
+    require_permission(principal, Permission.VIEW_BOOKINGS)
+    return BookingNotificationService(db, principal.operator_id).list()
 
 
 @router.get("/bookings", response_model=list[BookingListItem])

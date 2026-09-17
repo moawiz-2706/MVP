@@ -66,6 +66,10 @@ class StaffRead(EntityModel):
     is_active: bool
     hours: list[StaffHourRead]
     upcoming_assignments: int = 0
+    ghl_user_id: str | None = None
+    ghl_user_sync_status: str = "not_requested"
+    ghl_user_last_error: str | None = None
+    ghl_permissions_verified_at: datetime | None = None
 
 
 class StaffAssignmentCreate(BaseModel):
@@ -83,6 +87,7 @@ class StaffAssignmentCreate(BaseModel):
 
 
 class StaffAssignmentUpdate(BaseModel):
+    staff_id: uuid.UUID | None = None
     role: str | None = Field(default=None, max_length=80)
 
     @field_validator("role")

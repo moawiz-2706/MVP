@@ -28,6 +28,7 @@ from app.schemas.availability import (
     ResourceAvailability,
 )
 from app.services.capacity import CapacityInterval, overlaps, reserved_for_interval
+from app.services.staffing_service import readiness_for_interval
 from app.utils.timezone import local_datetime, require_timezone
 
 
@@ -241,6 +242,9 @@ class AvailabilityService:
             inventory_max = min(inventory_max, calendar.max_units_per_booking)
         resource_sufficient = all(detail.sufficient for detail in details)
         reason = None
+        staffing = readiness_for_interval(
+            self.db, calendar.operator_id, calendar.id, start_at, end_at
+        )
         if not calendar.is_active:
             reason = "Calendar is inactive"
         elif not within_hours:
@@ -249,6 +253,8 @@ class AvailabilityService:
             reason = "Requested time is blocked"
         elif not resource_sufficient or units > inventory_max:
             reason = "Insufficient resource inventory"
+        elif not staffing.ready:
+            reason = staffing.reason or "Exactly one active Captain must cover the entire booking"
         return AvailabilityCheckResponse(
             available=reason is None,
             start_at=start_at,

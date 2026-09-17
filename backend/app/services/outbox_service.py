@@ -11,6 +11,7 @@ from app.services.ghl_appointment_service import GHLAppointmentService
 from app.services.ghl_calendar_service import GHLCalendarService
 from app.services.ghl_contact_service import GHLContactService
 from app.services.ghl_email_service import GHLEmailService
+from app.services.ghl_staff_user_service import GHLStaffUserService
 from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.services.stripe_refund_service import StripeRefundService
 from app.services.stripe_transfer_reversal_service import StripeTransferReversalService
@@ -125,6 +126,9 @@ class OutboxService:
             return
         if job.job_type == "ghl_upsert_staff_contact":
             GHLContactService(self.db, job.operator_id).sync_staff(uuid.UUID(payload["staff_id"]))
+            return
+        if job.job_type == "ghl_sync_staff_user":
+            GHLStaffUserService(self.db, job.operator_id).sync(uuid.UUID(payload["staff_id"]))
             return
         if job.job_type == "ghl_staff_assigned_email":
             GHLEmailService(self.db, job.operator_id).send_staff_assigned(

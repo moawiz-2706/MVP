@@ -13,7 +13,15 @@ from datetime import date, time
 
 import pytest
 
-from app.models.entities import Calendar, CalendarDateHour, CalendarHour, Operator
+from app.models.entities import (
+    Calendar,
+    CalendarDateHour,
+    CalendarHour,
+    Operator,
+    Staff,
+    StaffAssignment,
+    StaffHour,
+)
 from app.services.availability_service import AvailabilityService
 from app.utils.timezone import local_datetime
 
@@ -50,6 +58,31 @@ def _calendar(db, op, *, mode: str) -> Calendar:
         availability_mode=mode,
     )
     db.add(cal)
+    db.flush()
+    captain = Staff(operator_id=op.id, name="Test Captain", is_active=True)
+    db.add(captain)
+    db.flush()
+    db.add_all(
+        [
+            StaffHour(
+                staff_id=captain.id,
+                day_of_week=dow,
+                start_time=time(0),
+                end_time=time(23, 59),
+            )
+            for dow in range(7)
+        ]
+    )
+    db.add(
+        StaffAssignment(
+            operator_id=op.id,
+            staff_id=captain.id,
+            calendar_id=cal.id,
+            start_at=_at(date(2027, 6, 1), 0),
+            end_at=_at(date(2027, 8, 1), 0),
+            role="Captain",
+        )
+    )
     db.flush()
     return cal
 

@@ -38,6 +38,13 @@ REQUIRED_SCOPES = {
 }
 
 
+def required_scopes(settings: Settings) -> set[str]:
+    scopes = set(REQUIRED_SCOPES)
+    if settings.ghl_staff_user_sync_enabled:
+        scopes.update({"users.readonly", "users.write"})
+    return scopes
+
+
 def _slugify(value: str) -> str:
     result = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return result[:140] or "rental-operator"
@@ -113,8 +120,9 @@ class GHLAuthService:
         if str(payload.get("userType", "")).lower() != "location":
             raise ValueError("Passport requires a HighLevel Location token")
         granted = set(str(payload.get("scope", "")).split())
-        if not granted or not REQUIRED_SCOPES.issubset(granted):
-            missing = ", ".join(sorted(REQUIRED_SCOPES - granted))
+        required = required_scopes(self.settings)
+        if not granted or not required.issubset(granted):
+            missing = ", ".join(sorted(required - granted))
             raise ValueError(f"Required HighLevel scopes were not granted: {missing}")
         for required in ("access_token", "refresh_token", "userId"):
             if not payload.get(required):

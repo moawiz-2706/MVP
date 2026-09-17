@@ -271,3 +271,27 @@ a { color: inherit; text-decoration: none; }
   .public-card { border: 0; box-shadow: none; }
   .waiver-text { max-height: none; overflow: visible; border: 0; padding: 0; background: #fff; }
 }
+
+
+/* Staffing notifications and GHL ownership controls */
+.sidebar-actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sidebar-actions > a { flex: 1; }
+.notification-wrap { position: relative; }
+.notification-button { position: relative; width: 34px; height: 34px; border: 1px solid #35434e; border-radius: 7px; background: #1b2632; color: #c9d4dc; display: grid; place-items: center; }
+.notification-button:hover { color: white; background: #24333e; }
+.notification-count { position: absolute; right: -6px; top: -7px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: #d66b42; color: white; font-size: 9px; font-weight: 800; display: grid; place-items: center; }
+.notification-popover { position: absolute; right: 0; bottom: 43px; width: min(360px, calc(100vw - 28px)); max-height: 410px; overflow: auto; padding: 10px; border: 1px solid #dbe1e5; border-radius: 10px; background: white; box-shadow: 0 16px 38px rgba(20,31,40,.2); color: var(--ink); z-index: 50; }
+.notification-heading { display: flex; justify-content: space-between; gap: 10px; padding: 4px 5px 9px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.notification-heading span { color: var(--muted); font-size: 10.5px; }
+.notification-item { width: 100%; display: grid; gap: 3px; padding: 10px 6px; border: 0; border-bottom: 1px solid #eef0f2; background: white; text-align: left; color: #667085; font-size: 10.5px; }
+.notification-item:hover { background: #f8fbfa; }
+.notification-item-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: #26323c; font-size: 12px; }
+.notification-item .badge { flex: 0 0 auto; }
+.notification-error { color: var(--danger); background: #fef0ef; border-radius: 6px; padding: 8px; margin: 8px 0; font-size: 11px; }
+.staff-ghl-error { color: var(--danger) !important; }
+.edit-booking-form { display: grid; gap: 10px; padding: 11px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc; }
+.staff-row-assignment { grid-template-columns: minmax(0, 1fr) 130px 150px 32px; }
+@media (max-width: 520px) { .staff-row-assignment { grid-template-columns: 1fr; } }
+
+.notification-badges { display: inline-flex; align-items: center; gap: 4px; }
+.badge.new { color: #155e75; background: #e0f2fe; }

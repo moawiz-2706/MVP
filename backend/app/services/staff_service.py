@@ -192,7 +192,10 @@ class StaffService:
             self._queue_job(
                 "ghl_sync_appointment",
                 f"booking:{booking.id}:ghl_appointment:staff:{uuid.uuid4().hex}",
-                {"booking_id": str(booking.id)},
+                {
+                    "booking_id": str(booking.id),
+                    "booking_order_id": str(booking.booking_order_id),
+                },
             )
         self.db.commit()
         try:
@@ -210,6 +213,17 @@ class StaffService:
             {"staff_id": str(staff.id)},
         )
 
+    def _queue_staff_user_sync(self, staff: Staff, *, manual_review: bool = False) -> None:
+        if not get_settings().ghl_staff_user_sync_enabled:
+            return
+        if manual_review:
+            staff.ghl_user_sync_status = "manual_review"
+        self._queue_job(
+            "ghl_sync_staff_user",
+            f"staff:{staff.id}:ghl_user:{uuid.uuid4().hex}",
+            {"staff_id": str(staff.id), "manual_review": manual_review},
+        )
+
     def create_staff(self, data: StaffCreate) -> dict[str, Any]:
         staff = Staff(operator_id=self.operator_id, **data.model_dump(exclude={"hours"}))
         self.db.add(staff)
@@ -217,6 +231,7 @@ class StaffService:
         self._replace_hours(staff.id, data.hours)
         if staff.email:
             self._queue_contact_sync(staff)
+        self._queue_staff_user_sync(staff)
         self.db.commit()
         return self.get_staff(staff.id)
 
@@ -239,6 +254,7 @@ class StaffService:
         for key, value in values.items():
             setattr(staff, key, value)
         if values.get("is_active") is False:
+            from app.services.staffing_service import lock_calendars
             calendar_ids.update(
                 self.db.scalars(
                     select(StaffAssignment.calendar_id).where(
@@ -247,6 +263,7 @@ class StaffService:
                     )
                 )
             )
+            lock_calendars(self.db, self.operator_id, calendar_ids)
             self.db.execute(
                 delete(StaffAssignment).where(
                     StaffAssignment.staff_id == staff.id,
@@ -255,6 +272,8 @@ class StaffService:
             )
         if contact_changed and staff.email:
             self._queue_contact_sync(staff)
+        if values or data.hours is not None:
+            self._queue_staff_user_sync(staff, manual_review=values.get("is_active") is False)
         # Existing assignments are kept even if new hours no longer cover them;
         # hours gate new assignments only.
         if data.hours is not None:
@@ -277,8 +296,11 @@ class StaffService:
                 )
             )
         )
+        from app.services.staffing_service import lock_calendars
+        lock_calendars(self.db, self.operator_id, calendar_ids)
         staff.deleted_at = now
         staff.is_active = False
+        self._queue_staff_user_sync(staff, manual_review=True)
         self.db.execute(
             delete(StaffAssignment).where(
                 StaffAssignment.staff_id == staff.id, StaffAssignment.end_at > now
@@ -420,9 +442,15 @@ class StaffService:
         return result
 
     def assign(self, data: StaffAssignmentCreate) -> dict[str, Any]:
-        calendar = self._calendar(data.calendar_id)
+        from app.services.staffing_service import ensure_no_overlapping_captain, lock_calendar, is_captain
+
+        calendar = lock_calendar(self.db, self.operator_id, data.calendar_id)
         end_at = data.start_at + timedelta(minutes=calendar.duration_minutes)
         staff = self._staff(data.staff_id, lock=True)
+        if is_captain(data.role):
+            ensure_no_overlapping_captain(
+                self.db, self.operator_id, calendar.id, data.start_at, end_at
+            )
         reason = self._unavailable_reason(
             staff,
             self._hours([staff.id]).get(staff.id, []),
@@ -470,16 +498,47 @@ class StaffService:
     def update_assignment(
         self, assignment_id: uuid.UUID, data: StaffAssignmentUpdate
     ) -> dict[str, Any]:
-        assignment, staff_name = self._assignment(assignment_id)
-        assignment.role = data.role
+        from app.services.staffing_service import ensure_no_overlapping_captain, is_captain, lock_calendar
+
+        assignment, _ = self._assignment(assignment_id)
+        calendar = lock_calendar(self.db, self.operator_id, assignment.calendar_id)
+        current_staff = self._staff(assignment.staff_id, lock=True)
+        target_staff = (
+            current_staff
+            if data.staff_id is None or data.staff_id == current_staff.id
+            else self._staff(data.staff_id, lock=True)
+        )
+        role = data.role if "role" in data.model_fields_set else assignment.role
+        overlap = None
+        if target_staff.id != assignment.staff_id:
+            overlap = self._overlaps([target_staff.id], assignment.start_at, assignment.end_at).get(target_staff.id)
+        reason = self._unavailable_reason(
+            target_staff,
+            self._hours([target_staff.id]).get(target_staff.id, []),
+            overlap,
+            assignment.start_at,
+            assignment.end_at,
+            self._zone(),
+        )
+        if reason:
+            raise ConflictError(reason)
+        if is_captain(role):
+            ensure_no_overlapping_captain(
+                self.db, self.operator_id, calendar.id, assignment.start_at, assignment.end_at,
+                exclude_assignment_id=assignment.id,
+            )
+        assignment.staff_id = target_staff.id
+        assignment.role = role
         self.db.commit()
-        self._queue_calendar_sync(assignment.calendar_id)
-        self._queue_appointment_sync_for_calendars({assignment.calendar_id})
-        return self._assignment_payload(assignment, staff_name)
+        self._queue_calendar_sync(calendar.id)
+        self._queue_appointment_sync_for_calendars({calendar.id})
+        return self._assignment_payload(assignment, target_staff.name)
 
     def unassign(self, assignment_id: uuid.UUID) -> None:
         """Remove staff from a slot and, for an upcoming slot, email them about it."""
         assignment, _ = self._assignment(assignment_id)
+        from app.services.staffing_service import lock_calendar
+        lock_calendar(self.db, self.operator_id, assignment.calendar_id)
         staff = self.db.get(Staff, assignment.staff_id)
         if staff and staff.email and staff.deleted_at is None and assignment.start_at > datetime.now(UTC):
             calendar = self.db.get(Calendar, assignment.calendar_id)

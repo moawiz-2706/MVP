@@ -24,6 +24,7 @@ from app.models.entities import (
 from app.services.ghl_calendar_service import GHLCalendarService
 from app.services.ghl_client import GHLAPIError, GHLClient
 from app.services.ghl_contact_service import GHLContactService
+from app.services.ghl_staff_user_service import GHLStaffUserService
 
 
 class GHLAppointmentService:
@@ -126,6 +127,10 @@ class GHLAppointmentService:
             # A cancellation may race the initial appointment job. There is no
             # remote appointment to cancel, and creating a cancelled event is wrong.
             return None
+        if mapping is not None and mapping.ghl_event_id is None and mapping.status == "manual_review":
+            raise RuntimeError(
+                "HighLevel appointment create outcome is unknown; reconcile the remote event before retrying"
+            )
         if mapping is None:
             mapping = GHLAppointmentMapping(
                 operator_id=self.operator_id,
@@ -139,6 +144,24 @@ class GHLAppointmentService:
             self.db.refresh(order)
         if not order.ghl_contact_id:
             raise RuntimeError("HighLevel contact is required for an appointment")
+        captain_user_id = None
+        from app.services.staffing_service import readiness_for_booking
+
+        readiness = readiness_for_booking(self.db, booking)
+        if readiness.ready and readiness.assignment_id:
+            captain_staff_id = self.db.scalar(
+                select(StaffAssignment.staff_id).where(StaffAssignment.id == readiness.assignment_id)
+            )
+            if captain_staff_id:
+                captain_user_id = GHLStaffUserService(
+                    self.db, self.operator_id
+                ).verified_active_user_id(captain_staff_id)
+            if captain_user_id:
+                GHLContactService(self.db, self.operator_id).sync_booking_owner(
+                    order.id, captain_user_id
+                )
+        else:
+            GHLContactService(self.db, self.operator_id).clear_managed_owner(order.id)
         staff_names = list(
             self.db.scalars(
                 select(Staff.name)
@@ -165,6 +188,8 @@ class GHLAppointmentService:
             "ignoreFreeSlotValidation": True,
             "toNotify": False,
         }
+        if captain_user_id:
+            body["assignedUserId"] = captain_user_id
         payload_hash = hashlib.sha256(
             json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -207,6 +232,12 @@ class GHLAppointmentService:
         except Exception as exc:
             mapping.status = "failed"
             mapping.last_error = str(exc)[:2000]
+            if mapping.ghl_event_id is None:
+                mapping.status = "manual_review"
+                mapping.last_error = (
+                    "HighLevel appointment create outcome is unknown; reconcile the remote event "
+                    "before retrying"
+                )
             self.db.commit()
             raise
 

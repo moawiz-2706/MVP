@@ -35,6 +35,7 @@ from app.schemas.order import (
 from app.services.availability_service import AvailabilityService
 from app.services.capacity import CapacityInterval, batch_fits
 from app.services.public_access_service import PublicAccessService
+from app.services.staffing_service import lock_calendars
 from app.services.stripe_payment_service import StripePaymentService
 from app.utils.identifiers import public_reference
 from app.utils.money import PaymentBreakdown, calculate_payment
@@ -269,7 +270,8 @@ class OrderService:
             if payment is None:
                 raise ConflictError("Existing checkout is missing its payment record")
             return self._existing_response(existing, payment, request_hash)
-        # Reads above started SQLAlchemy's autobegin transaction; lock and write in it.
+        # Serialize booking writes with Captain assignment writes on calendar rows.
+        lock_calendars(self.db, operator.id, [item.calendar_id for item in request.items])
         prepared = self._prepare(operator, request.items)
         self._lock_resources(prepared)
         # Recalculate only after locks are held. Other reservations cannot lock/commit
@@ -457,7 +459,10 @@ class OrderService:
                 booking_order_id=order_id,
                 job_type="ghl_sync_appointment",
                     idempotency_key=f"booking:{booking.id}:ghl_appointment:create",
-                payload={"booking_id": str(booking.id)},
+                payload={
+                    "booking_id": str(booking.id),
+                    "booking_order_id": str(order_id),
+                },
                 status="pending",
             )
             for booking in bookings

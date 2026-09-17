@@ -103,3 +103,23 @@ class BookingUpdate(BaseModel):
         if self.start_at is None and self.units is None:
             raise ValueError("At least one field must be supplied")
         return self
+
+
+class BookingNotificationItem(BaseModel):
+    booking_id: uuid.UUID
+    calendar_id: uuid.UUID
+    calendar_name: str
+    customer_name: str
+    start_at: datetime
+    end_at: datetime
+    units: int
+    status: str
+    created_at: datetime
+    assignment_status: str
+    captain_name: str | None
+    reason: str | None
+
+
+class BookingNotificationsResponse(BaseModel):
+    items: list[BookingNotificationItem]
+    pending_count: int

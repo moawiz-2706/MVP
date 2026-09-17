@@ -24,6 +24,9 @@ from app.models.entities import (
     CalendarResource,
     Operator,
     Resource,
+    Staff,
+    StaffAssignment,
+    StaffHour,
 )
 from app.schemas.configuration import PushedSlotsCreate, PushedSlotWrite
 from app.services.availability_service import AvailabilityService
@@ -63,6 +66,31 @@ def _setup(db, *, duration: int = 180):
         availability_mode="pushed",
     )
     db.add(cal)
+    db.flush()
+    captain = Staff(operator_id=op.id, name="Test Captain", is_active=True)
+    db.add(captain)
+    db.flush()
+    db.add_all(
+        [
+            StaffHour(
+                staff_id=captain.id,
+                day_of_week=dow,
+                start_time=time(0),
+                end_time=time(23, 59),
+            )
+            for dow in range(7)
+        ]
+    )
+    db.add(
+        StaffAssignment(
+            operator_id=op.id,
+            staff_id=captain.id,
+            calendar_id=cal.id,
+            start_at=_at(0),
+            end_at=_at(0, day=DAY + timedelta(days=1)),
+            role="Captain",
+        )
+    )
     db.flush()
     return op, cal
 
@@ -234,8 +262,11 @@ def test_dashboard_shows_open_pushed_slot_without_bookings(db) -> None:
     _push(db, cal, _at(9))
     db.commit()
     slots = BookingAdminService(db, op.id).slots(_at(0), _at(23))
-    assert len(slots) == 1
-    entry = slots[0]["calendars"][0]
+    pushed_entries = [
+        entry for slot in slots for entry in slot["calendars"] if entry["pushed"]
+    ]
+    assert len(pushed_entries) == 1
+    entry = pushed_entries[0]
     assert entry["pushed"] is True
     assert entry["bookings"] == []
     assert entry["end_at"] == _at(12)

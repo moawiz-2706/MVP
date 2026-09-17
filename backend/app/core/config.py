@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     outbox_lease_minutes: int = Field(default=15, ge=1, le=60)
     outbox_max_attempts: int = Field(default=12, ge=1, le=100)
     ghl_calendar_sync_enabled: bool = False
+    # Enable only after installing users.readonly/users.write scopes and applying migration 012.
+    ghl_staff_user_sync_enabled: bool = False
     cron_secret: str = ""
 
     @field_validator("cors_origins", mode="before")

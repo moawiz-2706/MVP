@@ -26,6 +26,9 @@ from app.models.entities import (
     CalendarResource,
     Operator,
     Resource,
+    Staff,
+    StaffAssignment,
+    StaffHour,
 )
 from app.services.availability_service import AvailabilityService
 from app.utils.timezone import local_datetime
@@ -68,6 +71,32 @@ def _calendar(db, op, *, duration=180, active=True, deleted=False) -> Calendar:
         db.add(
             CalendarHour(
                 calendar_id=cal.id, day_of_week=dow, start_time=time(8), end_time=time(18)
+            )
+        )
+    db.flush()
+    if active and not deleted:
+        captain = Staff(operator_id=op.id, name="Test Captain", is_active=True)
+        db.add(captain)
+        db.flush()
+        db.add_all(
+            [
+                StaffHour(
+                    staff_id=captain.id,
+                    day_of_week=dow,
+                    start_time=time(0),
+                    end_time=time(23, 59),
+                )
+                for dow in range(7)
+            ]
+        )
+        db.add(
+            StaffAssignment(
+                operator_id=op.id,
+                staff_id=captain.id,
+                calendar_id=cal.id,
+                start_at=local_datetime(DAY, time(0), TZ),
+                end_at=local_datetime(DAY + timedelta(days=1), time(0), TZ),
+                role="Captain",
             )
         )
     db.flush()

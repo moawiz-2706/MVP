@@ -107,6 +107,11 @@ class GHLContactService:
         if normalized_phone:
             fields["phone"] = normalized_phone
         if contact_id:
+            current = self.client.request("GET", f"/contacts/{contact_id}", version="v3")
+            current_contact = current.get("contact", current) if isinstance(current, dict) else {}
+            current_email = current_contact.get("email") if isinstance(current_contact, dict) else None
+            if current_email and email and str(current_email).casefold() != email.casefold():
+                raise RuntimeError("HighLevel contact email is immutable; manual reconciliation is required")
             result = self.client.request(
                 "PUT", f"/contacts/{contact_id}", version="v3", json=fields
             )
@@ -153,3 +158,31 @@ class GHLContactService:
         if len(candidates) > 1:
             raise RuntimeError("Multiple exact HighLevel contacts matched; refusing unsafe update")
         return str(candidates[0]["id"]) if candidates else None
+
+    def sync_booking_owner(self, order_id: uuid.UUID, user_id: str) -> str:
+        """Set Passport Captain ownership, refusing global-owner conflicts."""
+        order = self.db.scalar(select(BookingOrder).where(BookingOrder.id == order_id, BookingOrder.operator_id == self.operator_id))
+        if order is None or not order.ghl_contact_id:
+            raise RuntimeError("HighLevel contact is required before assigning a Captain")
+        current = self.client.request("GET", f"/contacts/{order.ghl_contact_id}", version="v3")
+        contact = current.get("contact", current) if isinstance(current, dict) else {}
+        assigned = contact.get("assignedTo") if isinstance(contact, dict) else None
+        if assigned and str(assigned) != user_id:
+            raise RuntimeError("HighLevel contact is already owned by another user; manual review is required")
+        if str(assigned or "") != user_id:
+            self.client.request("PUT", f"/contacts/{order.ghl_contact_id}", version="v3", json={"assignedTo": user_id})
+        return order.ghl_contact_id
+
+    def clear_managed_owner(self, order_id: uuid.UUID) -> None:
+        """Clear only an owner that is currently linked to Passport staff."""
+        order = self.db.scalar(select(BookingOrder).where(BookingOrder.id == order_id, BookingOrder.operator_id == self.operator_id))
+        if order is None or not order.ghl_contact_id:
+            return
+        current = self.client.request("GET", f"/contacts/{order.ghl_contact_id}", version="v3")
+        contact = current.get("contact", current) if isinstance(current, dict) else {}
+        assigned = contact.get("assignedTo") if isinstance(contact, dict) else None
+        if not assigned:
+            return
+        managed = self.db.scalar(select(Staff.id).where(Staff.operator_id == self.operator_id, Staff.ghl_user_id == str(assigned)))
+        if managed is not None:
+            self.client.request("PUT", f"/contacts/{order.ghl_contact_id}", version="v3", json={"assignedTo": None})
