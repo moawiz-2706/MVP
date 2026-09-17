@@ -187,7 +187,10 @@ class GHLStaffUserService:
         result = self.client.request(
             "GET",
             "/users/search",
-            version="v3",
+            # The documented search endpoint remains on the legacy version and
+            # supports OAuth/sub-account tokens; the v3 filter-by-email endpoint
+            # is agency-token-only.
+            version="2021-07-28",
             params={
                 "companyId": company_id,
                 "locationId": location_id,

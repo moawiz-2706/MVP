@@ -55,9 +55,12 @@ def list_staff(principal: CurrentPrincipal, db: DB):
 @router.post("/staff", response_model=StaffRead, status_code=status.HTTP_201_CREATED)
 def create_staff(data: StaffCreate, principal: CurrentPrincipal, db: DB, settings: AppSettings):
     require_permission(principal, Permission.MANAGE_CONFIGURATION)
-    result = service(db, principal).create_staff(data)
+    staff_service = service(db, principal)
+    result = staff_service.create_staff(data)
     _send_now(db, settings)
-    return result
+    # Inline outbox processing may have persisted the GHL user ID or a clear
+    # failure/manual-review status; return the refreshed record to the UI.
+    return staff_service.get_staff(result["id"])
 
 
 @router.get("/staff/{staff_id}", response_model=StaffRead)
@@ -70,9 +73,10 @@ def update_staff(
     data: StaffUpdate, staff_id: uuid.UUID, principal: CurrentPrincipal, db: DB, settings: AppSettings
 ):
     require_permission(principal, Permission.MANAGE_CONFIGURATION)
-    result = service(db, principal).update_staff(staff_id, data)
+    staff_service = service(db, principal)
+    result = staff_service.update_staff(staff_id, data)
     _send_now(db, settings)
-    return result
+    return staff_service.get_staff(result["id"])
 
 
 @router.delete("/staff/{staff_id}", status_code=status.HTTP_204_NO_CONTENT)

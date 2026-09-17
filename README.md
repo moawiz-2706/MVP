@@ -40,9 +40,11 @@ deployed before this migration is applied, `GET /api/v1/booking-notifications`
 and `POST /api/v1/staff` can fail with HTTP 500 because PostgreSQL cannot find
 the new `staff.ghl_user_*` columns.
 
-Set `GHL_STAFF_USER_SYNC_ENABLED=false` during the initial migration rollout.
-After the migration and deployment are healthy, add `users.readonly` and
-`users.write` to the HighLevel Marketplace app, reinstall or reauthorize the
-app in each sub-account, and then set `GHL_STAFF_USER_SYNC_ENABLED=true`.
-Existing staff records are not automatically assigned a HighLevel login until
-they are retried from the Staff page.
+Keep `GHL_STAFF_USER_SYNC_ENABLED=true` after the migration is applied and the
+HighLevel Marketplace app has `users.readonly` and `users.write`. Reinstall or
+reauthorize the app in each sub-account so the installation stores those
+scopes. New staff with an email address are then provisioned automatically and
+the created HighLevel user ID is returned in the Staff response. Existing staff
+records can be provisioned with the Retry GHL button on the Staff page. If the
+scopes are missing, the staff record remains local and shows a visible
+manual-review error instead of silently failing.
