@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -12,6 +13,8 @@ from app.models.entities import (
     DepartureLocation,
     GHLCalendarMapping,
     Operator,
+    Staff,
+    StaffAssignment,
 )
 from app.services.ghl_client import GHLAPIError, GHLClient
 
@@ -54,7 +57,34 @@ class GHLCalendarService:
                 raise
             self.client.request("POST", path, version="v3", json=body)
 
-    def _find_remote_calendar(self, operator: Operator, passport_id: uuid.UUID) -> str | None:
+    def _calendar_description(self, calendar: Calendar) -> str:
+        staff_names = list(
+            self.db.scalars(
+                select(Staff.name)
+                .join(StaffAssignment, StaffAssignment.staff_id == Staff.id)
+                .where(
+                    StaffAssignment.operator_id == self.operator_id,
+                    StaffAssignment.calendar_id == calendar.id,
+                    StaffAssignment.end_at > datetime.now(UTC),
+                    Staff.deleted_at.is_(None),
+                )
+                .distinct()
+                .order_by(Staff.name)
+            )
+        )
+        description = calendar.description or ""
+        if not staff_names:
+            return description
+        staff_section = "Assigned staff:\n" + "\n".join(
+            f"- {name}" for name in staff_names
+        )
+        return f"{description}\n\n{staff_section}" if description else staff_section
+
+    def _find_remote_calendar(
+        self,
+        operator: Operator,
+        calendar: Calendar,
+    ) -> str | None:
         result = self.client.request(
             "GET",
             "/calendars/",
@@ -62,9 +92,13 @@ class GHLCalendarService:
             params={"locationId": operator.ghl_location_id},
         )
         calendars = result.get("calendars", []) if isinstance(result, dict) else []
-        marker = f"Passport calendar: {passport_id}"
         for remote in calendars:
-            if isinstance(remote, dict) and remote.get("description") == marker and remote.get("id"):
+            if (
+                isinstance(remote, dict)
+                and remote.get("name") == calendar.name
+                and (remote.get("description") or "") == self._calendar_description(calendar)
+                and remote.get("id")
+            ):
                 return str(remote["id"])
         return None
 
@@ -100,9 +134,9 @@ class GHLCalendarService:
             self.db.add(mapping)
             self.db.flush()
         common_body = {
-            "name": f"(PASSPORT) {calendar.name}",
+            "name": calendar.name,
             "isActive": calendar.is_active,
-            "description": f"Passport calendar: {calendar.id}",
+            "description": self._calendar_description(calendar),
             "locationConfigurations": (
                 [
                     {
@@ -117,6 +151,8 @@ class GHLCalendarService:
             "slotDurationUnit": "mins",
             "slotInterval": calendar.slot_interval_minutes,
             "slotIntervalUnit": "mins",
+            "isLivePaymentMode": False,
+            "eventTitle": "{{contact.name}}",
             "allowReschedule": False,
             "allowCancellation": False,
         }
@@ -141,7 +177,7 @@ class GHLCalendarService:
                     mapping.ghl_calendar_id = None
                     self.db.flush()
             if remote_id is None:
-                recovered_id = self._find_remote_calendar(operator, calendar.id)
+                recovered_id = self._find_remote_calendar(operator, calendar)
                 if recovered_id:
                     remote_id = recovered_id
                 else:

@@ -6,10 +6,12 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Calendar,
     DepartureLocation,
+    GHLCalendarMapping,
     Operator,
     OutboxJob,
     Staff,
@@ -23,6 +25,7 @@ from app.schemas.staff import (
     StaffHourWrite,
     StaffUpdate,
 )
+from app.services.outbox_service import OutboxService
 from app.utils.timezone import require_timezone
 
 
@@ -141,6 +144,38 @@ class StaffService:
             )
         )
 
+    def _queue_calendar_sync(self, calendar_id: uuid.UUID) -> None:
+        if not get_settings().ghl_calendar_sync_enabled:
+            return
+        mapping = self.db.scalar(
+            select(GHLCalendarMapping).where(
+                GHLCalendarMapping.operator_id == self.operator_id,
+                GHLCalendarMapping.calendar_id == calendar_id,
+            )
+        )
+        if mapping is None:
+            mapping = GHLCalendarMapping(
+                operator_id=self.operator_id,
+                calendar_id=calendar_id,
+                desired_revision=1,
+                status="pending",
+            )
+            self.db.add(mapping)
+        else:
+            mapping.desired_revision += 1
+            mapping.status = "pending"
+        self._queue_job(
+            "ghl_sync_calendar",
+            f"calendar:{calendar_id}:revision:{mapping.desired_revision}",
+            {"calendar_id": str(calendar_id)},
+        )
+        self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=5)
+        except Exception:
+            # The change is committed; the scheduled worker can retry the job.
+            pass
+
     def _queue_contact_sync(self, staff: Staff) -> None:
         # Every profile change gets its own job so the latest details are pushed.
         self._queue_job(
@@ -162,12 +197,30 @@ class StaffService:
     def update_staff(self, staff_id: uuid.UUID, data: StaffUpdate) -> dict[str, Any]:
         staff = self._staff(staff_id)
         values = data.model_dump(exclude_unset=True, exclude={"hours"})
+        calendar_ids: set[uuid.UUID] = set()
         contact_changed = any(
             key in values and values[key] != getattr(staff, key) for key in ("name", "email", "phone")
         )
+        if values.get("name") != staff.name and "name" in values:
+            calendar_ids.update(
+                self.db.scalars(
+                    select(StaffAssignment.calendar_id).where(
+                        StaffAssignment.staff_id == staff.id,
+                        StaffAssignment.end_at > datetime.now(UTC),
+                    )
+                )
+            )
         for key, value in values.items():
             setattr(staff, key, value)
         if values.get("is_active") is False:
+            calendar_ids.update(
+                self.db.scalars(
+                    select(StaffAssignment.calendar_id).where(
+                        StaffAssignment.staff_id == staff.id,
+                        StaffAssignment.end_at > datetime.now(UTC),
+                    )
+                )
+            )
             self.db.execute(
                 delete(StaffAssignment).where(
                     StaffAssignment.staff_id == staff.id,
@@ -181,12 +234,22 @@ class StaffService:
         if data.hours is not None:
             self._replace_hours(staff.id, data.hours)
         self.db.commit()
+        for calendar_id in calendar_ids:
+            self._queue_calendar_sync(calendar_id)
         return self.get_staff(staff.id)
 
     def delete_staff(self, staff_id: uuid.UUID) -> None:
         """Soft-delete. Upcoming assignments are released; past ones stay as history."""
         staff = self._staff(staff_id, lock=True)
         now = datetime.now(UTC)
+        calendar_ids = set(
+            self.db.scalars(
+                select(StaffAssignment.calendar_id).where(
+                    StaffAssignment.staff_id == staff.id,
+                    StaffAssignment.end_at > now,
+                )
+            )
+        )
         staff.deleted_at = now
         staff.is_active = False
         self.db.execute(
@@ -195,6 +258,8 @@ class StaffService:
             )
         )
         self.db.commit()
+        for calendar_id in calendar_ids:
+            self._queue_calendar_sync(calendar_id)
 
     # --- Assignments ----------------------------------------------------------
 
@@ -357,6 +422,7 @@ class StaffService:
                 {"assignment_id": str(assignment.id)},
             )
         self.db.commit()
+        self._queue_calendar_sync(calendar.id)
         return self._assignment_payload(assignment, staff.name)
 
     def _assignment(self, assignment_id: uuid.UUID) -> tuple[StaffAssignment, str]:
@@ -378,6 +444,7 @@ class StaffService:
         assignment, staff_name = self._assignment(assignment_id)
         assignment.role = data.role
         self.db.commit()
+        self._queue_calendar_sync(assignment.calendar_id)
         return self._assignment_payload(assignment, staff_name)
 
     def unassign(self, assignment_id: uuid.UUID) -> None:
@@ -407,3 +474,4 @@ class StaffService:
             )
         self.db.delete(assignment)
         self.db.commit()
+        self._queue_calendar_sync(assignment.calendar_id)
