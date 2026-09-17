@@ -366,6 +366,37 @@ class ConfigurationService:
             # The configuration change has already been committed. Keep the
             # outbox job available for the scheduled worker to retry.
             pass
+        self._queue_ghl_appointment_sync(calendar.id)
+
+    def _queue_ghl_appointment_sync(self, calendar_id: uuid.UUID) -> None:
+        if not get_settings().ghl_calendar_sync_enabled:
+            return
+        bookings = self.db.scalars(
+            select(Booking).where(
+                Booking.operator_id == self.operator_id,
+                Booking.calendar_id == calendar_id,
+                Booking.status.not_in(("cancelled", "failed")),
+                Booking.end_at > datetime.now(UTC),
+            )
+        )
+        for booking in bookings:
+            self.db.add(
+                OutboxJob(
+                    operator_id=self.operator_id,
+                    booking_order_id=booking.booking_order_id,
+                    job_type="ghl_sync_appointment",
+                    idempotency_key=f"booking:{booking.id}:ghl_appointment:calendar:{uuid.uuid4().hex}",
+                    payload={"booking_id": str(booking.id)},
+                    status="pending",
+                )
+            )
+        self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=20)
+        except Exception:
+            # The local calendar change is committed; the appointment job stays
+            # queued for retry if HighLevel is unavailable.
+            pass
 
     def delete_calendar(self, entity_id: uuid.UUID) -> None:
         entity = self.get_calendar(entity_id)
@@ -692,4 +723,5 @@ class ConfigurationService:
             [CalendarResource(calendar_id=calendar_id, **item.model_dump()) for item in data.resources]
         )
         self.db.commit()
+        self._queue_ghl_appointment_sync(calendar_id)
         return self.list_calendar_resources(calendar_id)

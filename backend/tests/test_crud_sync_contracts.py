@@ -58,6 +58,23 @@ def test_appointment_title_handles_unassigned_staff() -> None:
     )
 
 
+def test_appointment_status_maps_passport_booking_states() -> None:
+    states = {
+        "pending_payment": "new",
+        "confirmed": "confirmed",
+        "cancelled": "cancelled",
+        "completed": "completed",
+        "no_show": "noshow",
+    }
+    for passport_status, ghl_status in states.items():
+        assert (
+            GHLAppointmentService._appointment_status(
+                SimpleNamespace(status=passport_status)
+            )
+            == ghl_status
+        )
+
+
 def test_booking_update_rejects_terminal_booking() -> None:
     service = BookingAdminService.__new__(BookingAdminService)
     service.operator_id = SimpleNamespace()

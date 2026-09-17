@@ -12,15 +12,17 @@ from app.core.config import get_settings
 from app.models.entities import (
     Booking,
     BookingOrder,
+    BookingResource,
     Calendar,
     GHLAppointmentMapping,
     GHLCalendarMapping,
     Operator,
+    Resource,
     Staff,
     StaffAssignment,
 )
 from app.services.ghl_calendar_service import GHLCalendarService
-from app.services.ghl_client import GHLClient
+from app.services.ghl_client import GHLAPIError, GHLClient
 from app.services.ghl_contact_service import GHLContactService
 
 
@@ -38,13 +40,55 @@ class GHLAppointmentService:
         staff_names: list[str] | tuple[str, ...] = (),
     ) -> str:
         contact_name = " ".join(
-            part
-            for part in (order.customer_first_name, order.customer_last_name)
-            if part
+            part for part in (order.customer_first_name, order.customer_last_name) if part
         ).strip()
         base_unit_price = Decimal(booking.base_price_minor) / Decimal(100)
         assigned_staff = ", ".join(staff_names) if staff_names else "Unassigned"
-        return f"{contact_name} – {order.currency.upper()} {base_unit_price:,.2f} and {assigned_staff}"
+        return (
+            f"{contact_name} – {order.currency.upper()} {base_unit_price:,.2f}"
+            f" and {assigned_staff}"
+        )
+
+    def _appointment_description(
+        self,
+        booking: Booking,
+        order: BookingOrder,
+        calendar: Calendar,
+        staff_names: list[str],
+    ) -> str:
+        resources = [
+            f"{name} × {quantity}"
+            for name, quantity in self.db.execute(
+                select(Resource.name, BookingResource.quantity)
+                .join(BookingResource, BookingResource.resource_id == Resource.id)
+                .where(BookingResource.booking_id == booking.id)
+                .order_by(Resource.name)
+            )
+        ]
+        lines = [
+            f"Passport booking: {booking.id}",
+            f"Reference: {order.public_reference}",
+            f"Service: {calendar.name}",
+            f"Customer email: {order.customer_email}",
+            f"Customer phone: {order.customer_phone or 'Not provided'}",
+            f"Status: {booking.status}",
+            f"Quantity: {booking.units}",
+            f"Base unit price: {order.currency.upper()} {booking.base_price_minor / 100:,.2f}",
+            "Assigned staff: " + (", ".join(staff_names) if staff_names else "Unassigned"),
+            "Resources: " + (", ".join(resources) if resources else "None"),
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _appointment_status(booking: Booking) -> str:
+        return {
+            "pending_payment": "new",
+            "confirmed": "confirmed",
+            "cancelled": "cancelled",
+            "completed": "completed",
+            "no_show": "noshow",
+            "failed": "invalid",
+        }.get(booking.status, "confirmed")
 
     def sync(self, booking_id: uuid.UUID) -> str | None:
         if not self.settings.ghl_calendar_sync_enabled:
@@ -71,11 +115,17 @@ class GHLAppointmentService:
         if calendar_mapping is None:
             raise RuntimeError("GHL calendar mapping was not created")
         mapping = self.db.scalar(
-            select(GHLAppointmentMapping).where(
+            select(GHLAppointmentMapping)
+            .where(
                 GHLAppointmentMapping.operator_id == self.operator_id,
                 GHLAppointmentMapping.booking_id == booking.id,
-            ).with_for_update()
+            )
+            .with_for_update()
         )
+        if booking.status == "cancelled" and mapping is None:
+            # A cancellation may race the initial appointment job. There is no
+            # remote appointment to cancel, and creating a cancelled event is wrong.
+            return None
         if mapping is None:
             mapping = GHLAppointmentMapping(
                 operator_id=self.operator_id,
@@ -108,10 +158,10 @@ class GHLAppointmentService:
             "locationId": operator.ghl_location_id,
             "contactId": order.ghl_contact_id,
             "title": self._appointment_title(booking, order, staff_names),
-            "description": f"Passport booking: {booking.id}",
+            "description": self._appointment_description(booking, order, calendar, staff_names),
             "startTime": booking.start_at.isoformat(),
             "endTime": booking.end_at.isoformat(),
-            "appointmentStatus": "cancelled" if booking.status == "cancelled" else "confirmed",
+            "appointmentStatus": self._appointment_status(booking),
             "ignoreFreeSlotValidation": True,
             "toNotify": False,
         }
@@ -120,12 +170,23 @@ class GHLAppointmentService:
         ).hexdigest()
         try:
             if mapping.ghl_event_id:
-                result = self.client.request(
-                    "PUT",
-                    f"/calendars/events/appointments/{mapping.ghl_event_id}",
-                    version="v3",
-                    json=body,
-                )
+                try:
+                    result = self.client.request(
+                        "PUT",
+                        f"/calendars/events/appointments/{mapping.ghl_event_id}",
+                        version="v3",
+                        json=body,
+                    )
+                except GHLAPIError as exc:
+                    if exc.status_code != 404:
+                        raise
+                    # The event may have been deleted directly in GHL. Clear the
+                    # stale ID and recreate it once, preserving idempotent mapping.
+                    mapping.ghl_event_id = None
+                    self.db.flush()
+                    result = self.client.request(
+                        "POST", "/calendars/events/appointments", version="v3", json=body
+                    )
             else:
                 result = self.client.request(
                     "POST", "/calendars/events/appointments", version="v3", json=body
@@ -153,10 +214,12 @@ class GHLAppointmentService:
         if not self.settings.ghl_calendar_sync_enabled:
             return None
         mapping = self.db.scalar(
-            select(GHLAppointmentMapping).where(
+            select(GHLAppointmentMapping)
+            .where(
                 GHLAppointmentMapping.operator_id == self.operator_id,
                 GHLAppointmentMapping.booking_id == booking_id,
-            ).with_for_update()
+            )
+            .with_for_update()
         )
         if mapping is None or not mapping.ghl_event_id:
             return None
@@ -171,8 +234,47 @@ class GHLAppointmentService:
             mapping.last_error = None
             self.db.commit()
             return mapping.ghl_event_id
+        except GHLAPIError as exc:
+            if exc.status_code == 404:
+                mapping.ghl_event_id = None
+                mapping.status = "cancelled"
+                mapping.last_error = "Remote HighLevel appointment was already deleted"
+                self.db.commit()
+                return None
+            mapping.status = "failed"
+            mapping.last_error = str(exc)[:2000]
+            self.db.commit()
+            raise
         except Exception as exc:
             mapping.status = "failed"
             mapping.last_error = str(exc)[:2000]
             self.db.commit()
             raise
+
+    def get(self, booking_id: uuid.UUID) -> dict | None:
+        """Retrieve the mapped remote appointment for diagnostics and reconciliation."""
+        if not self.settings.ghl_calendar_sync_enabled:
+            return None
+        mapping = self.db.scalar(
+            select(GHLAppointmentMapping).where(
+                GHLAppointmentMapping.operator_id == self.operator_id,
+                GHLAppointmentMapping.booking_id == booking_id,
+            )
+        )
+        if mapping is None or not mapping.ghl_event_id:
+            return None
+        try:
+            result = self.client.request(
+                "GET",
+                f"/calendars/events/appointments/{mapping.ghl_event_id}",
+                version="2021-04-15",
+            )
+        except GHLAPIError as exc:
+            if exc.status_code == 404:
+                mapping.ghl_event_id = None
+                mapping.status = "failed"
+                mapping.last_error = "Remote HighLevel appointment no longer exists"
+                self.db.commit()
+                return None
+            raise
+        return result.get("event", result) if isinstance(result, dict) else None

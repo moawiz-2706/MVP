@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
+    Booking,
     Calendar,
     DepartureLocation,
     GHLCalendarMapping,
@@ -176,6 +177,31 @@ class StaffService:
             # The change is committed; the scheduled worker can retry the job.
             pass
 
+    def _queue_appointment_sync_for_calendars(self, calendar_ids: set[uuid.UUID]) -> None:
+        if not get_settings().ghl_calendar_sync_enabled or not calendar_ids:
+            return
+        bookings = self.db.scalars(
+            select(Booking).where(
+                Booking.operator_id == self.operator_id,
+                Booking.calendar_id.in_(calendar_ids),
+                Booking.status.not_in(("cancelled", "failed")),
+                Booking.end_at > datetime.now(UTC),
+            )
+        )
+        for booking in bookings:
+            self._queue_job(
+                "ghl_sync_appointment",
+                f"booking:{booking.id}:ghl_appointment:staff:{uuid.uuid4().hex}",
+                {"booking_id": str(booking.id)},
+            )
+        self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=20)
+        except Exception:
+            # The local staff change is committed; appointment jobs retry through
+            # the durable outbox if HighLevel is unavailable.
+            pass
+
     def _queue_contact_sync(self, staff: Staff) -> None:
         # Every profile change gets its own job so the latest details are pushed.
         self._queue_job(
@@ -236,6 +262,7 @@ class StaffService:
         self.db.commit()
         for calendar_id in calendar_ids:
             self._queue_calendar_sync(calendar_id)
+        self._queue_appointment_sync_for_calendars(calendar_ids)
         return self.get_staff(staff.id)
 
     def delete_staff(self, staff_id: uuid.UUID) -> None:
@@ -260,6 +287,7 @@ class StaffService:
         self.db.commit()
         for calendar_id in calendar_ids:
             self._queue_calendar_sync(calendar_id)
+        self._queue_appointment_sync_for_calendars(calendar_ids)
 
     # --- Assignments ----------------------------------------------------------
 
@@ -423,6 +451,7 @@ class StaffService:
             )
         self.db.commit()
         self._queue_calendar_sync(calendar.id)
+        self._queue_appointment_sync_for_calendars({calendar.id})
         return self._assignment_payload(assignment, staff.name)
 
     def _assignment(self, assignment_id: uuid.UUID) -> tuple[StaffAssignment, str]:
@@ -445,6 +474,7 @@ class StaffService:
         assignment.role = data.role
         self.db.commit()
         self._queue_calendar_sync(assignment.calendar_id)
+        self._queue_appointment_sync_for_calendars({assignment.calendar_id})
         return self._assignment_payload(assignment, staff_name)
 
     def unassign(self, assignment_id: uuid.UUID) -> None:
@@ -475,3 +505,4 @@ class StaffService:
         self.db.delete(assignment)
         self.db.commit()
         self._queue_calendar_sync(assignment.calendar_id)
+        self._queue_appointment_sync_for_calendars({assignment.calendar_id})

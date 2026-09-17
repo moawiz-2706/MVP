@@ -456,7 +456,7 @@ class OrderService:
                 operator_id=operator_id,
                 booking_order_id=order_id,
                 job_type="ghl_sync_appointment",
-                idempotency_key=f"booking:{booking.id}:ghl_appointment:{booking.updated_at.isoformat()}",
+                    idempotency_key=f"booking:{booking.id}:ghl_appointment:create",
                 payload={"booking_id": str(booking.id)},
                 status="pending",
             )

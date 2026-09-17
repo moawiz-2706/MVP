@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -482,6 +482,7 @@ class BookingAdminService:
         booking.start_at = result.start_at
         booking.end_at = result.end_at
         booking.units = units
+        booking.updated_at = datetime.now(UTC)
         for existing in list(
             self.db.scalars(
                 select(BookingResource).where(BookingResource.booking_id == booking.id)
@@ -504,7 +505,7 @@ class BookingAdminService:
                 operator_id=self.operator_id,
                 booking_order_id=booking.booking_order_id,
                 job_type="ghl_sync_appointment",
-                idempotency_key=f"booking:{booking.id}:ghl_appointment:{booking.updated_at.isoformat()}",
+                idempotency_key=f"booking:{booking.id}:ghl_appointment:update:{booking.updated_at.isoformat()}",
                 payload={"booking_id": str(booking.id)},
                 status="pending",
             )
