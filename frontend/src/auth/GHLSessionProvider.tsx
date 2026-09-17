@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, json, setSessionToken } from "../api/client";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { api, json, setSessionRefresher, setSessionToken } from "../api/client";
 import type { UserContext } from "../api/types";
 
 interface SessionState { me: UserContext; refresh: () => Promise<void> }
@@ -31,6 +31,7 @@ function requestEncryptedContext(): Promise<string> {
 export function GHLSessionProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<UserContext | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const refreshTimer = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -38,20 +39,28 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
     setSessionToken(null);
     try {
       const encryptedData = await requestEncryptedContext();
-      const session = await api<{ access_token: string }>("/auth/ghl-session", json("POST", { encryptedData }));
+      const session = await api<{ access_token: string; expires_in: number }>("/auth/ghl-session", json("POST", { encryptedData }), { retryOnUnauthorized: false, notifySessionExpired: false });
       setSessionToken(session.access_token);
-      setMe(await api<UserContext>("/me"));
+      if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
+      const renewIn = Math.max(30_000, (session.expires_in * 1000) - 60_000);
+      refreshTimer.current = window.setTimeout(() => void refresh(), renewIn);
+      setMe(await api<UserContext>("/me", {}, { retryOnUnauthorized: false, notifySessionExpired: false }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to establish a secure session.");
     }
-  }, []);
+  }, [refreshTimer]);
 
   useEffect(() => {
+    setSessionRefresher(refresh);
     void refresh();
     const expired = () => void refresh();
     window.addEventListener("passport:session-expired", expired);
-    return () => window.removeEventListener("passport:session-expired", expired);
-  }, [refresh]);
+    return () => {
+      setSessionRefresher(null);
+      window.removeEventListener("passport:session-expired", expired);
+      if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
+    };
+  }, [refresh, refreshTimer]);
 
   if (error) return <div className="center-state"><div className="state-card"><div className="brand-mark">P</div><h1>Passport</h1><p>{error}</p><button className="button secondary" onClick={() => void refresh()}>Try again</button></div></div>;
   if (!me) return <div className="center-state"><div className="state-card"><div className="spinner" /><h1>Opening Passport</h1><p>Verifying your HighLevel workspace…</p></div></div>;

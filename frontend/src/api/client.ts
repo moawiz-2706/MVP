@@ -1,6 +1,8 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1").replace(/\/$/, "");
 
 let sessionToken: string | null = null;
+let refreshSession: (() => Promise<void>) | null = null;
+let refreshInFlight: Promise<void> | null = null;
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public details?: unknown) {
@@ -12,13 +14,36 @@ export function setSessionToken(token: string | null) {
   sessionToken = token;
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+export function setSessionRefresher(callback: (() => Promise<void>) | null) {
+  refreshSession = callback;
+}
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  options: { retryOnUnauthorized?: boolean; notifySessionExpired?: boolean } = {},
+): Promise<T> {
+  const retryOnUnauthorized = options.retryOnUnauthorized ?? true;
+  const notifySessionExpired = options.notifySessionExpired ?? true;
   const method = (init.method || "GET").toUpperCase();
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  if (response.status === 401 && sessionToken) {
+  if (response.status === 401 && sessionToken && retryOnUnauthorized && refreshSession) {
+    try {
+      if (!refreshInFlight) {
+        refreshInFlight = refreshSession().finally(() => {
+          refreshInFlight = null;
+        });
+      }
+      await refreshInFlight;
+      if (sessionToken) return api<T>(path, init, { retryOnUnauthorized: false, notifySessionExpired: false });
+    } catch {
+      // The original 401 is reported below; the refresh failure is not exposed.
+    }
+  }
+  if (response.status === 401 && notifySessionExpired) {
     setSessionToken(null);
     window.dispatchEvent(new Event("passport:session-expired"));
   }

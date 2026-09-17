@@ -1,4 +1,5 @@
 import uuid
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -13,6 +14,8 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.models.entities import GHLInstallation, Operator, OperatorUser
+
+logger = logging.getLogger("passport.auth")
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +72,7 @@ def decode_app_session(token: str, settings: Settings) -> SessionPrincipal:
             authz_version=int(claims.get("authz_version", 1)),
         )
     except (InvalidTokenError, ValueError, KeyError, TypeError) as exc:
+        logger.warning("Application session token rejected reason=%s", type(exc).__name__)
         raise HTTPException(status_code=401, detail="Invalid or expired application session") from exc
 
 
@@ -78,6 +82,7 @@ def get_current_principal(
     db: Annotated[Session, Depends(get_db)],
 ) -> SessionPrincipal:
     if credentials is None or credentials.scheme.lower() != "bearer":
+        logger.warning("Application session rejected reason=missing_bearer")
         raise HTTPException(status_code=401, detail="Application session required")
     principal = decode_app_session(credentials.credentials, settings)
     row = db.execute(
@@ -94,9 +99,21 @@ def get_current_principal(
         )
     ).one_or_none()
     if row is None:
+        logger.warning(
+            "Application session rejected reason=installation_membership_mismatch operator_id=%s location_id=%s user_id=%s",
+            principal.operator_id,
+            principal.ghl_location_id,
+            principal.app_user_id,
+        )
         raise HTTPException(status_code=401, detail="Application session is no longer valid")
     installation, membership, _operator = row
     if installation.authz_version != principal.authz_version:
+        logger.warning(
+            "Application session rejected reason=authz_version_mismatch operator_id=%s token_version=%s current_version=%s",
+            principal.operator_id,
+            principal.authz_version,
+            installation.authz_version,
+        )
         raise HTTPException(status_code=401, detail="Application session requires refresh")
     return SessionPrincipal(
         app_user_id=principal.app_user_id,

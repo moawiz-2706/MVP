@@ -1,4 +1,5 @@
 import uuid
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -9,6 +10,8 @@ from app.core.config import get_settings
 from app.core.database import get_session_factory
 from app.core.encryption import TokenCipher
 from app.models.entities import GHLInstallation
+
+logger = logging.getLogger("passport.ghl_api")
 
 
 class GHLAPIError(RuntimeError):
@@ -109,6 +112,11 @@ class GHLClient:
             except httpx.TransportError as exc:
                 raise GHLAPIError("HighLevel request failed temporarily") from exc
             if response.status_code == 401 and attempt == 0:
+                logger.warning(
+                    "HighLevel API returned 401 method=%s path=%s; refreshing token",
+                    method,
+                    path,
+                )
                 token = self._load_token(force_refresh=True)
                 continue
             if response.is_error:
@@ -116,10 +124,22 @@ class GHLClient:
                     detail = response.json()
                 except ValueError:
                     detail = response.text[:1000]
+                logger.error(
+                    "HighLevel API failed method=%s path=%s status=%s",
+                    method,
+                    path,
+                    response.status_code,
+                )
                 raise GHLAPIError(
                     f"HighLevel request failed ({response.status_code}): {detail}",
                     status_code=response.status_code,
                     permanent=response.status_code in {401, 403, 404},
                 )
+            logger.info(
+                "HighLevel API succeeded method=%s path=%s status=%s",
+                method,
+                path,
+                response.status_code,
+            )
             return response.json() if response.content else {}
         raise GHLAPIError("HighLevel authorization failed", status_code=401, permanent=True)
