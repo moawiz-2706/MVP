@@ -167,6 +167,13 @@ class StaffService:
         )
         for key, value in values.items():
             setattr(staff, key, value)
+        if values.get("is_active") is False:
+            self.db.execute(
+                delete(StaffAssignment).where(
+                    StaffAssignment.staff_id == staff.id,
+                    StaffAssignment.end_at > datetime.now(UTC),
+                )
+            )
         if contact_changed and staff.email:
             self._queue_contact_sync(staff)
         # Existing assignments are kept even if new hours no longer cover them;
@@ -197,6 +204,7 @@ class StaffService:
                 Calendar.id == calendar_id,
                 Calendar.operator_id == self.operator_id,
                 Calendar.deleted_at.is_(None),
+                Calendar.is_active.is_(True),
             )
         )
         if calendar is None:
@@ -283,7 +291,9 @@ class StaffService:
         rows = self.db.execute(
             select(StaffAssignment, Staff.name)
             .join(Staff, Staff.id == StaffAssignment.staff_id)
+            .join(Calendar, Calendar.id == StaffAssignment.calendar_id)
             .where(*conditions)
+            .where(Calendar.deleted_at.is_(None))
             .order_by(StaffAssignment.start_at, Staff.name)
         )
         return [self._assignment_payload(assignment, name) for assignment, name in rows]

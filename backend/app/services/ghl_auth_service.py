@@ -31,6 +31,10 @@ REQUIRED_SCOPES = {
     "contacts.write",
     "conversations/message.write",
     "locations.readonly",
+    "calendars.readonly",
+    "calendars.write",
+    "calendars/events.readonly",
+    "calendars/events.write",
 }
 
 

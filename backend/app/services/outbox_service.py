@@ -60,18 +60,27 @@ class OutboxService:
             job = self.db.get(OutboxJob, job_id)
             if job is None:
                 continue
+            claimed_fencing_token = job.fencing_token
             try:
                 self._run(job)
-                job.status = "completed"
-                job.last_error = None
-                job.next_attempt_at = None
-                job.lease_owner = None
-                job.lease_expires_at = None
-                completed += 1
+                current = self.db.get(OutboxJob, job_id)
+                if (
+                    current is not None
+                    and current.lease_owner == worker_id
+                    and current.fencing_token == claimed_fencing_token
+                ):
+                    current.status = "completed"
+                    current.last_error = None
+                    current.next_attempt_at = None
+                    current.lease_owner = None
+                    current.lease_expires_at = None
+                    completed += 1
             except Exception as exc:
                 self.db.rollback()
                 job = self.db.get(OutboxJob, job_id)
                 if job is None:
+                    continue
+                if job.lease_owner != worker_id or job.fencing_token != claimed_fencing_token:
                     continue
                 job.status = (
                     "dead" if job.attempt_count >= self.settings.outbox_max_attempts else "failed"

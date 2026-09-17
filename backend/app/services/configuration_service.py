@@ -27,6 +27,7 @@ from app.models.entities import (
     Operator,
     OutboxJob,
     Resource,
+    StaffAssignment,
 )
 from app.schemas.configuration import (
     CalendarBlocksReplace,
@@ -302,13 +303,20 @@ class ConfigurationService:
         self._validate_calendar_refs(data.calendar_category_id, data.departure_location_id)
         entity = Calendar(operator_id=self.operator_id, **data.model_dump())
         self.db.add(entity)
-        self.db.commit()
+        self._commit_calendar()
         self.db.refresh(entity)
         self._queue_ghl_calendar_sync(entity)
         return entity
 
     def get_calendar(self, entity_id: uuid.UUID, *, active: bool = False) -> Calendar:
-        return self._owned(Calendar, entity_id, active=active)
+        return self._owned(Calendar, entity_id, active=True)
+
+    def _commit_calendar(self) -> None:
+        try:
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise ConflictError("A calendar with that slug already exists") from exc
 
     def update_calendar(self, entity_id: uuid.UUID, data: CalendarUpdate) -> Calendar:
         entity = self.get_calendar(entity_id)
@@ -317,7 +325,7 @@ class ConfigurationService:
         location_id = values.get("departure_location_id", entity.departure_location_id)
         self._validate_calendar_refs(category_id, location_id)
         _apply(entity, values)
-        self.db.commit()
+        self._commit_calendar()
         self.db.refresh(entity)
         self._queue_ghl_calendar_sync(entity)
         return entity
@@ -425,6 +433,12 @@ class ConfigurationService:
         entity.deleted_at = datetime.now(UTC)
         entity.is_active = False
         entity.public_booking_enabled = False
+        self.db.execute(
+            delete(StaffAssignment).where(
+                StaffAssignment.calendar_id == entity.id,
+                StaffAssignment.end_at > datetime.now(UTC),
+            )
+        )
         if calendar_mapping is not None and calendar_mapping.ghl_calendar_id:
             self.db.add(
                 OutboxJob(
@@ -649,7 +663,12 @@ class ConfigurationService:
                 CalendarResource.default_quantity_per_unit,
             )
             .join(Resource, Resource.id == CalendarResource.resource_id)
-            .where(CalendarResource.calendar_id == calendar_id)
+            .where(
+                CalendarResource.calendar_id == calendar_id,
+                Resource.operator_id == self.operator_id,
+                Resource.deleted_at.is_(None),
+                Resource.is_active.is_(True),
+            )
             .order_by(Resource.name)
         )
         return [

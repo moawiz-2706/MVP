@@ -418,8 +418,17 @@ class BookingAdminService:
         payment = self.db.scalar(
             select(Payment).where(Payment.booking_order_id == booking.booking_order_id)
         )
-        if payment and payment.customer_total_minor > 0 and payment.status == "succeeded":
-            raise ConflictError("Paid booking time or quantity changes require an adjustment workflow")
+        if booking.status not in {"pending_payment", "confirmed"}:
+            raise ConflictError("Only pending or confirmed bookings can be edited")
+        if payment and payment.customer_total_minor > 0 and payment.status in {
+            "requires_payment",
+            "processing",
+            "provider_unknown",
+            "succeeded",
+        }:
+            raise ConflictError(
+                "Paid booking time or quantity changes require an adjustment workflow"
+            )
         start_at = data.start_at or booking.start_at
         units = data.units or booking.units
         calendar = self.db.scalar(
@@ -478,7 +487,7 @@ class BookingAdminService:
                     quantity=units * mapping.default_quantity_per_unit,
                 )
             )
-        self.db.commit()
+        self.db.flush()
         self.db.add(
             OutboxJob(
                 operator_id=self.operator_id,

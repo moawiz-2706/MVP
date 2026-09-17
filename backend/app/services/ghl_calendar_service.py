@@ -54,6 +54,20 @@ class GHLCalendarService:
                 raise
             self.client.request("POST", path, version="v3", json=body)
 
+    def _find_remote_calendar(self, operator: Operator, passport_id: uuid.UUID) -> str | None:
+        result = self.client.request(
+            "GET",
+            "/calendars/",
+            version="v3",
+            params={"locationId": operator.ghl_location_id},
+        )
+        calendars = result.get("calendars", []) if isinstance(result, dict) else []
+        marker = f"Passport calendar: {passport_id}"
+        for remote in calendars:
+            if isinstance(remote, dict) and remote.get("description") == marker and remote.get("id"):
+                return str(remote["id"])
+        return None
+
     def sync(self, calendar_id: uuid.UUID) -> str | None:
         if not self.settings.ghl_calendar_sync_enabled:
             return None
@@ -61,7 +75,11 @@ class GHLCalendarService:
             select(Calendar, Operator, DepartureLocation)
             .join(Operator, Operator.id == Calendar.operator_id)
             .outerjoin(DepartureLocation, DepartureLocation.id == Calendar.departure_location_id)
-            .where(Calendar.id == calendar_id, Calendar.operator_id == self.operator_id)
+            .where(
+                Calendar.id == calendar_id,
+                Calendar.operator_id == self.operator_id,
+                Calendar.deleted_at.is_(None),
+            )
         ).one_or_none()
         if row is None:
             raise RuntimeError("GHL calendar source not found")
@@ -103,32 +121,42 @@ class GHLCalendarService:
             "allowCancellation": False,
         }
         try:
-            if mapping.ghl_calendar_id:
+            remote_id = mapping.ghl_calendar_id
+            if remote_id:
                 # HighLevel's Update Calendar schema does not accept
                 # locationId; the subaccount location is immutable after
                 # creation. The Passport departure location is represented
                 # by locationConfigurations and can be updated here.
-                result = self.client.request(
-                    "PUT",
-                    f"/calendars/{mapping.ghl_calendar_id}",
-                    version="v3",
-                    json=common_body,
-                )
-            else:
-                result = self.client.request(
-                    "POST",
-                    "/calendars/",
-                    version="v3",
-                    json={
-                        "locationId": operator.ghl_location_id,
-                        "calendarType": "event",
-                        **common_body,
-                    },
-                )
-            remote = result.get("calendar", result)
-            remote_id = remote.get("id") if isinstance(remote, dict) else None
-            if not remote_id and mapping.ghl_calendar_id:
-                remote_id = mapping.ghl_calendar_id
+                try:
+                    result = self.client.request(
+                        "PUT",
+                        f"/calendars/{remote_id}",
+                        version="v3",
+                        json=common_body,
+                    )
+                except GHLAPIError as exc:
+                    if exc.status_code != 404:
+                        raise
+                    remote_id = None
+                    mapping.ghl_calendar_id = None
+                    self.db.flush()
+            if remote_id is None:
+                recovered_id = self._find_remote_calendar(operator, calendar.id)
+                if recovered_id:
+                    remote_id = recovered_id
+                else:
+                    result = self.client.request(
+                        "POST",
+                        "/calendars/",
+                        version="v3",
+                        json={
+                            "locationId": operator.ghl_location_id,
+                            "calendarType": "event",
+                            **common_body,
+                        },
+                    )
+                    remote = result.get("calendar", result)
+                    remote_id = remote.get("id") if isinstance(remote, dict) else None
             if not remote_id:
                 raise RuntimeError("HighLevel did not return an Event Calendar ID")
             self._sync_schedule(calendar, operator, str(remote_id))
