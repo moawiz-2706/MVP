@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.core.app_session import CurrentPrincipal
@@ -13,7 +13,6 @@ from app.schemas.availability import (
     PublicAvailabilityResponse,
 )
 from app.services.availability_service import AvailabilityService
-
 
 router = APIRouter(tags=["availability"])
 DB = Annotated[Session, Depends(get_db)]
@@ -35,8 +34,10 @@ def public_availability(
     calendar_slug: str,
     date: date,
     db: DB,
+    response: Response,
     timezone: str | None = None,
 ):
+    response.headers["Cache-Control"] = "public, s-maxage=3, max-age=3, stale-while-revalidate=7"
     return AvailabilityService(db).public_day(
         operator_slug, calendar_slug, date, display_timezone=timezone
     )

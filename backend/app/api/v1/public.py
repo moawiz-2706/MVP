@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -57,8 +57,11 @@ def _active_operator(db: Session, operator_slug: str) -> Operator:
 
 @router.get("/{operator_slug}", response_model=PublicOperatorCatalog)
 def public_catalog(
-    operator_slug: str, db: Annotated[Session, Depends(get_db)]
+    operator_slug: str, db: Annotated[Session, Depends(get_db)], response: Response
 ) -> PublicOperatorCatalog:
+    response.headers["Cache-Control"] = (
+        "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
+    )
     operator = _active_operator(db, operator_slug)
     rows = db.execute(
         select(Calendar, CalendarCategory, DepartureLocation)
@@ -82,8 +85,14 @@ def public_catalog(
 
 @router.get("/{operator_slug}/category/{category_slug}", response_model=PublicCategoryPage)
 def public_category(
-    operator_slug: str, category_slug: str, db: Annotated[Session, Depends(get_db)]
+    operator_slug: str,
+    category_slug: str,
+    db: Annotated[Session, Depends(get_db)],
+    response: Response,
 ) -> PublicCategoryPage:
+    response.headers["Cache-Control"] = (
+        "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
+    )
     operator = _active_operator(db, operator_slug)
     category = db.scalar(
         select(CalendarCategory).where(

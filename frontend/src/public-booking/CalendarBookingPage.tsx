@@ -32,7 +32,7 @@ export function CalendarBookingPage() {
   const { operatorSlug = "", calendarSlug = "" } = useParams();
   const navigate = useNavigate();
   const embed = useEmbed();
-  const catalog = useQuery({ queryKey: ["public-catalog", operatorSlug], queryFn: () => api<PublicCatalog>(`/public/${operatorSlug}`) });
+  const catalog = useQuery({ queryKey: ["public-catalog", operatorSlug], queryFn: () => api<PublicCatalog>(`/public/${operatorSlug}`), staleTime: 30_000 });
   const calendar = catalog.data?.calendars.find((item) => item.slug === calendarSlug);
   const defaultTimeZone = safeTimeZone(catalog.data?.time_zone);
   const [selectedTimeZone, setSelectedTimeZone] = useState("UTC");
@@ -63,6 +63,8 @@ export function CalendarBookingPage() {
     queryKey: ["availability", operatorSlug, calendarSlug, day, selectedTimeZone],
     queryFn: () => api<AvailabilityResponse>(`/public/${operatorSlug}/calendars/${calendarSlug}/availability?${new URLSearchParams({ date: day, timezone: selectedTimeZone })}`),
     enabled: Boolean(calendar && day && selectedTimeZone),
+    staleTime: 3_000,
+    gcTime: 60_000,
   });
   const requestItems = useMemo(() => cart.map(({ calendar_id, start_at, units: itemUnits }) => ({ calendar_id, start_at, units: itemUnits })), [cart]);
   const quote = useQuery({ queryKey: ["quote", operatorSlug, JSON.stringify(requestItems)], queryFn: () => api<Quote>(`/public/${operatorSlug}/orders/quote`, json("POST", { items: requestItems })), enabled: cart.length > 0 });

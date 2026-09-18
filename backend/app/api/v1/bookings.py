@@ -1,4 +1,3 @@
-import logging
 import uuid
 from datetime import datetime
 from typing import Annotated
@@ -15,9 +14,9 @@ from app.models.entities import Operator
 from app.schemas.booking import (
     BookingDetail,
     BookingListItem,
-    BookingNotificationsResponse,
     BookingNoteCreate,
     BookingNoteRead,
+    BookingNotificationsResponse,
     BookingUpdate,
     DashboardSlot,
 )
@@ -25,9 +24,6 @@ from app.schemas.order import OrderCreateRequest, OrderCreateResponse
 from app.services.booking_admin_service import BookingAdminService
 from app.services.booking_notification_service import BookingNotificationService
 from app.services.order_service import OrderService
-from app.services.outbox_service import OutboxService
-
-logger = logging.getLogger("passport.bookings")
 
 router = APIRouter(tags=["bookings"])
 DB = Annotated[Session, Depends(get_db)]
@@ -92,12 +88,7 @@ def create_booking(
 ):
     require_permission(principal, Permission.OPERATE_BOOKINGS)
     operator_slug = db.scalar(select(Operator.slug).where(Operator.id == principal.operator_id))
-    result = OrderService(db, settings).create(operator_slug, data)
-    try:
-        OutboxService(db, settings).process(limit=10)
-    except Exception:
-        logger.exception("Inline GHL booking sync failed; job remains queued for retry")
-    return result
+    return OrderService(db, settings).create(operator_slug, data)
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingDetail)
@@ -143,15 +134,7 @@ def retry_ghl(
     order_id: uuid.UUID,
     principal: CurrentPrincipal,
     db: DB,
-    settings: Annotated[Settings, Depends(get_settings)],
 ) -> Response:
     require_permission(principal, Permission.OPERATE_BOOKINGS)
     BookingAdminService(db, principal.operator_id).retry_ghl(order_id)
-    # Resetting the jobs to pending is not a retry on its own: without a scheduler
-    # nothing would pick them up. Run them now so the button does what it says.
-    # Failures are left queued with backoff rather than surfaced as a 500.
-    try:
-        OutboxService(db, settings).process(limit=5)
-    except Exception:
-        logger.exception("Inline outbox processing failed during manual GHL retry")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

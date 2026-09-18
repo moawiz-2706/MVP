@@ -22,8 +22,8 @@ from app.models.entities import (
     CalendarPushedSlot,
     CalendarResource,
     DepartureLocation,
-    GHLCalendarMapping,
     GHLAppointmentMapping,
+    GHLCalendarMapping,
     Operator,
     OutboxJob,
     Resource,
@@ -45,7 +45,6 @@ from app.schemas.configuration import (
     ResourceCreate,
     ResourceUpdate,
 )
-from app.services.outbox_service import OutboxService
 from app.utils.timezone import local_datetime, require_timezone, wall_time_exists
 
 ModelT = TypeVar("ModelT")
@@ -222,7 +221,10 @@ class ConfigurationService:
     def list_categories(self) -> list[dict[str, Any]]:
         count = (
             select(func.count(Calendar.id))
-            .where(Calendar.calendar_category_id == CalendarCategory.id, Calendar.deleted_at.is_(None))
+            .where(
+                Calendar.calendar_category_id == CalendarCategory.id,
+                Calendar.deleted_at.is_(None),
+            )
             .correlate(CalendarCategory)
             .scalar_subquery()
         )
@@ -360,12 +362,6 @@ class ConfigurationService:
             )
         )
         self.db.commit()
-        try:
-            OutboxService(self.db, get_settings()).process(limit=5)
-        except Exception:
-            # The configuration change has already been committed. Keep the
-            # outbox job available for the scheduled worker to retry.
-            pass
         self._queue_ghl_appointment_sync(calendar.id)
 
     def _queue_ghl_appointment_sync(self, calendar_id: uuid.UUID) -> None:
@@ -391,12 +387,6 @@ class ConfigurationService:
                 )
             )
         self.db.commit()
-        try:
-            OutboxService(self.db, get_settings()).process(limit=20)
-        except Exception:
-            # The local calendar change is committed; the appointment job stays
-            # queued for retry if HighLevel is unavailable.
-            pass
 
     def delete_calendar(self, entity_id: uuid.UUID) -> None:
         entity = self.get_calendar(entity_id)
@@ -421,7 +411,8 @@ class ConfigurationService:
         if signed_waiver is not None:
             raise ConflictError(
                 "This calendar has a signed waiver and cannot be physically deleted. "
-                "Preserve the booking record or remove the signed waiver under your legal-retention policy."
+                "Preserve the booking record or remove the signed waiver under your "
+                "legal-retention policy."
             )
         if booking_ids:
             self.db.execute(
@@ -484,10 +475,6 @@ class ConfigurationService:
                 )
             )
         self.db.commit()
-        try:
-            OutboxService(self.db, get_settings()).process(limit=5)
-        except Exception:
-            pass
 
     def list_hours(self, calendar_id: uuid.UUID) -> list[CalendarHour]:
         self.get_calendar(calendar_id)
@@ -504,7 +491,9 @@ class ConfigurationService:
     ) -> list[CalendarHour]:
         calendar = self.get_calendar(calendar_id)
         self.db.execute(delete(CalendarHour).where(CalendarHour.calendar_id == calendar_id))
-        entities = [CalendarHour(calendar_id=calendar_id, **item.model_dump()) for item in data.hours]
+        entities = [
+            CalendarHour(calendar_id=calendar_id, **item.model_dump()) for item in data.hours
+        ]
         self.db.add_all(entities)
         self.db.commit()
         self._queue_ghl_calendar_sync(calendar)
@@ -720,7 +709,10 @@ class ConfigurationService:
             self._owned(Resource, mapping.resource_id, active=True)
         self.db.execute(delete(CalendarResource).where(CalendarResource.calendar_id == calendar_id))
         self.db.add_all(
-            [CalendarResource(calendar_id=calendar_id, **item.model_dump()) for item in data.resources]
+            [
+                CalendarResource(calendar_id=calendar_id, **item.model_dump())
+                for item in data.resources
+            ]
         )
         self.db.commit()
         self._queue_ghl_appointment_sync(calendar_id)

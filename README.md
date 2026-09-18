@@ -84,6 +84,13 @@ the same production environment variables on the worker as on the API, including
 `DATABASE_URL`, the encrypted GHL credentials, `GHL_STAFF_USER_SYNC_ENABLED`,
 `GHL_STAFF_SYNC_INTERVAL_SECONDS`, and the production secrets.
 
+Calendar, resource, availability, and booking endpoints commit Passport data and
+enqueue GHL work without waiting for external HTTP requests. This keeps the user
+response fast; the worker must be running for queued GHL calendar, contact, email,
+and appointment jobs to be applied promptly. The final booking validation remains
+inside the database transaction, so asynchronous synchronization does not allow
+an invalid or duplicate booking.
+
 ## Production database connection behavior
 
 The API and worker each create one SQLAlchemy engine per running process with a

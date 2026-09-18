@@ -23,7 +23,6 @@ from app.schemas.order import (
     PublicOrderStatus,
 )
 from app.services.order_service import OrderService
-from app.services.outbox_service import OutboxService
 from app.services.public_rate_limit_service import enforce_public_rate_limit
 from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.services.waiver_service import SIGNABLE_STATUSES, WaiverService, waiver_url
@@ -59,12 +58,6 @@ def create_order(
 ):
     enforce_public_rate_limit(request, db, settings, scope=f"checkout:{operator_slug}")
     result = OrderService(db, settings).create(operator_slug, data, checkout_key=checkout_key)
-    try:
-        OutboxService(db, settings).process(limit=10)
-    except Exception:
-        # Booking/payment state is already committed. Failed GHL work stays in
-        # the outbox and is retried by the internal worker.
-        pass
     return result
 
 
