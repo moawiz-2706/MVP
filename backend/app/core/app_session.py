@@ -115,6 +115,10 @@ def get_current_principal(
             installation.authz_version,
         )
         raise HTTPException(status_code=401, detail="Application session requires refresh")
+    # The membership lookup is read-only. End its transaction before the route
+    # handler starts so the one-process database connection is not held while the
+    # handler performs external API work or additional application logic.
+    db.rollback()
     return SessionPrincipal(
         app_user_id=principal.app_user_id,
         operator_id=principal.operator_id,
