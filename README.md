@@ -59,9 +59,17 @@ a custom role. Booking staff selectors use that Passport role as their source
 of truth and show only matching staff.
 
 Migration `supabase/migrations/014_staff_ghl_availability.sql` is required for
-the GHL availability cache. Apply it after 013. The Staff page requests the
-`calendars.readonly` schedule APIs on every directory refresh, stores the latest
-weekly intervals in `staff_hours`, and shows the current GHL profile and schedule
-in a read-only details dialog. Passport cannot edit those GHL-managed values.
-The fixed custom-role dropdown contains only Captain, First Mate, Guide,
-Deckhand, and Instructor.
+the GHL availability cache, and `supabase/migrations/015_staff_pool_two_week_availability.sql`
+adds calendar staff pools plus concrete rolling availability windows. Apply both
+after 013 and before deploying this version. The Staff page requests the
+`calendars.readonly` schedule APIs on every directory refresh, stores the weekly
+schedule for display, and expands each linked GHL user's schedule into the next
+14 days of UTC intervals. The protected daily cron refreshes those windows
+automatically; the booking engine uses them as the availability source of truth.
+Passport cannot edit GHL-managed staff details or availability.
+
+Calendar editors can require one or more independent staff pools. Existing
+calendars default to `Captain`; selecting `First Mate` adds a separate pool, so
+both pools must have at least one available member for a slot to be bookable.
+The fixed custom-role dropdown contains only Captain, First Mate, Guide, Deckhand,
+and Instructor.

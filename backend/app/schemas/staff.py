@@ -112,7 +112,10 @@ class GHLStaffDetailsResponse(BaseModel):
     profile: dict[str, object]
     time_zone: str | None
     hours: list[StaffHourRead]
-    availability_sync_status: str
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    window_count: int = 0
+    availability_sync_status: str = "not_requested"
     availability_last_synced_at: datetime | None
 
 

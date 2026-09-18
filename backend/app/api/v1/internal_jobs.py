@@ -2,10 +2,13 @@ import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
+from app.models.entities import GHLInstallation
+from app.services.ghl_staff_user_service import GHLStaffUserService
 from app.services.outbox_service import OutboxService
 from app.services.reminder_service import ReminderService
 
@@ -54,4 +57,19 @@ def daily_cron(
     """
     _authorize(settings, authorization, x_cron_secret)
     queued = ReminderService(db).enqueue()
-    return {**queued, **OutboxService(db, settings).drain(budget_seconds=DRAIN_BUDGET_SECONDS)}
+    availability_synced = availability_failed = 0
+    for operator_id in db.scalars(
+        select(GHLInstallation.operator_id).where(
+            GHLInstallation.is_installed.is_(True),
+            GHLInstallation.lifecycle_status == "active",
+        )
+    ):
+        result = GHLStaffUserService(db, operator_id).sync_all_availability()
+        availability_synced += int(result["synced"])
+        availability_failed += int(result["failed"])
+    return {
+        **queued,
+        "availability_synced": availability_synced,
+        "availability_failed": availability_failed,
+        **OutboxService(db, settings).drain(budget_seconds=DRAIN_BUDGET_SECONDS),
+    }

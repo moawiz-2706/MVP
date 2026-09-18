@@ -9,7 +9,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models.entities import Booking, Calendar, Operator, Staff, StaffAssignment, StaffHour
+from app.models.entities import (
+    Booking,
+    Calendar,
+    Staff,
+    StaffAssignment,
+    StaffAvailabilityWindow,
+    StaffHour,
+)
 from app.utils.timezone import require_timezone
 
 
@@ -83,11 +90,6 @@ def lock_calendars(
     return calendars
 
 
-def _operator_zone(db: Session, operator_id: uuid.UUID):
-    timezone_name = db.scalar(select(Operator.time_zone).where(Operator.id == operator_id))
-    return require_timezone(timezone_name or "UTC")
-
-
 def _hours_cover_interval(
     db: Session, staff_id: uuid.UUID, start_at: datetime, end_at: datetime, zone: Any
 ) -> bool:
@@ -100,6 +102,62 @@ def _hours_cover_interval(
     )
     weekly = [(day, opens, closes) for day, opens, closes in rows]
     return fits_weekly_hours(weekly, start_at.astimezone(zone), end_at.astimezone(zone))
+
+
+def _staff_covers_interval(
+    db: Session, staff: Staff, start_at: datetime, end_at: datetime
+) -> bool:
+    """Check concrete GHL windows, with a pre-sync compatibility fallback."""
+    windows = list(
+        db.execute(
+            select(StaffAvailabilityWindow.start_at, StaffAvailabilityWindow.end_at).where(
+                StaffAvailabilityWindow.staff_id == staff.id,
+                StaffAvailabilityWindow.start_at < end_at,
+                StaffAvailabilityWindow.end_at > start_at,
+            )
+        )
+    )
+    if windows:
+        return any(window_start <= start_at and window_end >= end_at for window_start, window_end in windows)
+    if staff.availability_sync_status == "synced":
+        return False
+    zone = require_timezone(staff.availability_time_zone or "UTC")
+    return _hours_cover_interval(db, staff.id, start_at, end_at, zone)
+
+
+def pool_readiness_for_interval(
+    db: Session,
+    operator_id: uuid.UUID,
+    calendar_id: uuid.UUID,
+    start_at: datetime,
+    end_at: datetime,
+) -> StaffingReadiness:
+    """Return whether every configured role pool has at least one available person."""
+    calendar = db.scalar(
+        select(Calendar).where(
+            Calendar.id == calendar_id,
+            Calendar.operator_id == operator_id,
+            Calendar.deleted_at.is_(None),
+        )
+    )
+    if calendar is None:
+        return StaffingReadiness(False, reason="Calendar not found")
+    roles = [str(role).strip() for role in (calendar.required_staff_roles or ["Captain"]) if str(role).strip()]
+    staff = list(
+        db.scalars(
+            select(Staff).where(
+                Staff.operator_id == operator_id,
+                Staff.deleted_at.is_(None),
+                Staff.is_active.is_(True),
+                func.lower(Staff.custom_role).in_([role.casefold() for role in roles]),
+            )
+        )
+    )
+    for role in roles:
+        matches = [member for member in staff if (member.custom_role or "").casefold() == role.casefold()]
+        if not any(_staff_covers_interval(db, member, start_at, end_at) for member in matches):
+            return StaffingReadiness(False, reason=f"No available {role} is scheduled for this time")
+    return StaffingReadiness(True)
 
 
 def readiness_for_interval(
@@ -120,12 +178,20 @@ def readiness_for_interval(
     if start_at.tzinfo is None or end_at.tzinfo is None or start_at >= end_at:
         return StaffingReadiness(False, reason="A valid timezone-aware booking interval is required")
 
+    calendar = db.scalar(
+        select(Calendar).where(
+            Calendar.id == calendar_id,
+            Calendar.operator_id == operator_id,
+            Calendar.deleted_at.is_(None),
+        )
+    )
+    roles = [str(role).strip() for role in ((calendar.required_staff_roles if calendar else None) or ["Captain"]) if str(role).strip()]
     conditions = [
         StaffAssignment.operator_id == operator_id,
         StaffAssignment.calendar_id == calendar_id,
         StaffAssignment.start_at <= start_at,
         StaffAssignment.end_at >= end_at,
-        func.lower(func.trim(StaffAssignment.role)) == CAPTAIN_ROLE,
+        func.lower(func.trim(StaffAssignment.role)).in_([role.casefold() for role in roles]),
     ]
     if exclude_assignment_id is not None:
         conditions.append(StaffAssignment.id != exclude_assignment_id)
@@ -137,33 +203,31 @@ def readiness_for_interval(
             .order_by(StaffAssignment.id)
         )
     )
-    if not rows:
-        return StaffingReadiness(False, reason="Exactly one active Captain must cover the entire booking")
-
-    zone = _operator_zone(db, operator_id)
-    valid: list[tuple[StaffAssignment, Staff]] = []
+    valid_by_role: dict[str, list[tuple[StaffAssignment, Staff]]] = {role.casefold(): [] for role in roles}
     invalid_reasons: list[str] = []
     for assignment, staff in rows:
         if staff.deleted_at is not None or not staff.is_active:
             invalid_reasons.append(f"{staff.name} is inactive")
             continue
-        if not _hours_cover_interval(db, staff.id, start_at, end_at, zone):
+        if not _staff_covers_interval(db, staff, start_at, end_at):
             invalid_reasons.append(f"{staff.name} is not working at that time")
             continue
-        valid.append((assignment, staff))
-
-    if len(valid) != 1:
-        if len(valid) > 1:
+        valid_by_role.setdefault((assignment.role or "").casefold(), []).append((assignment, staff))
+    for role in roles:
+        valid = valid_by_role.get(role.casefold(), [])
+        if not valid:
+            return StaffingReadiness(
+                False,
+                reason=invalid_reasons[0] if invalid_reasons else f"A {role} must be assigned before booking",
+            )
+        if is_captain(role) and len(valid) > 1:
             return StaffingReadiness(False, reason="Only one Captain may cover a booking interval")
-        return StaffingReadiness(
-            False,
-            reason=invalid_reasons[0]
-            if invalid_reasons
-            else "Exactly one active Captain must cover the entire booking",
-        )
-    assignment, staff = valid[0]
+    captain = valid_by_role.get(CAPTAIN_ROLE, [])
+    assignment, staff = captain[0] if captain else (None, None)
     return StaffingReadiness(
-        True, captain_name=staff.name, assignment_id=assignment.id
+        True,
+        captain_name=staff.name if staff else None,
+        assignment_id=assignment.id if assignment else None,
     )
 
 
@@ -221,6 +285,7 @@ __all__ = [
     "is_captain",
     "lock_calendar",
     "lock_calendars",
+    "pool_readiness_for_interval",
     "readiness_for_booking",
     "readiness_for_interval",
 ]

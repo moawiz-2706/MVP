@@ -181,6 +181,12 @@ class Calendar(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     availability_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="day_wise"
     )
+    required_staff_roles: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=lambda: ["Captain"],
+        server_default=text("'[\"Captain\"]'::jsonb"),
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -324,6 +330,24 @@ class StaffHour(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     day_of_week: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
+
+
+class StaffAvailabilityWindow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Concrete GHL availability interval within the rolling sync window."""
+
+    __tablename__ = "staff_availability_windows"
+    __table_args__ = (
+        CheckConstraint("start_at < end_at", name="time_order"),
+        Index("ix_staff_availability_windows_staff_interval", "staff_id", "start_at", "end_at"),
+        UniqueConstraint("staff_id", "start_at", "end_at"),
+    )
+
+    staff_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("staff.id", ondelete="CASCADE"), nullable=False
+    )
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source_schedule_id: Mapped[str | None] = mapped_column(Text)
 
 
 class StaffAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):

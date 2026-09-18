@@ -100,3 +100,50 @@ def test_ghl_weekly_schedule_rules_map_to_passport_hours() -> None:
     )
     assert (0, hours[0][1], hours[0][2]) in hours
     assert (6, hours[1][1], hours[1][2]) in hours
+
+
+
+def test_ghl_schedule_expands_into_next_fourteen_days_in_utc() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.ghl_staff_user_service import _expand_schedule_windows
+
+    start = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    windows = _expand_schedule_windows(
+        [
+            {
+                "id": "schedule-1",
+                "timezone": "America/New_York",
+                "rules": [
+                    {"type": "wday", "day": "monday", "intervals": [{"from": "09:00", "to": "17:00"}]},
+                ],
+            }
+        ],
+        fallback_timezone="UTC",
+        window_start=start,
+        window_end=start + timedelta(days=14),
+    )
+
+    assert len(windows) == 2
+    assert all(item[2] == "schedule-1" for item in windows)
+    assert windows[0][0].hour == 13  # 09:00 America/New_York in September
+
+
+def test_staff_pool_roles_are_independent() -> None:
+    from app.schemas.configuration import CalendarCreate
+
+    calendar = CalendarCreate(
+        name="River trip",
+        slug="river-trip",
+        duration_minutes=60,
+        required_staff_roles=["Captain", "First Mate"],
+    )
+    assert calendar.required_staff_roles == ["Captain", "First Mate"]
+
+    with pytest.raises(ValueError):
+        CalendarCreate(
+            name="No pool",
+            slug="no-pool",
+            duration_minutes=60,
+            required_staff_roles=[],
+        )

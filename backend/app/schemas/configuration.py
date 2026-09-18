@@ -72,6 +72,13 @@ class CategoryRead(EntityModel):
 
 
 AvailabilityMode = Literal["day_wise", "date_wise", "pushed"]
+StaffPoolRole = Literal["Captain", "First Mate", "Guide", "Deckhand", "Instructor"]
+
+
+def _normalize_staff_roles(value: list[StaffPoolRole]) -> list[StaffPoolRole]:
+    if not value:
+        raise ValueError("At least one required staff role must be selected")
+    return list(dict.fromkeys(value))
 
 
 class CalendarCreate(BaseModel):
@@ -88,6 +95,12 @@ class CalendarCreate(BaseModel):
     base_price_minor: int = Field(default=0, ge=0)
     currency: str = Field(default="usd", pattern=r"^[a-zA-Z]{3}$")
     availability_mode: AvailabilityMode = "day_wise"
+    required_staff_roles: list[StaffPoolRole] = Field(default_factory=lambda: ["Captain"], max_length=5)
+
+    @field_validator("required_staff_roles")
+    @classmethod
+    def normalize_staff_roles(cls, value: list[StaffPoolRole]) -> list[StaffPoolRole]:
+        return _normalize_staff_roles(value)
 
     @field_validator("currency")
     @classmethod
@@ -109,11 +122,17 @@ class CalendarUpdate(BaseModel):
     base_price_minor: int | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, pattern=r"^[a-zA-Z]{3}$")
     availability_mode: AvailabilityMode | None = None
+    required_staff_roles: list[StaffPoolRole] | None = Field(default=None, max_length=5)
 
     @field_validator("currency")
     @classmethod
     def normalize_currency(cls, value: str | None) -> str | None:
         return value.lower() if value else value
+
+    @field_validator("required_staff_roles")
+    @classmethod
+    def normalize_staff_roles(cls, value: list[StaffPoolRole] | None) -> list[StaffPoolRole] | None:
+        return _normalize_staff_roles(value) if value is not None else None
 
 
 class CalendarRead(EntityModel):
@@ -130,6 +149,7 @@ class CalendarRead(EntityModel):
     base_price_minor: int
     currency: str
     availability_mode: str
+    required_staff_roles: list[str]
 
 
 class CalendarHourWrite(BaseModel):

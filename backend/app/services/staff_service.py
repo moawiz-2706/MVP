@@ -366,8 +366,8 @@ class StaffService:
             found.setdefault(assignment.staff_id, (assignment, calendar_name))
         return found
 
-    @staticmethod
     def _unavailable_reason(
+        self,
         staff: Staff,
         hours: WeeklyHours,
         overlap: tuple[StaffAssignment, str] | None,
@@ -385,7 +385,7 @@ class StaffService:
                 f"{staff.name} is already assigned to {calendar_name} "
                 f"({busy_from:%b %d, %H:%M}–{busy_to:%H:%M})"
             )
-        if not fits_weekly_hours(hours, start_at.astimezone(zone), end_at.astimezone(zone)):
+        if not _staff_covers_interval(self.db, staff, start_at, end_at):
             return f"{staff.name} is not working at that time"
         return None
 

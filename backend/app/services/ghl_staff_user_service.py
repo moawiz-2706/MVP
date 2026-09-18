@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 import string
 import uuid
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models.entities import GHLInstallation, Operator, Staff, StaffHour
+from app.models.entities import GHLInstallation, Operator, Staff, StaffAvailabilityWindow, StaffHour
 from app.services.ghl_client import GHLAPIError, GHLClient
+from app.utils.timezone import require_timezone, wall_time_exists
 
 SYNC_PENDING = "pending"
 SYNCING = "syncing"
@@ -72,6 +73,38 @@ def _schedule_rules(schedule: dict[str, Any]) -> list[tuple[int, time, time]]:
             if start and end and start < end:
                 parsed.add((day, start, end))
     return sorted(parsed, key=lambda item: (item[0], item[1], item[2]))
+
+
+def _expand_schedule_windows(
+    schedules: list[dict[str, Any]],
+    *,
+    fallback_timezone: str,
+    window_start: datetime,
+    window_end: datetime,
+) -> list[tuple[datetime, datetime, str | None]]:
+    windows: set[tuple[datetime, datetime, str | None]] = set()
+    for schedule in schedules:
+        timezone_name = str(schedule.get("timezone") or schedule.get("timeZone") or fallback_timezone)
+        zone = require_timezone(timezone_name)
+        rules = _schedule_rules(schedule)
+        local_start = window_start.astimezone(zone).date() - timedelta(days=1)
+        local_end = window_end.astimezone(zone).date() + timedelta(days=1)
+        current = local_start
+        schedule_id = schedule.get("_schedule_id") or schedule.get("id") or schedule.get("scheduleId")
+        while current <= local_end:
+            for day, opens, closes in rules:
+                if current.weekday() != day:
+                    continue
+                local_open = datetime.combine(current, opens, tzinfo=zone)
+                local_close = datetime.combine(current, closes, tzinfo=zone)
+                if not wall_time_exists(local_open) or not wall_time_exists(local_close):
+                    continue
+                start_at = max(local_open.astimezone(UTC), window_start)
+                end_at = min(local_close.astimezone(UTC), window_end)
+                if start_at < end_at:
+                    windows.add((start_at, end_at, str(schedule_id) if schedule_id else None))
+            current += timedelta(days=1)
+    return sorted(windows, key=lambda item: (item[0], item[1], item[2] or ""))
 
 # The documented create-user API requires a password, but Passport never stores or
 # returns it.  Build it from a CSPRNG and guarantee the special-character rule.
@@ -318,6 +351,7 @@ class GHLStaffUserService:
                 )
                 detail = detail.get("schedule", detail) if isinstance(detail, dict) else {}
                 if isinstance(detail, dict):
+                    detail["_schedule_id"] = str(schedule_id)
                     schedules.append(detail)
             else:
                 schedules.append(summary)
@@ -351,12 +385,33 @@ class GHLStaffUserService:
             for schedule in schedules:
                 time_zone = time_zone or schedule.get("timezone") or schedule.get("timeZone")
                 hours.update(_schedule_rules(schedule))
+            effective_timezone = str(time_zone or operator.time_zone)
+            window_start = datetime.now(UTC)
+            window_end = window_start + timedelta(days=14)
+            windows = _expand_schedule_windows(
+                schedules,
+                fallback_timezone=effective_timezone,
+                window_start=window_start,
+                window_end=window_end,
+            )
             self.db.execute(delete(StaffHour).where(StaffHour.staff_id == staff.id))
             self.db.add_all(
                 StaffHour(staff_id=staff.id, day_of_week=day, start_time=start, end_time=end)
                 for day, start, end in sorted(hours)
             )
-            staff.availability_time_zone = str(time_zone) if time_zone else None
+            self.db.execute(
+                delete(StaffAvailabilityWindow).where(StaffAvailabilityWindow.staff_id == staff.id)
+            )
+            self.db.add_all(
+                StaffAvailabilityWindow(
+                    staff_id=staff.id,
+                    start_at=start_at,
+                    end_at=end_at,
+                    source_schedule_id=schedule_id,
+                )
+                for start_at, end_at, schedule_id in windows
+            )
+            staff.availability_time_zone = effective_timezone
             staff.availability_sync_status = SYNCED
             staff.availability_last_error = None
             staff.availability_last_synced_at = datetime.now(UTC)
@@ -365,6 +420,9 @@ class GHLStaffUserService:
                 "profile": self._safe_profile(remote),
                 "time_zone": staff.availability_time_zone,
                 "hours": sorted(hours),
+                "window_start": window_start,
+                "window_end": window_end,
+                "window_count": len(windows),
             }
         except Exception as exc:
             staff.availability_sync_status = SYNC_FAILED
@@ -384,9 +442,39 @@ class GHLStaffUserService:
                 {"day_of_week": day, "start_time": start, "end_time": end}
                 for day, start, end in result["hours"]
             ],
+            "window_start": result["window_start"],
+            "window_end": result["window_end"],
+            "window_count": result["window_count"],
             "availability_sync_status": staff.availability_sync_status,
             "availability_last_synced_at": staff.availability_last_synced_at,
         }
+
+    def sync_all_availability(self) -> dict[str, int | str | None]:
+        """Refresh every linked staff member for this operator.
+
+        This is called by the protected daily cron. It intentionally reconciles
+        only availability; it does not modify any GHL user profile or permission.
+        """
+        staff_ids = list(
+            self.db.scalars(
+                select(Staff.id).where(
+                    Staff.operator_id == self.operator_id,
+                    Staff.deleted_at.is_(None),
+                    Staff.is_active.is_(True),
+                    Staff.ghl_user_id.is_not(None),
+                )
+            )
+        )
+        synced = failed = 0
+        last_error: str | None = None
+        for staff_id in staff_ids:
+            try:
+                self.sync_availability(staff_id)
+                synced += 1
+            except Exception as exc:
+                failed += 1
+                last_error = str(exc)[:2000]
+        return {"synced": synced, "failed": failed, "error": last_error}
 
     @staticmethod
     def _remote_profile(remote: dict[str, Any]) -> tuple[str, str | None, str | None]:
@@ -595,4 +683,3 @@ __all__ = [
     "_remote_role",
     "_temporary_password",
 ]
-
