@@ -25,11 +25,13 @@ def test_create_payload_disables_every_permission_and_scope() -> None:
     assert not any(permissions.values())
 
 
-def test_remote_user_location_and_role_are_strict() -> None:
-    remote = {"locationIds": ["loc-1"], "roles": {"role": "user"}}
-    assert GHLStaffUserService._is_same_location_user(remote, "loc-1")
+def test_remote_staff_location_accepts_user_and_admin_roles() -> None:
+    for role in ("user", "admin", "administrator"):
+        assert GHLStaffUserService._is_same_location_user(
+            {"locationIds": ["loc-1"], "roles": {"role": role}}, "loc-1"
+        )
     assert not GHLStaffUserService._is_same_location_user(
-        {"locationIds": ["loc-1"], "roles": {"role": "admin"}}, "loc-1"
+        {"locationIds": ["loc-1"], "roles": {"role": "agency"}}, "loc-1"
     )
     assert not GHLStaffUserService._is_same_location_user(
         {"locationIds": ["loc-2"], "roles": {"role": "user"}}, "loc-1"
@@ -58,3 +60,27 @@ def test_payload_does_not_include_password() -> None:
     payload = GHLStaffUserService.payload(staff)
     assert "password" not in payload
     assert "temporary_password" not in payload
+
+
+
+def test_directory_search_includes_admin_accounts() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def request(self, method: str, path: str, **kwargs: object) -> dict[str, object]:
+            self.calls.append({"method": method, "path": path, **kwargs})
+            return {
+                "users": [
+                    {"id": "user-1", "role": "user", "locationIds": ["loc-1"]},
+                    {"id": "admin-1", "role": "admin", "locationIds": ["loc-1"]},
+                    {"id": "agency-1", "role": "agency", "locationIds": ["loc-1"]},
+                ]
+            }
+
+    service = GHLStaffUserService.__new__(GHLStaffUserService)
+    service.client = FakeClient()
+    users = service._list_remote_users("company-1", "loc-1")
+
+    assert {user["id"] for user in users} == {"user-1", "admin-1"}
+    assert "role" not in service.client.calls[0]["params"]
