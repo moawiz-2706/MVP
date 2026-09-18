@@ -210,7 +210,7 @@ function SlotCalendarDetail({ entry, startAt, onBack, onOpenBooking }: { entry: 
   const roleOptions = Array.from(new Set((candidates.data || []).map((candidate) => candidate.custom_role).concat(entry.staff.map((member) => member.role)))).filter((option): option is string => Boolean(option)).sort();
   const matchesRole = (candidate: StaffCandidate, requiredRole: string | null | undefined) => !requiredRole || candidate.custom_role?.toLowerCase() === requiredRole.toLowerCase();
   const options = (candidates.data || []).filter((candidate) => !assigned.has(candidate.staff_id) && matchesRole(candidate, role.trim() || null));
-  const staffError = assign.error || unassign.error || rename.error;
+  const staffError = assign.error || reassign.error || unassign.error || rename.error;
 
   return (
     <>

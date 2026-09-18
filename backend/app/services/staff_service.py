@@ -28,6 +28,7 @@ from app.schemas.staff import (
     StaffUpdate,
 )
 from app.services.outbox_service import OutboxService
+from app.services.staffing_service import _staff_covers_interval
 from app.utils.timezone import require_timezone
 
 
