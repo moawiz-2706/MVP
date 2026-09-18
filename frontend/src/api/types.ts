@@ -111,6 +111,28 @@ export interface BookingNotificationsResponse {
   pending_count: number;
 }
 
+export type NotificationType = "booking_staff" | "calendar_availability" | "calendar_resources";
+export interface NotificationItem {
+  id: string;
+  type: NotificationType;
+  title: string;
+  description: string;
+  action_label: string;
+  calendar_id: Id;
+  calendar_name: string;
+  booking_id: Id | null;
+  customer_name: string | null;
+  start_at: string | null;
+  end_at: string | null;
+  required_roles: string[];
+  missing_roles: string[];
+}
+export interface NotificationsResponse {
+  items: NotificationItem[];
+  pending_count: number;
+  generated_at: string;
+}
+
 export interface PublicCalendar {
   id: Id;
   name: string;

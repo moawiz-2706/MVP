@@ -9,6 +9,7 @@ import { ResourcesPage } from "./resources/ResourcesPage";
 import { LocationsPage } from "./locations/LocationsPage";
 import { CalendarsPage } from "./calendars/CalendarsPage";
 import { StaffPage } from "./staff/StaffPage";
+import { NotificationsPage } from "./notifications/NotificationsPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { OperatorBookingPage } from "./public-booking/OperatorBookingPage";
 import { CategoryBookingPage } from "./public-booking/CategoryBookingPage";
@@ -25,6 +26,7 @@ const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/app" replace /> },
   { path: "/app", element: embedded, children: [
     { index: true, element: <BookingsPage /> },
+    { path: "notifications", element: <NotificationsPage /> },
     { path: "resources", element: <ResourcesPage /> },
     { path: "locations", element: <LocationsPage /> },
     { path: "calendars", element: <CalendarsPage /> },

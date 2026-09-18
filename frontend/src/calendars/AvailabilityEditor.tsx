@@ -31,14 +31,14 @@ function groupDateHours(rows: CalendarDateHour[]): DateRangeHours[] {
   return [...groups.values()];
 }
 
-type ModeProps = { calendar: Calendar; onCalendarChange: (calendar: Calendar) => void };
+type ModeProps = { calendar: Calendar; onCalendarChange: (calendar: Calendar) => void; onSaved?: () => void };
 
 /**
  * Availability is governed by exactly one mode. Each tab keeps its own saved
  * rows, but only the active mode is consulted by the availability engine —
  * saving a tab (or pushing a time) makes that tab the active mode.
  */
-export function AvailabilityEditor({ calendar, onCalendarChange }: ModeProps) {
+export function AvailabilityEditor({ calendar, onCalendarChange, onSaved }: ModeProps) {
   const active = activeMode(calendar);
   const [tab, setTab] = useState<Mode>(active);
   return (
@@ -51,14 +51,14 @@ export function AvailabilityEditor({ calendar, onCalendarChange }: ModeProps) {
       <p style={{ fontSize: 12, color: "#697386", marginTop: 10 }}>
         Only one mode controls availability. <strong>{modeLabels[active]}</strong> is currently active — saving another tab switches to it.
       </p>
-      {tab === "day_wise" && <DayWiseEditor calendar={calendar} onCalendarChange={onCalendarChange} />}
-      {tab === "date_wise" && <DateWiseEditor calendar={calendar} onCalendarChange={onCalendarChange} />}
-      {tab === "pushed" && <PushEditor calendar={calendar} onCalendarChange={onCalendarChange} />}
+      {tab === "day_wise" && <DayWiseEditor calendar={calendar} onCalendarChange={onCalendarChange} onSaved={onSaved} />}
+      {tab === "date_wise" && <DateWiseEditor calendar={calendar} onCalendarChange={onCalendarChange} onSaved={onSaved} />}
+      {tab === "pushed" && <PushEditor calendar={calendar} onCalendarChange={onCalendarChange} onSaved={onSaved} />}
     </>
   );
 }
 
-function DayWiseEditor({ calendar, onCalendarChange }: ModeProps) {
+function DayWiseEditor({ calendar, onCalendarChange, onSaved }: ModeProps) {
   const client = useQueryClient();
   const query = useQuery({ queryKey: ["hours", calendar.id], queryFn: () => api<CalendarHour[]>(`/calendars/${calendar.id}/hours`) });
   const [hours, setHours] = useState<WeeklyInterval[]>([]);
@@ -78,6 +78,7 @@ function DayWiseEditor({ calendar, onCalendarChange }: ModeProps) {
       setHours(result.map((h) => ({ day_of_week: h.day_of_week, start_time: hhmm(h.start_time), end_time: hhmm(h.end_time) })));
       void client.invalidateQueries({ queryKey: ["hours", calendar.id] });
       void client.invalidateQueries({ queryKey: ["calendars"] });
+      onSaved?.();
     },
   });
 
@@ -91,7 +92,7 @@ function DayWiseEditor({ calendar, onCalendarChange }: ModeProps) {
   );
 }
 
-function DateWiseEditor({ calendar, onCalendarChange }: ModeProps) {
+function DateWiseEditor({ calendar, onCalendarChange, onSaved }: ModeProps) {
   const client = useQueryClient();
   const query = useQuery({ queryKey: ["date-hours", calendar.id], queryFn: () => api<CalendarDateHour[]>(`/calendars/${calendar.id}/date-hours`) });
   const [ranges, setRanges] = useState<DateRangeHours[]>([]);
@@ -117,6 +118,7 @@ function DateWiseEditor({ calendar, onCalendarChange }: ModeProps) {
       setRanges(groupDateHours(result));
       void client.invalidateQueries({ queryKey: ["date-hours", calendar.id] });
       void client.invalidateQueries({ queryKey: ["calendars"] });
+      onSaved?.();
     },
   });
 
@@ -168,7 +170,7 @@ function endPreview(start: string, minutes: number): string {
  * Push availability: only start times the operator pushes are bookable. The end
  * is start + the calendar's duration, and the slot interval does not apply.
  */
-function PushEditor({ calendar, onCalendarChange }: ModeProps) {
+function PushEditor({ calendar, onCalendarChange, onSaved }: ModeProps) {
   const client = useQueryClient();
   const { me } = useSession();
   const tz = me.operator.time_zone;
@@ -185,12 +187,12 @@ function PushEditor({ calendar, onCalendarChange }: ModeProps) {
       await activate();
       return result;
     },
-    onSuccess: (result) => { client.setQueryData(["pushed-slots", calendar.id], result); void refresh(); },
+    onSuccess: (result) => { client.setQueryData(["pushed-slots", calendar.id], result); void refresh(); onSaved?.(); },
   });
-  const switchMode = useMutation({ mutationFn: activate, onSuccess: () => void refresh() });
+  const switchMode = useMutation({ mutationFn: activate, onSuccess: () => { void refresh(); onSaved?.(); } });
   const remove = useMutation({
     mutationFn: (id: string) => api<void>(`/calendars/${calendar.id}/pushed-slots/${id}`, { method: "DELETE" }),
-    onSuccess: () => { void client.invalidateQueries({ queryKey: ["pushed-slots", calendar.id] }); void refresh(); },
+    onSuccess: () => { void client.invalidateQueries({ queryKey: ["pushed-slots", calendar.id] }); void refresh(); onSaved?.(); },
   });
   const error = push.error || remove.error || switchMode.error;
 

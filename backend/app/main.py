@@ -12,6 +12,7 @@ from app.api.v1 import (
     ghl_oauth,
     ghl_webhooks,
     internal_jobs,
+    notifications,
     orders,
     public,
     staff,
@@ -53,7 +54,12 @@ app.add_exception_handler(DomainError, domain_error_handler)
 async def integrity_error_handler(_request: Request, _exc: IntegrityError) -> JSONResponse:
     return JSONResponse(
         status_code=409,
-        content={"error": {"code": "integrity_conflict", "message": "That value conflicts with existing data"}},
+        content={
+            "error": {
+                "code": "integrity_conflict",
+                "message": "That value conflicts with existing data",
+            }
+        },
     )
 
 
@@ -82,6 +88,7 @@ for router in (
     ghl_oauth.router,
     ghl_webhooks.router,
     internal_jobs.router,
+    notifications.router,
     orders.router,
     public.router,
     staff.router,

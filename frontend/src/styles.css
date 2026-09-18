@@ -131,6 +131,29 @@ a { color: inherit; text-decoration: none; }
 .drawer-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--line); padding-bottom: 15px; margin-bottom: 18px; }
 .drawer-header h2 { font-size: 17px; margin: 0 0 4px; }
 .drawer-header p { margin: 0; color: var(--muted); font-size: 11px; }
+.notification-list { display: grid; gap: 10px; max-width: 900px; }
+.notification-card { width: 100%; display: flex; align-items: center; gap: 13px; padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: white; text-align: left; color: inherit; }
+.notification-card:hover { border-color: #b8d8d1; background: #fbfdfc; box-shadow: 0 4px 14px rgba(25, 50, 45, .06); }
+.notification-icon { width: 38px; height: 38px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 10px; color: #125b4e; background: var(--accent-soft); }
+.notification-icon.booking_staff { color: #8a5314; background: #fff4df; }
+.notification-icon.calendar_resources { color: #275d87; background: #eaf3fb; }
+.notification-card-body { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.notification-card-body strong { font-size: 13px; color: #202b37; }
+.notification-card-body span { color: #586575; font-size: 12px; line-height: 1.45; }
+.notification-card-body small { color: var(--muted); font-size: 11px; }
+.notification-drawer { width: min(560px, 100vw); }
+.notification-drawer-summary { padding: 12px; border-radius: 8px; background: #f7f9fa; border: 1px solid #eef0f2; margin-bottom: 18px; }
+.notification-drawer-summary strong { display: block; font-size: 13px; margin-bottom: 4px; }
+.notification-drawer-summary p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.drawer-action-content { display: grid; gap: 13px; }
+.notification-detail-meta { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.notification-detail-meta strong { color: #202b37; font-size: 14px; }
+.drawer-resource-list { display: grid; gap: 8px; }
+.drawer-resource-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.drawer-resource-row .check-field { flex: 1; }
+.drawer-resource-row .check-field span { display: grid; gap: 3px; }
+.drawer-resource-row small { color: var(--muted); font-size: 11px; }
+.resource-quantity { width: 90px !important; }
 .detail-section { margin: 0 0 20px; }
 .detail-section h3 { font-size: 10px; color: #7d8794; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 9px; }
 .detail-list { margin: 0; display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 12px; font-size: 12px; }
