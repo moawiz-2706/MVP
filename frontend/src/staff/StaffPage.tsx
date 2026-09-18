@@ -45,10 +45,15 @@ function StaffRoleEditor({ member, onOpen }: { member: Staff; onOpen: (member: S
 export function StaffPage() {
   const client = useQueryClient();
   const [selected, setSelected] = useState<Staff | null>(null);
-  const { data = [], isLoading, error } = useQuery({ queryKey: ["staff"], queryFn: () => api<Staff[]>("/staff") });
+  const { data = [], isLoading, error } = useQuery({
+    queryKey: ["staff"],
+    queryFn: () => api<Staff[]>("/staff"),
+    refetchInterval: 15000,
+    refetchIntervalInBackground: true,
+  });
   const syncStarted = useRef(false);
   const directorySync = useMutation({
-    mutationFn: () => api<{ synced: number; created: number; updated: number; availability_synced: number; availability_failed: number; error: string | null }>("/staff-ghl/directory/sync", json("POST", {})),
+    mutationFn: () => api<{ synced: number; created: number; updated: number; deactivated: number; availability_synced: number; availability_failed: number; error: string | null }>("/staff-ghl/directory/sync", json("POST", {})),
     onSuccess: () => client.invalidateQueries({ queryKey: ["staff"] }),
   });
   useEffect(() => { if (!syncStarted.current) { syncStarted.current = true; directorySync.mutate(); } }, []);
@@ -59,7 +64,7 @@ export function StaffPage() {
     <PageHeader title="Staff roles" description="GHL manages staff identity and availability. Passport manages only the fixed custom role used for booking eligibility." action={<button className="button secondary" disabled={directorySync.isPending} onClick={() => directorySync.mutate()}><RefreshCw size={16} />{directorySync.isPending ? "Syncing GHL…" : "Sync GHL staff"}</button>} />
     {error && <div className="error-banner">{error.message}</div>}
     {directorySync.error && <div className="error-banner">GHL staff synchronization failed: {directorySync.error.message}</div>}
-    {directorySync.isSuccess && <div className="success-banner">GHL staff and weekly availability synchronized into Passport.</div>}
+    {directorySync.isSuccess && <div className="success-banner">GHL staff and weekly availability synchronized into Passport.{directorySync.data.deactivated ? ` ${directorySync.data.deactivated} removed GHL staff member${directorySync.data.deactivated === 1 ? " was" : "s were"} marked inactive.` : ""}</div>}
     {unassignedCount > 0 && <div className="warning-banner">{unassignedCount} synced staff member{unassignedCount === 1 ? "" : "s"} still need a custom role.</div>}
     {isLoading ? <div className="loading">Loading staff from Passport…</div> : !syncedStaff.length ? <EmptyState title="No synced GHL staff" copy="Click Sync GHL staff after the GHL users.readonly and calendars.readonly scopes have been authorized." /> : <div className="card table-card"><table className="data-table staff-directory-table"><thead><tr><th>Name and email</th><th>Phone</th><th>GHL status</th><th>GHL user ID</th><th>Passport custom role</th></tr></thead><tbody>{syncedStaff.map((member) => <StaffRoleEditor key={member.id} member={member} onOpen={setSelected} />)}</tbody></table></div>}
     <p className="muted-note" style={{ marginTop: 12 }}>Click a staff member’s name to view the weekly availability currently stored in Passport. Name, email, phone, GHL user ID, permissions, schedule, and account status are read-only. Only the predefined Passport role can be changed.</p>

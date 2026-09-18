@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # Existing GHL account-user directory sync is automatic after migration 012
     # and the users.readonly scope is available.
     ghl_staff_user_sync_enabled: bool = True
+    # Used by the standalone worker. Vercel functions cannot keep a persistent
+    # process alive, so production deployments should run backend/worker.py on
+    # an always-on worker host for near-real-time synchronization.
+    ghl_staff_sync_interval_seconds: int = Field(default=15, ge=10, le=60)
     cron_secret: str = ""
 
     @field_validator("cors_origins", mode="before")

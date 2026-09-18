@@ -73,3 +73,13 @@ calendars default to `Captain`; selecting `First Mate` adds a separate pool, so
 both pools must have at least one available member for a slot to be bookable.
 The fixed custom-role dropdown contains only Captain, First Mate, Guide, Deckhand,
 and Instructor.
+
+For near-real-time synchronization, run `python worker.py` from the `backend/`
+directory on an always-on worker service. It performs a complete GHL directory
+and availability reconciliation every `GHL_STAFF_SYNC_INTERVAL_SECONDS` seconds
+(15 by default), keeps removed GHL users inactive locally, and preserves their
+historical bookings. Vercel cannot keep a persistent 10–15-second process alive;
+its protected daily cron remains a fallback reconciliation mechanism only. Set
+the same production environment variables on the worker as on the API, including
+`DATABASE_URL`, the encrypted GHL credentials, `GHL_STAFF_USER_SYNC_ENABLED`,
+`GHL_STAFF_SYNC_INTERVAL_SECONDS`, and the production secrets.

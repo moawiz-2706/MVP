@@ -101,6 +101,7 @@ class GHLStaffDirectoryResponse(BaseModel):
     synced: int
     created: int
     updated: int
+    deactivated: int = 0
     availability_synced: int = 0
     availability_failed: int = 0
     error: str | None = None

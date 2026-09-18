@@ -67,7 +67,12 @@ def _setup(db, *, duration: int = 180):
     )
     db.add(cal)
     db.flush()
-    captain = Staff(operator_id=op.id, name="Test Captain", is_active=True)
+    captain = Staff(
+        operator_id=op.id,
+        name="Test Captain",
+        custom_role="Captain",
+        is_active=True,
+    )
     db.add(captain)
     db.flush()
     db.add_all(

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 import uuid
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
+from app.models.entities import Operator, Staff, StaffAvailabilityWindow
 from app.services.ghl_staff_user_service import (
     GHLStaffUserService,
     _remote_location_ids,
@@ -147,3 +150,65 @@ def test_staff_pool_roles_are_independent() -> None:
             duration_minutes=60,
             required_staff_roles=[],
         )
+
+
+@pytest.mark.skipif(
+    not os.getenv("TEST_DATABASE_URL"),
+    reason="Set TEST_DATABASE_URL to run the directory reconciliation integration test",
+)
+def test_directory_deactivates_gone_users_and_clears_stale_availability(db, monkeypatch) -> None:
+    operator = Operator(
+        ghl_location_id="loc-directory-test",
+        name="Directory Test",
+        slug=f"directory-{uuid.uuid4().hex[:8]}",
+        time_zone="UTC",
+    )
+    db.add(operator)
+    db.flush()
+    removed = Staff(
+        operator_id=operator.id,
+        name="Removed User",
+        email="removed@example.com",
+        ghl_user_id="gone-user",
+        is_active=True,
+        availability_sync_status="synced",
+    )
+    db.add(removed)
+    db.flush()
+    db.add(
+        StaffAvailabilityWindow(
+            staff_id=removed.id,
+            start_at=datetime.now(UTC) + timedelta(hours=1),
+            end_at=datetime.now(UTC) + timedelta(hours=2),
+        )
+    )
+    db.commit()
+
+    service = GHLStaffUserService.__new__(GHLStaffUserService)
+    service.db = db
+    service.operator_id = operator.id
+    service.settings = SimpleNamespace(ghl_staff_user_sync_enabled=True)
+    service._installation = lambda required_scopes=None: (
+        SimpleNamespace(company_id="company-directory-test"),
+        operator,
+    )
+    service._list_remote_users = lambda company_id, location_id: [
+        {
+            "id": "kept-user",
+            "name": "Kept User",
+            "email": "kept@example.com",
+            "locationIds": [location_id],
+            "role": "user",
+        }
+    ]
+    monkeypatch.setattr(service, "sync_availability", lambda staff_id: {})
+
+    result = service.sync_directory()
+    db.refresh(removed)
+
+    assert result["deactivated"] == 1
+    assert removed.is_active is False
+    assert removed.ghl_user_sync_status == "removed"
+    assert removed.availability_sync_status == "removed"
+    assert db.query(StaffAvailabilityWindow).filter_by(staff_id=removed.id).count() == 0
+    assert db.query(Staff).filter_by(ghl_user_id="kept-user").count() == 1

@@ -12,7 +12,6 @@ from app.services.ghl_staff_user_service import GHLStaffUserService
 from app.services.outbox_service import OutboxService
 from app.services.reminder_service import ReminderService
 
-
 router = APIRouter(prefix="/internal", tags=["internal"])
 DB = Annotated[Session, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings)]
@@ -57,18 +56,33 @@ def daily_cron(
     """
     _authorize(settings, authorization, x_cron_secret)
     queued = ReminderService(db).enqueue()
+    directory_synced = directory_failed = deactivated = 0
     availability_synced = availability_failed = 0
-    for operator_id in db.scalars(
-        select(GHLInstallation.operator_id).where(
-            GHLInstallation.is_installed.is_(True),
-            GHLInstallation.lifecycle_status == "active",
+    operator_ids = list(
+        db.scalars(
+            select(GHLInstallation.operator_id).where(
+                GHLInstallation.is_installed.is_(True),
+                GHLInstallation.lifecycle_status == "active",
+            )
         )
-    ):
-        result = GHLStaffUserService(db, operator_id).sync_all_availability()
-        availability_synced += int(result["synced"])
-        availability_failed += int(result["failed"])
+    )
+    for operator_id in operator_ids:
+        try:
+            result = GHLStaffUserService(db, operator_id).sync_all()
+            directory_synced += int(result["synced"])
+            deactivated += int(result.get("deactivated", 0))
+            availability_synced += int(result.get("availability_synced", 0))
+            availability_failed += int(result.get("availability_failed", 0))
+        except Exception:
+            # One tenant's expired token or missing scope must not prevent
+            # reminders and synchronization for every other tenant.
+            db.rollback()
+            directory_failed += 1
     return {
         **queued,
+        "directory_synced": directory_synced,
+        "directory_failed": directory_failed,
+        "deactivated": deactivated,
         "availability_synced": availability_synced,
         "availability_failed": availability_failed,
         **OutboxService(db, settings).drain(budget_seconds=DRAIN_BUDGET_SECONDS),

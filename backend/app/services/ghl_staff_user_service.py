@@ -21,6 +21,7 @@ SYNCED = "synced"
 NEEDS_PERMISSION_REVIEW = "needs_permission_review"
 MANUAL_REVIEW = "manual_review"
 SYNC_FAILED = "failed"
+SYNC_REMOVED = "removed"
 
 _DAY_NAMES = {
     "monday": 0,
@@ -511,11 +512,13 @@ class GHLStaffUserService:
             for staff in local_staff
             if staff.email and not staff.ghl_user_id
         }
-        created = updated = 0
+        created = updated = deactivated = 0
+        seen_remote_ids: set[str] = set()
         for remote in remote_users:
             remote_id = _remote_user_id(remote)
             if not remote_id:
                 continue
+            seen_remote_ids.add(remote_id)
             name, email, phone = self._remote_profile(remote)
             staff = by_ghl_id.get(remote_id) or (by_email.get(email.casefold()) if email else None)
             if staff is None:
@@ -536,25 +539,65 @@ class GHLStaffUserService:
                 staff.email = email
                 staff.phone = phone
                 staff.is_active = not bool(remote.get("deleted"))
-                if staff.ghl_user_sync_status in {"not_requested", SYNC_FAILED, MANUAL_REVIEW}:
+                if staff.ghl_user_sync_status in {
+                    "not_requested",
+                    SYNC_FAILED,
+                    MANUAL_REVIEW,
+                    SYNC_REMOVED,
+                }:
                     staff.ghl_user_sync_status = NEEDS_PERMISSION_REVIEW
                 updated += 1
             by_ghl_id[remote_id] = staff
+
+        # The list response is authoritative only after the complete paginated
+        # request succeeds. Keep historical rows for bookings, but make users
+        # missing from GHL unavailable for new bookings and remove stale cache
+        # rows so old schedules cannot continue to open booking slots.
+        for staff in local_staff:
+            if staff.ghl_user_id and staff.ghl_user_id not in seen_remote_ids:
+                if staff.is_active or staff.availability_sync_status != SYNC_REMOVED:
+                    deactivated += 1
+                staff.is_active = False
+                staff.availability_sync_status = SYNC_REMOVED
+                staff.availability_last_error = (
+                    "HighLevel no longer returns this user for the installed sub-account"
+                )
+                staff.availability_last_synced_at = datetime.now(UTC)
+                staff.ghl_user_sync_status = SYNC_REMOVED
+                self.db.execute(delete(StaffHour).where(StaffHour.staff_id == staff.id))
+                self.db.execute(
+                    delete(StaffAvailabilityWindow).where(
+                        StaffAvailabilityWindow.staff_id == staff.id
+                    )
+                )
+
         self.db.commit()
         availability_failed = 0
+        availability_synced = 0
         for staff in by_ghl_id.values():
+            if not staff.is_active:
+                continue
             try:
                 self.sync_availability(staff.id)
+                availability_synced += 1
             except Exception:
                 availability_failed += 1
         return {
             "synced": created + updated,
             "created": created,
             "updated": updated,
-            "availability_synced": len(by_ghl_id) - availability_failed,
+            "deactivated": deactivated,
+            "availability_synced": availability_synced,
             "availability_failed": availability_failed,
             "error": None,
         }
+
+    def sync_all(self) -> dict[str, int | str | None]:
+        """Reconcile the complete GHL directory and cached availability."""
+        if not self.settings.ghl_staff_user_sync_enabled:
+            raise ConflictError("GHL staff directory sync is disabled")
+        result = self.sync_directory()
+        return result
 
     @staticmethod
     def _error_message(exc: Exception) -> str:
@@ -678,6 +721,7 @@ __all__ = [
     "GHLStaffUserService",
     "MANUAL_REVIEW",
     "NEEDS_PERMISSION_REVIEW",
+    "SYNC_REMOVED",
     "SYNCED",
     "_remote_location_ids",
     "_remote_role",

@@ -75,7 +75,12 @@ def _calendar(db, op, *, duration=180, active=True, deleted=False) -> Calendar:
         )
     db.flush()
     if active and not deleted:
-        captain = Staff(operator_id=op.id, name="Test Captain", is_active=True)
+        captain = Staff(
+            operator_id=op.id,
+            name="Test Captain",
+            custom_role="Captain",
+            is_active=True,
+        )
         db.add(captain)
         db.flush()
         db.add_all(
@@ -279,6 +284,64 @@ def test_spec153_17_cross_operator_resource_rejected(db) -> None:
     # Passing another operator's id must not resolve this calendar.
     with pytest.raises(NotFoundError):
         AvailabilityService(db).check(cal.id, _start(10), 1, operator_id=other.id)
+
+
+def test_all_attached_resources_are_required(db) -> None:
+    op = _operator(db)
+    cal = _calendar(db, op)
+    boat = _resource(db, op, quantity=2)
+    equipment = _resource(db, op, quantity=2)
+    _map(db, cal, boat)
+    _map(db, cal, equipment)
+    db.commit()
+
+    engine = AvailabilityService(db)
+    assert engine.check(cal.id, _start(10), 1, operator_id=op.id).available
+
+    # Occupying only one shared component makes the complete calendar slot
+    # unavailable even though the other attached resource still has capacity.
+    _booking(db, op, cal, equipment, start=_start(10), end=_start(13), qty=2)
+    db.commit()
+    result = engine.check(cal.id, _start(10), 1, operator_id=op.id)
+    assert not result.available
+    assert result.reason == "Insufficient resource inventory"
+
+
+def test_each_required_staff_role_needs_an_available_member(db) -> None:
+    op = _operator(db)
+    cal = _calendar(db, op)
+    cal.required_staff_roles = ["Captain", "First Mate"]
+    res = _resource(db, op)
+    _map(db, cal, res)
+    first_mate = Staff(
+        operator_id=op.id,
+        name="Test First Mate",
+        custom_role="First Mate",
+        is_active=True,
+    )
+    db.add(first_mate)
+    db.flush()
+    db.add_all(
+        [
+            StaffHour(
+                staff_id=first_mate.id,
+                day_of_week=dow,
+                start_time=time(0),
+                end_time=time(23, 59),
+            )
+            for dow in range(7)
+        ]
+    )
+    db.commit()
+
+    engine = AvailabilityService(db)
+    assert engine.check(cal.id, _start(10), 1, operator_id=op.id).available
+
+    first_mate.is_active = False
+    db.commit()
+    result = engine.check(cal.id, _start(10), 1, operator_id=op.id)
+    assert not result.available
+    assert "First Mate" in (result.reason or "")
 
 
 def test_spec154_18_row_lock_serializes_last_unit(engine) -> None:
