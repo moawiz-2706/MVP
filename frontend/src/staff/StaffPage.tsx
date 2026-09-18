@@ -2,36 +2,24 @@ import { RefreshCw, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, json } from "../api/client";
-import type { GHLStaffDetails, Staff } from "../api/types";
+import type { Staff } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
-import { formatLongDate, formatTime } from "../lib/datetime";
+import { formatLongDate } from "../lib/datetime";
 
 const STAFF_ROLES = ["Captain", "First Mate", "Guide", "Deckhand", "Instructor"] as const;
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-function displayProfileValue(value: unknown) {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+function clock(value: string) {
+  return value.slice(0, 5);
 }
 
 function StaffDetailsDialog({ staff, onClose }: { staff: Staff | null; onClose: () => void }) {
-  const details = useQuery({
-    queryKey: ["staff-ghl-details", staff?.id],
-    queryFn: () => api<GHLStaffDetails>(`/staff-ghl/${staff!.id}/details`),
-    enabled: Boolean(staff),
-    staleTime: 0,
-  });
-  const profile = details.data?.profile || {};
-  return <Modal open={Boolean(staff)} onOpenChange={(open) => !open && onClose()} title={staff ? `${staff.name} — GHL details` : "GHL staff details"} description="Read-only information retrieved from GoHighLevel, including the latest availability schedule.">
-    {details.isLoading && <div className="loading">Refreshing details and availability from GHL…</div>}
-    {details.error && <div className="error-banner">Unable to load the latest GHL details: {details.error.message}</div>}
-    {details.data && <div className="staff-details-dialog">
-      <section className="detail-section"><h3>GHL profile</h3><dl className="detail-list">{Object.entries(profile).map(([key, value]) => <span style={{ display: "contents" }} key={key}><dt>{key}</dt><dd>{displayProfileValue(value)}</dd></span>)}</dl></section>
-      <section className="detail-section"><h3>Availability from GHL Calendar</h3><dl className="detail-list"><dt>Time zone</dt><dd>{details.data.time_zone || "Not returned by GHL"}</dd><dt>Last synchronized</dt><dd>{details.data.availability_last_synced_at ? formatLongDate(details.data.availability_last_synced_at, details.data.time_zone || "UTC") : "Not synchronized"}</dd><dt>Rolling window</dt><dd>Next 14 days ({details.data.window_count ?? 0} intervals)</dd><dt>Sync status</dt><dd>{details.data.availability_sync_status}</dd></dl>{details.data.hours.length ? <div className="staff-schedule-list">{details.data.hours.map((hour) => <div className="staff-schedule-row" key={`${hour.day_of_week}-${hour.start_time}-${hour.end_time}`}><strong>{DAY_NAMES[hour.day_of_week] || `Day ${hour.day_of_week}`}</strong><span>{formatTime(`1970-01-01T${hour.start_time}Z`, details.data!.time_zone || "UTC")} – {formatTime(`1970-01-01T${hour.end_time}Z`, details.data!.time_zone || "UTC")}</span></div>)}</div> : <p className="muted-note">GHL returned no weekly availability intervals for this staff member.</p>}</section>
-      <p className="muted-note">These details and availability are controlled by GHL. Passport only stores the custom role shown on the Staff page.</p>
+  return <Modal open={Boolean(staff)} onOpenChange={(open) => !open && onClose()} title={staff ? `${staff.name} — weekly availability` : "Weekly staff availability"} description="Weekly availability synchronized from GHL and stored in Passport.">
+    {staff && <div className="staff-details-dialog">
+      <section className="detail-section"><h3>Weekly availability</h3><dl className="detail-list"><dt>Time zone</dt><dd>{staff.availability_time_zone || "UTC"}</dd><dt>Sync status</dt><dd>{staff.availability_sync_status}</dd><dt>Last synchronized</dt><dd>{staff.availability_last_synced_at ? formatLongDate(staff.availability_last_synced_at, staff.availability_time_zone || "UTC") : "Not synchronized"}</dd></dl>{staff.hours.length ? <div className="staff-schedule-list">{staff.hours.map((hour) => <div className="staff-schedule-row" key={`${hour.day_of_week}-${hour.start_time}-${hour.end_time}`}><strong>{DAY_NAMES[hour.day_of_week] || `Day ${hour.day_of_week}`}</strong><span>{clock(hour.start_time)} – {clock(hour.end_time)}</span></div>)}</div> : <p className="muted-note">No weekly availability is currently stored for this staff member. Use “Sync GHL staff” to refresh it.</p>}</section>
+      <p className="muted-note">This schedule is read from Passport’s database cache. GHL remains the source of truth; Passport does not edit staff availability.</p>
     </div>}
   </Modal>;
 }
@@ -70,11 +58,11 @@ export function StaffPage() {
   return <div className="page">
     <PageHeader title="Staff roles" description="GHL manages staff identity and availability. Passport manages only the fixed custom role used for booking eligibility." action={<button className="button secondary" disabled={directorySync.isPending} onClick={() => directorySync.mutate()}><RefreshCw size={16} />{directorySync.isPending ? "Syncing GHL…" : "Sync GHL staff"}</button>} />
     {error && <div className="error-banner">{error.message}</div>}
-    {directorySync.error && <div className="error-banner">GHL staff and availability sync failed: {directorySync.error.message}</div>}
-    {directorySync.isSuccess && <div className="success-banner">GHL staff and availability synchronized. Passport role assignments were preserved.</div>}
+    {directorySync.error && <div className="error-banner">GHL staff synchronization failed: {directorySync.error.message}</div>}
+    {directorySync.isSuccess && <div className="success-banner">GHL staff and weekly availability synchronized into Passport.</div>}
     {unassignedCount > 0 && <div className="warning-banner">{unassignedCount} synced staff member{unassignedCount === 1 ? "" : "s"} still need a custom role.</div>}
-    {isLoading ? <div className="loading">Loading GHL staff…</div> : !syncedStaff.length ? <EmptyState title="No synced GHL staff" copy="Click Sync GHL staff after the GHL users.readonly and calendars.readonly scopes have been authorized." /> : <div className="card table-card"><table className="data-table staff-directory-table"><thead><tr><th>Name and email</th><th>Phone</th><th>GHL status</th><th>GHL user ID</th><th>Passport custom role</th></tr></thead><tbody>{syncedStaff.map((member) => <StaffRoleEditor key={member.id} member={member} onOpen={setSelected} />)}</tbody></table></div>}
-    <p className="muted-note" style={{ marginTop: 12 }}>Click a staff member’s name to view the latest GHL profile and availability. Name, email, phone, GHL user ID, permissions, schedule, and account status are read-only. Only the predefined Passport role can be changed.</p>
+    {isLoading ? <div className="loading">Loading staff from Passport…</div> : !syncedStaff.length ? <EmptyState title="No synced GHL staff" copy="Click Sync GHL staff after the GHL users.readonly and calendars.readonly scopes have been authorized." /> : <div className="card table-card"><table className="data-table staff-directory-table"><thead><tr><th>Name and email</th><th>Phone</th><th>GHL status</th><th>GHL user ID</th><th>Passport custom role</th></tr></thead><tbody>{syncedStaff.map((member) => <StaffRoleEditor key={member.id} member={member} onOpen={setSelected} />)}</tbody></table></div>}
+    <p className="muted-note" style={{ marginTop: 12 }}>Click a staff member’s name to view the weekly availability currently stored in Passport. Name, email, phone, GHL user ID, permissions, schedule, and account status are read-only. Only the predefined Passport role can be changed.</p>
     <StaffDetailsDialog staff={selected} onClose={() => setSelected(null)} />
   </div>;
 }
