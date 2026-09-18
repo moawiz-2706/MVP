@@ -32,7 +32,7 @@ class GHLAppointmentService:
         self.db = db
         self.operator_id = operator_id
         self.settings = get_settings()
-        self.client = GHLClient(operator_id)
+        self.client = GHLClient(operator_id, db)
 
     @staticmethod
     def _appointment_title(

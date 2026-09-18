@@ -142,7 +142,7 @@ class GHLEmailService:
     def __init__(self, db: Session, operator_id: uuid.UUID) -> None:
         self.db = db
         self.operator_id = operator_id
-        self.client = GHLClient(operator_id)
+        self.client = GHLClient(operator_id, db)
 
     def _deliver(
         self,

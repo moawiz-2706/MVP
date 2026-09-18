@@ -59,7 +59,7 @@ class FakeGHL:
 
     calls: list[tuple[str, str, dict | None]] = []
 
-    def __init__(self, operator_id) -> None:
+    def __init__(self, operator_id, db=None) -> None:
         self.operator_id = operator_id
 
     def request(self, method, path, *, version="", params=None, json=None):

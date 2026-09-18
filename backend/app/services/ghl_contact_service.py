@@ -32,7 +32,7 @@ class GHLContactService:
     def __init__(self, db: Session, operator_id: uuid.UUID) -> None:
         self.db = db
         self.operator_id = operator_id
-        self.client = GHLClient(operator_id)
+        self.client = GHLClient(operator_id, db)
 
     def sync(self, order_id: uuid.UUID) -> str:
         """Create or update the customer's Contact and tag it passport-customer."""

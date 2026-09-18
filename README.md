@@ -83,3 +83,14 @@ its protected daily cron remains a fallback reconciliation mechanism only. Set
 the same production environment variables on the worker as on the API, including
 `DATABASE_URL`, the encrypted GHL credentials, `GHL_STAFF_USER_SYNC_ENABLED`,
 `GHL_STAFF_SYNC_INTERVAL_SECONDS`, and the production secrets.
+
+## Production database connection behavior
+
+The API and worker each create one SQLAlchemy engine per running process with a
+single pooled database connection and no overflow connections. GHL token refreshes
+reuse the request or worker session instead of opening a nested database session.
+This prevents `QueuePool limit ... overflow ... reached` errors on deployments with
+a limited database connection budget. A serverless deployment can still have one
+connection per simultaneously warm Vercel instance; this setting limits each
+process, not the entire distributed platform. Use the Supabase pooler URL in
+`DATABASE_URL` and keep only one persistent staff worker process running.

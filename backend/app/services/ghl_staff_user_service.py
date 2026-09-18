@@ -175,7 +175,7 @@ class GHLStaffUserService:
         self.db = db
         self.operator_id = operator_id
         self.settings = get_settings()
-        self.client = GHLClient(operator_id)
+        self.client = GHLClient(operator_id, db)
 
     def _staff(self, staff_id: uuid.UUID, *, lock: bool = False) -> Staff:
         statement = select(Staff).where(

@@ -14,15 +14,10 @@ def get_session_factory() -> sessionmaker[Session]:
     Deployment target is Supabase's session pooler (Supavisor) behind a
     serverless backend. The engine is created once per warm instance (this
     factory is cached) and holds at most ONE pooled connection for that
-    instance: pool_size=1 plus a small transient overflow. Concurrent requests in
-    the same instance queue for the pooled connection rather than opening more,
-    which keeps total connections bounded by the number of live instances.
-
-    The overflow is required, not optional: the GHL client refreshes rotating
-    tokens inside its own `SELECT ... FOR UPDATE` transaction, so a caller that
-    already holds the pooled connection needs a second one for the duration of
-    that refresh. With max_overflow=0 that path deadlocks until pool_timeout.
-    Overflow connections are closed when returned, so steady state stays at one.
+    instance: pool_size=1 and no overflow connections. Concurrent requests in
+    the same instance queue for the single connection rather than opening more.
+    GHL token refreshes reuse the caller's existing SQLAlchemy session, so token
+    refresh no longer needs a second connection.
 
     Notes:
     - pool_pre_ping recovers from connections the pooler has dropped while idle;
@@ -36,7 +31,7 @@ def get_session_factory() -> sessionmaker[Session]:
     engine = create_engine(
         settings.database_url,
         pool_size=1,
-        max_overflow=settings.db_max_overflow,
+        max_overflow=0,
         pool_timeout=settings.db_pool_timeout_seconds,
         pool_pre_ping=True,
         pool_recycle=settings.db_pool_recycle_seconds,

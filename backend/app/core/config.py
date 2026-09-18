@@ -12,13 +12,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/api/v1"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/postgres"
-    # Session-pooler engine tuning: one pooled connection per warm instance, plus
-    # a transient overflow. The GHL client refreshes rotating tokens in its own
-    # locked transaction, so a request already holding a connection needs a second
-    # one briefly; overflow connections are closed on return, not pooled.
+    # Session-pooler engine tuning: exactly one database connection per process.
+    # GHL token refreshes reuse the caller's existing database session.
     db_pool_timeout_seconds: int = Field(default=10, ge=1, le=60)
     db_pool_recycle_seconds: int = Field(default=300, ge=60, le=3600)
-    db_max_overflow: int = Field(default=1, ge=0, le=10)
 
     ghl_client_id: str = ""
     ghl_client_secret: str = ""
