@@ -64,8 +64,7 @@ def me(principal: CurrentPrincipal, db: Annotated[Session, Depends(get_db)]) -> 
             id=operator.id,
             name=operator.name,
             slug=operator.slug,
-            time_zone=operator.time_zone,
+            time_zone=(operator.time_zone or "UTC").strip() or "UTC",
             ghl_location_id=operator.ghl_location_id,
         ),
     )
-

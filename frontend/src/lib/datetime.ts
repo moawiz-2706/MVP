@@ -8,22 +8,33 @@
  * timeZone is pinned to the operator's zone.
  */
 
+export function safeTimeZone(timeZone?: string | null): string {
+  const candidate = timeZone?.trim();
+  if (!candidate) return "UTC";
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: candidate }).format();
+    return candidate;
+  } catch {
+    return "UTC";
+  }
+}
+
 export function formatTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 }
 
 export function formatDay(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, { timeZone, month: "short", day: "numeric" }).format(new Date(iso));
+  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), month: "short", day: "numeric" }).format(new Date(iso));
 }
 
 export function formatLongDate(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: "long" }).format(new Date(iso));
+  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), dateStyle: "long" }).format(new Date(iso));
 }
 
 /** YYYY-MM-DD as seen in the operator's zone, for <input type="date">. */
 export function isoDayInZone(date: Date, timeZone: string): string {
   // en-CA renders ISO-shaped dates (YYYY-MM-DD).
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: safeTimeZone(timeZone), year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
 /** Tomorrow's date in the operator's zone — the earliest bookable day. */
@@ -33,14 +44,15 @@ export function tomorrowInZone(timeZone: string): string {
 
 /** Short zone label (e.g. "EDT") so viewers can see which timezone applies. */
 export function zoneLabel(timeZone: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(new Date());
-  return parts.find((part) => part.type === "timeZoneName")?.value ?? timeZone;
+  const safeZone = safeTimeZone(timeZone);
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: safeZone, timeZoneName: "short" }).formatToParts(new Date());
+  return parts.find((part) => part.type === "timeZoneName")?.value ?? safeTimeZone(timeZone);
 }
 
 /** Offset (ms) of `timeZone` from UTC at the given instant. */
 function zoneOffsetMs(instant: Date, timeZone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone, hour12: false,
+    timeZone: safeTimeZone(timeZone), hour12: false,
     year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", second: "2-digit",
   }).formatToParts(instant);

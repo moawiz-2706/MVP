@@ -17,6 +17,10 @@ from app.schemas.public import (
 router = APIRouter(prefix="/public", tags=["public catalog"])
 
 
+def _operator_time_zone(operator: Operator) -> str:
+    return (operator.time_zone or "UTC").strip() or "UTC"
+
+
 def _public_calendar(
     calendar: Calendar,
     category: CalendarCategory | None,
@@ -71,7 +75,7 @@ def public_catalog(
     return PublicOperatorCatalog(
         name=operator.name,
         slug=operator.slug,
-        time_zone=operator.time_zone,
+        time_zone=_operator_time_zone(operator),
         calendars=[_public_calendar(*row) for row in rows],
     )
 
@@ -109,7 +113,7 @@ def public_category(
     return PublicCategoryPage(
         operator_name=operator.name,
         operator_slug=operator.slug,
-        time_zone=operator.time_zone,
+        time_zone=_operator_time_zone(operator),
         category_name=category.name,
         category_slug=category.slug,
         calendars=[_public_calendar(calendar, category, location) for calendar, location in rows],

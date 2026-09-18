@@ -1,13 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Clock3, MapPin, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, json } from "../api/client";
 import type { AvailabilityResponse, AvailabilitySlot, PublicCalendar, PublicCatalog } from "../api/types";
 import { PaymentPanel } from "./PaymentPanel";
 import { PublicFrame } from "./OperatorBookingPage";
 import { useEmbed, withEmbed } from "./embed";
-import { formatDay, formatTime, tomorrowInZone, zoneLabel } from "../lib/datetime";
+import { formatDay, formatTime, safeTimeZone, tomorrowInZone, zoneLabel } from "../lib/datetime";
 
 interface CartItem { calendar_id: string; start_at: string; units: number; slot: AvailabilitySlot }
 interface Quote { currency: string; subtotal_minor: number; platform_fee_and_taxes_minor: number; customer_total_minor: number }
@@ -34,8 +34,9 @@ export function CalendarBookingPage() {
   const embed = useEmbed();
   const catalog = useQuery({ queryKey: ["public-catalog", operatorSlug], queryFn: () => api<PublicCatalog>(`/public/${operatorSlug}`) });
   const calendar = catalog.data?.calendars.find((item) => item.slug === calendarSlug);
-  const defaultTimeZone = catalog.data?.time_zone ?? "";
-  const [selectedTimeZone, setSelectedTimeZone] = useState("");
+  const defaultTimeZone = safeTimeZone(catalog.data?.time_zone);
+  const [selectedTimeZone, setSelectedTimeZone] = useState("UTC");
+  const timezoneInitialized = useRef(false);
   const [day, setDay] = useState("");
   const [slot, setSlot] = useState<AvailabilitySlot | null>(null);
   const [units, setUnits] = useState(1);
@@ -48,8 +49,11 @@ export function CalendarBookingPage() {
   const [checkoutKey] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
-    if (defaultTimeZone && !selectedTimeZone) setSelectedTimeZone(defaultTimeZone);
-  }, [defaultTimeZone, selectedTimeZone]);
+    if (defaultTimeZone && !timezoneInitialized.current) {
+      timezoneInitialized.current = true;
+      setSelectedTimeZone(defaultTimeZone);
+    }
+  }, [defaultTimeZone]);
 
   useEffect(() => {
     if (selectedTimeZone && !day) setDay(tomorrowInZone(selectedTimeZone));

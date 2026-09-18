@@ -36,6 +36,10 @@ class AvailabilityService:
     def __init__(self, db: Session) -> None:
         self.db = db
 
+    @staticmethod
+    def _operator_timezone(operator: Operator) -> str:
+        return (operator.time_zone or "UTC").strip() or "UTC"
+
     def _calendar(
         self,
         calendar_id: uuid.UUID,
@@ -126,7 +130,7 @@ class AvailabilityService:
             return bool(
                 self._pushed_starts(calendar.id, start_at, start_at + timedelta(microseconds=1))
             )
-        zone = require_timezone(operator.time_zone)
+        zone = require_timezone(self._operator_timezone(operator))
         local_start, local_end = start_at.astimezone(zone), end_at.astimezone(zone)
         if local_start.date() != local_end.date():
             return False
@@ -277,15 +281,15 @@ class AvailabilityService:
         if calendar.availability_mode == "pushed":
             return self._pushed_starts(
                 calendar.id,
-                local_datetime(day, time(0), operator.time_zone),
-                local_datetime(day + timedelta(days=1), time(0), operator.time_zone),
+                local_datetime(day, time(0), self._operator_timezone(operator)),
+                local_datetime(day + timedelta(days=1), time(0), self._operator_timezone(operator)),
             )
         starts: list[datetime] = []
         for opening_start, opening_end in self._openings_for_date(calendar, day):
-            candidate = local_datetime(day, opening_start, operator.time_zone)
-            closing = local_datetime(day, opening_end, operator.time_zone)
+            candidate = local_datetime(day, opening_start, self._operator_timezone(operator))
+            closing = local_datetime(day, opening_end, self._operator_timezone(operator))
             while candidate + timedelta(minutes=calendar.duration_minutes) <= closing:
-                if self._valid_local(candidate, operator.time_zone):
+                if self._valid_local(candidate, self._operator_timezone(operator)):
                     starts.append(candidate)
                 candidate += timedelta(minutes=calendar.slot_interval_minutes)
         return starts
@@ -314,8 +318,9 @@ class AvailabilityService:
         if row is None:
             raise NotFoundError("Public calendar not found")
         calendar, operator, location = row
-        operator_zone = require_timezone(operator.time_zone)
-        display_zone = require_timezone(display_timezone or operator.time_zone)
+        operator_timezone = self._operator_timezone(operator)
+        operator_zone = require_timezone(operator_timezone)
+        display_zone = require_timezone((display_timezone or operator_timezone).strip() or "UTC")
         if display_timezone:
             display_start = local_datetime(day, time(0), display_timezone)
             display_end = local_datetime(day + timedelta(days=1), time(0), display_timezone)
@@ -347,7 +352,7 @@ class AvailabilityService:
         slots.sort(key=lambda item: item.start_at)
         return PublicAvailabilityResponse(
             date=day,
-            time_zone=display_timezone or operator.time_zone,
+            time_zone=(display_timezone or operator_timezone).strip() or "UTC",
             calendar=PublicCalendarSummary(
                 id=calendar.id,
                 operator_name=operator.name,
@@ -402,7 +407,7 @@ class AvailabilityService:
             )
         return PublicAvailabilityResponse(
             date=day,
-            time_zone=operator.time_zone,
+            time_zone=self._operator_timezone(operator),
             calendar=PublicCalendarSummary(
                 id=calendar.id,
                 operator_name=operator.name,

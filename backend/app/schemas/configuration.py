@@ -296,6 +296,10 @@ class OperatorUpdate(BaseModel):
     @field_validator("time_zone")
     @classmethod
     def valid_timezone(cls, value: str | None) -> str | None:
-        if value:
-            require_timezone(value)
-        return value
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("time_zone cannot be blank")
+        require_timezone(normalized)
+        return normalized

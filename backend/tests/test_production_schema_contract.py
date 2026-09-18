@@ -7,6 +7,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "012_staff_ghl_users.sql"
 CUSTOM_ROLE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "013_staff_custom_roles.sql"
 AVAILABILITY_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "014_staff_ghl_availability.sql"
+TIMEZONE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "016_normalize_operator_time_zones.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -39,3 +40,9 @@ def test_availability_migration_contains_ghl_sync_columns() -> None:
     ):
         assert f"ADD COLUMN IF NOT EXISTS {column}" in sql
         assert column in Staff.__table__.columns
+
+
+def test_timezone_migration_repairs_blank_operator_values() -> None:
+    sql = TIMEZONE_MIGRATION.read_text()
+    assert "SET time_zone = 'UTC'" in sql
+    assert "btrim(time_zone) <> ''" in sql

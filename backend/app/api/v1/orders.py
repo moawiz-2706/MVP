@@ -141,7 +141,7 @@ def order_status(
         public_reference=order.public_reference,
         access_token=None,
         status=order.status,
-        time_zone=operator.time_zone,
+        time_zone=(operator.time_zone or "UTC").strip() or "UTC",
         payment_status=payment.status,
         confirmed=confirmed,
         customer_name=f"{order.customer_first_name} {order.customer_last_name}",
