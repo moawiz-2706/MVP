@@ -300,6 +300,14 @@ a { color: inherit; text-decoration: none; }
 .staff-role-warning { color: #8a5314; }
 .staff-role-saved { color: #176b4f; }
 .staff-ghl-id { color: #697386; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+.staff-name-button { display: grid; gap: 3px; border: 0; padding: 0; background: transparent; text-align: left; color: inherit; }
+.staff-name-button strong { color: var(--accent); }
+.staff-name-button span { color: var(--muted); font-size: 11px; }
+.staff-name-button:hover strong { text-decoration: underline; }
+.staff-details-dialog { max-height: min(66vh, 620px); overflow-y: auto; }
+.staff-schedule-list { display: grid; gap: 6px; margin-top: 12px; }
+.staff-schedule-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.staff-schedule-row span { color: var(--muted); }
 .edit-booking-form { display: grid; gap: 10px; padding: 11px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc; }
 .staff-row-assignment { grid-template-columns: minmax(0, 1fr) 130px 150px 32px; }
 @media (max-width: 520px) { .staff-row-assignment { grid-template-columns: 1fr; } }

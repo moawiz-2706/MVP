@@ -1,9 +1,14 @@
 import uuid
 from datetime import datetime, time
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.schemas.common import EntityModel
+
+
+STAFF_ROLES = ("Captain", "First Mate", "Guide", "Deckhand", "Instructor")
+StaffRole = Literal["Captain", "First Mate", "Guide", "Deckhand", "Instructor"]
 
 
 class StaffHourWrite(BaseModel):
@@ -60,11 +65,16 @@ class StaffUpdate(BaseModel):
 
 
 class StaffRoleUpdate(BaseModel):
-    custom_role: str | None = Field(default=None, max_length=80)
+    custom_role: StaffRole | None = None
+
+    @field_validator("custom_role", mode="before")
+    @classmethod
+    def normalize_role_input(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
 
     @field_validator("custom_role")
     @classmethod
-    def normalize_role(cls, value: str | None) -> str | None:
+    def normalize_role(cls, value: StaffRole | None) -> StaffRole | None:
         value = (value or "").strip()
         return value or None
 
@@ -81,20 +91,41 @@ class StaffRead(EntityModel):
     ghl_user_last_error: str | None = None
     ghl_permissions_verified_at: datetime | None = None
     custom_role: str | None = None
+    availability_time_zone: str | None = None
+    availability_sync_status: str = "not_requested"
+    availability_last_error: str | None = None
+    availability_last_synced_at: datetime | None = None
 
 
 class GHLStaffDirectoryResponse(BaseModel):
     synced: int
     created: int
     updated: int
+    availability_synced: int = 0
+    availability_failed: int = 0
     error: str | None = None
+
+
+class GHLStaffDetailsResponse(BaseModel):
+    staff_id: uuid.UUID
+    ghl_user_id: str
+    profile: dict[str, object]
+    time_zone: str | None
+    hours: list[StaffHourRead]
+    availability_sync_status: str
+    availability_last_synced_at: datetime | None
 
 
 class StaffAssignmentCreate(BaseModel):
     staff_id: uuid.UUID
     calendar_id: uuid.UUID
     start_at: datetime
-    role: str | None = Field(default=None, max_length=80)
+    role: StaffRole | None = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def normalize_role_input(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
 
     @model_validator(mode="after")
     def validate_start(self) -> "StaffAssignmentCreate":
@@ -106,11 +137,11 @@ class StaffAssignmentCreate(BaseModel):
 
 class StaffAssignmentUpdate(BaseModel):
     staff_id: uuid.UUID | None = None
-    role: str | None = Field(default=None, max_length=80)
+    role: StaffRole | None = None
 
-    @field_validator("role")
+    @field_validator("role", mode="before")
     @classmethod
-    def normalize_role(cls, value: str | None) -> str | None:
+    def normalize_role(cls, value: StaffRole | None) -> StaffRole | None:
         return (value or "").strip() or None
 
 

@@ -300,6 +300,12 @@ class Staff(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ghl_user_last_error: Mapped[str | None] = mapped_column(Text)
     ghl_permissions_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     custom_role: Mapped[str | None] = mapped_column(Text)
+    availability_time_zone: Mapped[str | None] = mapped_column(Text)
+    availability_sync_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="not_requested", server_default="not_requested"
+    )
+    availability_last_error: Mapped[str | None] = mapped_column(Text)
+    availability_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class StaffHour(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -67,6 +67,9 @@ class StaffService:
             or "UTC"
         )
 
+    def _staff_zone(self, staff: Staff):
+        return require_timezone(staff.availability_time_zone or str(self._zone()))
+
     def _staff(self, staff_id: uuid.UUID, *, lock: bool = False) -> Staff:
         statement = select(Staff).where(
             Staff.id == staff_id,
@@ -458,7 +461,12 @@ class StaffService:
         result = []
         for member in staff:
             reason = self._unavailable_reason(
-                member, hours.get(member.id, []), overlaps.get(member.id), start_at, end_at, zone
+                member,
+                hours.get(member.id, []),
+                overlaps.get(member.id),
+                start_at,
+                end_at,
+                self._staff_zone(member),
             )
             result.append(
                 {
@@ -492,7 +500,7 @@ class StaffService:
             self._overlaps([staff.id], data.start_at, end_at).get(staff.id),
             data.start_at,
             end_at,
-            self._zone(),
+            self._staff_zone(staff),
         )
         if reason:
             raise ConflictError(reason)
@@ -558,7 +566,7 @@ class StaffService:
             overlap,
             assignment.start_at,
             assignment.end_at,
-            self._zone(),
+            self._staff_zone(target_staff),
         )
         if reason:
             raise ConflictError(reason)

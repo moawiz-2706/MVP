@@ -57,3 +57,11 @@ permissions, or account status. It only stores `staff.custom_role` in Passport.
 The Staff sidebar badge and highlighted rows identify synced GHL staff without
 a custom role. Booking staff selectors use that Passport role as their source
 of truth and show only matching staff.
+
+Migration `supabase/migrations/014_staff_ghl_availability.sql` is required for
+the GHL availability cache. Apply it after 013. The Staff page requests the
+`calendars.readonly` schedule APIs on every directory refresh, stores the latest
+weekly intervals in `staff_hours`, and shows the current GHL profile and schedule
+in a read-only details dialog. Passport cannot edit those GHL-managed values.
+The fixed custom-role dropdown contains only Captain, First Mate, Guide,
+Deckhand, and Instructor.

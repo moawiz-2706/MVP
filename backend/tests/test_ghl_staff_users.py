@@ -84,3 +84,19 @@ def test_directory_search_includes_admin_accounts() -> None:
 
     assert {user["id"] for user in users} == {"user-1", "admin-1"}
     assert "role" not in service.client.calls[0]["params"]
+
+
+
+def test_ghl_weekly_schedule_rules_map_to_passport_hours() -> None:
+    from app.services.ghl_staff_user_service import _schedule_rules
+
+    hours = _schedule_rules(
+        {
+            "rules": [
+                {"type": "wday", "day": "monday", "intervals": [{"from": "09:00", "to": "17:00"}]},
+                {"type": "wday", "wday": 0, "intervals": [{"from": "10:30", "to": "12:00"}]},
+            ]
+        }
+    )
+    assert (0, hours[0][1], hours[0][2]) in hours
+    assert (6, hours[1][1], hours[1][2]) in hours

@@ -44,9 +44,10 @@ export interface CalendarResource { resource_id: Id; name: string; total_quantit
 export interface PushedSlot extends Entity { calendar_id: Id; start_at: string; end_at: string }
 
 export interface StaffHour { day_of_week: number; start_time: string; end_time: string }
-export interface Staff extends Entity { name: string; email: string | null; phone: string | null; is_active: boolean; hours: StaffHour[]; upcoming_assignments: number; ghl_user_id: string | null; ghl_user_sync_status: string; ghl_user_last_error: string | null; ghl_permissions_verified_at: string | null; custom_role: string | null }
+export interface Staff extends Entity { name: string; email: string | null; phone: string | null; is_active: boolean; hours: StaffHour[]; upcoming_assignments: number; ghl_user_id: string | null; ghl_user_sync_status: string; ghl_user_last_error: string | null; ghl_permissions_verified_at: string | null; custom_role: string | null; availability_time_zone: string | null; availability_sync_status: string; availability_last_error: string | null; availability_last_synced_at: string | null }
 export interface StaffCandidate { staff_id: Id; name: string; custom_role: string | null; available: boolean; reason: string | null }
 export interface StaffAssignment { id: Id; staff_id: Id; staff_name: string; calendar_id: Id; start_at: string; end_at: string; role: string | null }
+export interface GHLStaffDetails { staff_id: Id; ghl_user_id: string; profile: Record<string, unknown>; time_zone: string | null; hours: StaffHour[]; availability_sync_status: string; availability_last_synced_at: string | null }
 
 export interface Booking {
   id: Id;

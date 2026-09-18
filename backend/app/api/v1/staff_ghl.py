@@ -13,7 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.permissions import Permission, require_permission
 from app.models.entities import OutboxJob, Staff
-from app.schemas.staff import GHLStaffDirectoryResponse
+from app.schemas.staff import GHLStaffDetailsResponse, GHLStaffDirectoryResponse
 from app.services.ghl_staff_user_service import GHLStaffUserService
 
 router = APIRouter(tags=["staff-ghl"])
@@ -29,6 +29,12 @@ class PermissionVerification(BaseModel):
 def sync_staff_directory(principal: CurrentPrincipal, db: DB):
     require_permission(principal, Permission.MANAGE_CONFIGURATION)
     return GHLStaffUserService(db, principal.operator_id).sync_directory()
+
+
+@router.get("/staff-ghl/{staff_id}/details", response_model=GHLStaffDetailsResponse)
+def staff_ghl_details(staff_id: uuid.UUID, principal: CurrentPrincipal, db: DB):
+    require_permission(principal, Permission.MANAGE_CONFIGURATION)
+    return GHLStaffUserService(db, principal.operator_id).details(staff_id)
 
 
 def _staff(db: Session, operator_id: uuid.UUID, staff_id: uuid.UUID) -> Staff:

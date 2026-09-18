@@ -3,15 +3,15 @@ from __future__ import annotations
 import secrets
 import string
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models.entities import GHLInstallation, Operator, Staff
+from app.models.entities import GHLInstallation, Operator, Staff, StaffHour
 from app.services.ghl_client import GHLAPIError, GHLClient
 
 SYNC_PENDING = "pending"
@@ -20,6 +20,58 @@ SYNCED = "synced"
 NEEDS_PERMISSION_REVIEW = "needs_permission_review"
 MANUAL_REVIEW = "manual_review"
 SYNC_FAILED = "failed"
+
+_DAY_NAMES = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+
+def _parse_clock(value: Any) -> time | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parts = value.strip().split(":")
+        if len(parts) not in {2, 3}:
+            return None
+        hour, minute = int(parts[0]), int(parts[1])
+        second = int(parts[2]) if len(parts) == 3 else 0
+        return time(hour=hour, minute=minute, second=second)
+    except (TypeError, ValueError):
+        return None
+
+
+def _schedule_rules(schedule: dict[str, Any]) -> list[tuple[int, time, time]]:
+    rules = schedule.get("rules") or schedule.get("availabilityRules") or []
+    if not isinstance(rules, list):
+        return []
+    parsed: set[tuple[int, time, time]] = set()
+    for rule in rules:
+        if not isinstance(rule, dict) or rule.get("type") not in {None, "wday"}:
+            continue
+        day_value = str(rule.get("day") or "").strip().casefold()
+        day = _DAY_NAMES.get(day_value)
+        if day is None:
+            try:
+                # GHL's numeric weekday representation is Sunday=0.
+                day = (int(rule.get("wday")) - 1) % 7
+            except (TypeError, ValueError):
+                continue
+        intervals = rule.get("intervals") or []
+        if not isinstance(intervals, list):
+            continue
+        for interval in intervals:
+            if not isinstance(interval, dict):
+                continue
+            start, end = _parse_clock(interval.get("from")), _parse_clock(interval.get("to"))
+            if start and end and start < end:
+                parsed.add((day, start, end))
+    return sorted(parsed, key=lambda item: (item[0], item[1], item[2]))
 
 # The documented create-user API requires a password, but Passport never stores or
 # returns it.  Build it from a CSPRNG and guarantee the special-character rule.
@@ -245,6 +297,97 @@ class GHLStaffUserService:
             skip += page_size
         return users
 
+    def _user_schedules(self, location_id: str, user_id: str) -> list[dict[str, Any]]:
+        result = self.client.request(
+            "GET",
+            "/calendars/schedules/search",
+            version="2023-02-21",
+            params={"locationId": location_id, "userId": user_id, "skip": 0, "limit": 500},
+        )
+        summaries = result.get("schedules", []) if isinstance(result, dict) else []
+        if not isinstance(summaries, list):
+            return []
+        schedules: list[dict[str, Any]] = []
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+            schedule_id = summary.get("id") or summary.get("scheduleId")
+            if schedule_id:
+                detail = self.client.request(
+                    "GET", f"/calendars/schedules/{schedule_id}", version="v3"
+                )
+                detail = detail.get("schedule", detail) if isinstance(detail, dict) else {}
+                if isinstance(detail, dict):
+                    schedules.append(detail)
+            else:
+                schedules.append(summary)
+        return schedules
+
+    @staticmethod
+    def _safe_profile(remote: dict[str, Any]) -> dict[str, Any]:
+        blocked = ("password", "token", "secret", "authorization", "refresh")
+
+        def clean(value: Any, key: str = "") -> Any:
+            if any(word in key.casefold() for word in blocked):
+                return None
+            if isinstance(value, dict):
+                return {str(k): clean(v, str(k)) for k, v in value.items() if clean(v, str(k)) is not None}
+            if isinstance(value, list):
+                return [clean(item, key) for item in value]
+            return value
+
+        return clean(remote)
+
+    def sync_availability(self, staff_id: uuid.UUID) -> dict[str, Any]:
+        staff = self._staff(staff_id, lock=True)
+        if not staff.ghl_user_id:
+            raise ConflictError("Staff has no linked HighLevel user")
+        try:
+            _, operator = self._installation({"users.readonly", "calendars.readonly"})
+            remote = self._get_remote_user(staff.ghl_user_id, operator.ghl_location_id)
+            schedules = self._user_schedules(operator.ghl_location_id, staff.ghl_user_id)
+            hours: set[tuple[int, time, time]] = set()
+            time_zone = None
+            for schedule in schedules:
+                time_zone = time_zone or schedule.get("timezone") or schedule.get("timeZone")
+                hours.update(_schedule_rules(schedule))
+            self.db.execute(delete(StaffHour).where(StaffHour.staff_id == staff.id))
+            self.db.add_all(
+                StaffHour(staff_id=staff.id, day_of_week=day, start_time=start, end_time=end)
+                for day, start, end in sorted(hours)
+            )
+            staff.availability_time_zone = str(time_zone) if time_zone else None
+            staff.availability_sync_status = SYNCED
+            staff.availability_last_error = None
+            staff.availability_last_synced_at = datetime.now(UTC)
+            self.db.commit()
+            return {
+                "profile": self._safe_profile(remote),
+                "time_zone": staff.availability_time_zone,
+                "hours": sorted(hours),
+            }
+        except Exception as exc:
+            staff.availability_sync_status = SYNC_FAILED
+            staff.availability_last_error = str(exc)[:2000]
+            self.db.commit()
+            raise
+
+    def details(self, staff_id: uuid.UUID) -> dict[str, Any]:
+        staff = self._staff(staff_id)
+        result = self.sync_availability(staff.id)
+        return {
+            "staff_id": staff.id,
+            "ghl_user_id": staff.ghl_user_id,
+            "profile": result["profile"],
+            "time_zone": staff.availability_time_zone,
+            "hours": [
+                {"day_of_week": day, "start_time": start, "end_time": end}
+                for day, start, end in result["hours"]
+            ],
+            "availability_sync_status": staff.availability_sync_status,
+            "availability_last_synced_at": staff.availability_last_synced_at,
+        }
+
     @staticmethod
     def _remote_profile(remote: dict[str, Any]) -> tuple[str, str | None, str | None]:
         first = str(remote.get("firstName") or "").strip()
@@ -310,10 +453,18 @@ class GHLStaffUserService:
                 updated += 1
             by_ghl_id[remote_id] = staff
         self.db.commit()
+        availability_failed = 0
+        for staff in by_ghl_id.values():
+            try:
+                self.sync_availability(staff.id)
+            except Exception:
+                availability_failed += 1
         return {
             "synced": created + updated,
             "created": created,
             "updated": updated,
+            "availability_synced": len(by_ghl_id) - availability_failed,
+            "availability_failed": availability_failed,
             "error": None,
         }
 
