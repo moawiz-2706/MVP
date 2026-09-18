@@ -177,7 +177,7 @@ class GHLStaffUserService:
     def _is_same_location_user(cls, remote: dict[str, Any], location_id: str) -> bool:
         locations = _remote_location_ids(remote)
         role = _remote_role(remote)
-        return location_id in locations and role == "user"
+        return location_id in locations and role in {"user", "admin", "administrator"}
 
     def _get_remote_user(self, user_id: str, location_id: str) -> dict[str, Any]:
         remote = self.client.request("GET", f"/users/{user_id}", version="v3")
@@ -207,13 +207,14 @@ class GHLStaffUserService:
             for user in users
             if isinstance(user, dict)
             and str(user.get("email", "")).casefold() == email.casefold()
+            and self._is_same_location_user(user, location_id)
         ]
 
     def _list_remote_users(self, company_id: str, location_id: str) -> list[dict[str, Any]]:
         """List account-level users in this installed sub-account.
 
-        HighLevel's OAuth-compatible search endpoint is paginated and returns
-        users across the company unless locationId and role are supplied. Keep
+        HighLevel's OAuth-compatible search endpoint is paginated. Do not send
+        role=user here because that excludes sub-account administrators. Keep
         the final location/role filter locally as a tenant-safety boundary.
         """
         users: list[dict[str, Any]] = []
@@ -228,7 +229,6 @@ class GHLStaffUserService:
                     "companyId": company_id,
                     "locationId": location_id,
                     "type": "account",
-                    "role": "user",
                     "skip": skip,
                     "limit": page_size,
                 },
