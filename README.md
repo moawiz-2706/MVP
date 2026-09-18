@@ -49,3 +49,11 @@ assigned per booking time slot, so the same person can have different roles on
 different bookings and multiple staff members can share a role. If the scope
 is missing, the local roster remains visible and shows a sync error instead of
 silently failing.
+
+Migration `supabase/migrations/013_staff_custom_roles.sql` is also mandatory
+for the Passport-owned role layer. Apply migration 012 first, then 013, before
+deploying this version. The Staff page does not edit GHL names, email, phone,
+permissions, or account status. It only stores `staff.custom_role` in Passport.
+The Staff sidebar badge and highlighted rows identify synced GHL staff without
+a custom role. Booking staff selectors use that Passport role as their source
+of truth and show only matching staff.

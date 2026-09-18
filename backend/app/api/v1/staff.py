@@ -17,6 +17,7 @@ from app.schemas.staff import (
     StaffCandidate,
     StaffCreate,
     StaffRead,
+    StaffRoleUpdate,
     StaffUpdate,
 )
 from app.services.outbox_service import OutboxService
@@ -79,6 +80,14 @@ def update_staff(
     return staff_service.get_staff(result["id"])
 
 
+@router.patch("/staff/{staff_id}/custom-role", response_model=StaffRead)
+def update_custom_role(
+    data: StaffRoleUpdate, staff_id: uuid.UUID, principal: CurrentPrincipal, db: DB
+):
+    require_permission(principal, Permission.MANAGE_CONFIGURATION)
+    return service(db, principal).update_custom_role(staff_id, data)
+
+
 @router.delete("/staff/{staff_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_staff(staff_id: uuid.UUID, principal: CurrentPrincipal, db: DB) -> Response:
     require_permission(principal, Permission.DELETE_CONFIGURATION)
@@ -103,10 +112,14 @@ def list_assignments(
 
 @router.get("/staff-assignments/candidates", response_model=list[StaffCandidate])
 def assignment_candidates(
-    calendar_id: uuid.UUID, start_at: datetime, principal: CurrentPrincipal, db: DB
+    calendar_id: uuid.UUID,
+    start_at: datetime,
+    principal: CurrentPrincipal,
+    db: DB,
+    required_role: str | None = None,
 ):
     require_permission(principal, Permission.VIEW_BOOKINGS)
-    return service(db, principal).candidates(calendar_id, start_at)
+    return service(db, principal).candidates(calendar_id, start_at, required_role=required_role)
 
 
 @router.post(

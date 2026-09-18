@@ -299,6 +299,7 @@ class Staff(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     ghl_user_last_error: Mapped[str | None] = mapped_column(Text)
     ghl_permissions_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    custom_role: Mapped[str | None] = mapped_column(Text)
 
 
 class StaffHour(UUIDPrimaryKeyMixin, TimestampMixin, Base):

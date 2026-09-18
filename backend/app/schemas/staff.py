@@ -59,6 +59,16 @@ class StaffUpdate(BaseModel):
         return _unique_hours(value)
 
 
+class StaffRoleUpdate(BaseModel):
+    custom_role: str | None = Field(default=None, max_length=80)
+
+    @field_validator("custom_role")
+    @classmethod
+    def normalize_role(cls, value: str | None) -> str | None:
+        value = (value or "").strip()
+        return value or None
+
+
 class StaffRead(EntityModel):
     name: str
     email: str | None
@@ -70,6 +80,7 @@ class StaffRead(EntityModel):
     ghl_user_sync_status: str = "not_requested"
     ghl_user_last_error: str | None = None
     ghl_permissions_verified_at: datetime | None = None
+    custom_role: str | None = None
 
 
 class GHLStaffDirectoryResponse(BaseModel):
@@ -118,5 +129,6 @@ class StaffCandidate(BaseModel):
 
     staff_id: uuid.UUID
     name: str
+    custom_role: str | None
     available: bool
     reason: str | None

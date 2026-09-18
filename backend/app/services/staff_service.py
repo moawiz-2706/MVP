@@ -24,6 +24,7 @@ from app.schemas.staff import (
     StaffAssignmentUpdate,
     StaffCreate,
     StaffHourWrite,
+    StaffRoleUpdate,
     StaffUpdate,
 )
 from app.services.outbox_service import OutboxService
@@ -132,6 +133,21 @@ class StaffService:
     def get_staff(self, staff_id: uuid.UUID) -> dict[str, Any]:
         staff = self._staff(staff_id)
         return self._payload(staff, self._hours([staff.id]).get(staff.id, []))
+
+    def update_custom_role(self, staff_id: uuid.UUID, data: StaffRoleUpdate) -> dict[str, Any]:
+        staff = self._staff(staff_id, lock=True)
+        staff.custom_role = data.custom_role
+        calendar_ids = set(
+            self.db.scalars(
+                select(StaffAssignment.calendar_id).where(
+                    StaffAssignment.staff_id == staff.id,
+                    StaffAssignment.end_at > datetime.now(UTC),
+                )
+            )
+        )
+        self.db.commit()
+        self._queue_appointment_sync_for_calendars(calendar_ids)
+        return self.get_staff(staff.id)
 
     def _queue_job(self, job_type: str, key: str, payload: dict[str, Any]) -> None:
         """Queue a HighLevel side effect in the same transaction as the change."""
@@ -413,10 +429,13 @@ class StaffService:
         )
         return [self._assignment_payload(assignment, name) for assignment, name in rows]
 
-    def candidates(self, calendar_id: uuid.UUID, start_at: datetime) -> list[dict[str, Any]]:
-        """Every active staff member, flagged with whether they can take this slot."""
+    def candidates(
+        self, calendar_id: uuid.UUID, start_at: datetime, required_role: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Active staff matching a Passport custom role, flagged by availability."""
         calendar = self._calendar(calendar_id)
         end_at = start_at + timedelta(minutes=calendar.duration_minutes)
+        normalized_role = (required_role or "").strip().casefold() or None
         staff = list(
             self.db.scalars(
                 select(Staff)
@@ -424,6 +443,11 @@ class StaffService:
                     Staff.operator_id == self.operator_id,
                     Staff.deleted_at.is_(None),
                     Staff.is_active.is_(True),
+                    *(
+                        [func.lower(Staff.custom_role) == normalized_role]
+                        if normalized_role
+                        else []
+                    ),
                 )
                 .order_by(Staff.name)
             )
@@ -437,7 +461,13 @@ class StaffService:
                 member, hours.get(member.id, []), overlaps.get(member.id), start_at, end_at, zone
             )
             result.append(
-                {"staff_id": member.id, "name": member.name, "available": reason is None, "reason": reason}
+                {
+                    "staff_id": member.id,
+                    "name": member.name,
+                    "custom_role": member.custom_role,
+                    "available": reason is None,
+                    "reason": reason,
+                }
             )
         return result
 
@@ -447,7 +477,12 @@ class StaffService:
         calendar = lock_calendar(self.db, self.operator_id, data.calendar_id)
         end_at = data.start_at + timedelta(minutes=calendar.duration_minutes)
         staff = self._staff(data.staff_id, lock=True)
-        if is_captain(data.role):
+        if not staff.custom_role:
+            raise ConflictError(f"{staff.name} must be assigned a custom role on the Staff page first")
+        if data.role and staff.custom_role.casefold() != data.role.strip().casefold():
+            raise ConflictError(f"{staff.name} is assigned the {staff.custom_role} role, not {data.role}")
+        assignment_role = data.role or staff.custom_role
+        if is_captain(assignment_role):
             ensure_no_overlapping_captain(
                 self.db, self.operator_id, calendar.id, data.start_at, end_at
             )
@@ -467,7 +502,7 @@ class StaffService:
             calendar_id=calendar.id,
             start_at=data.start_at,
             end_at=end_at,
-            role=data.role,
+            role=assignment_role,
         )
         self.db.add(assignment)
         self.db.flush()
@@ -509,6 +544,11 @@ class StaffService:
             else self._staff(data.staff_id, lock=True)
         )
         role = data.role if "role" in data.model_fields_set else assignment.role
+        if not target_staff.custom_role:
+            raise ConflictError(f"{target_staff.name} must be assigned a custom role on the Staff page first")
+        if role and target_staff.custom_role.casefold() != role.strip().casefold():
+            raise ConflictError(f"{target_staff.name} is assigned the {target_staff.custom_role} role, not {role}")
+        role = role or target_staff.custom_role
         overlap = None
         if target_staff.id != assignment.staff_id:
             overlap = self._overlaps([target_staff.id], assignment.start_at, assignment.end_at).get(target_staff.id)
