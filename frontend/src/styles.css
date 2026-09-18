@@ -42,6 +42,8 @@ a { color: inherit; text-decoration: none; }
 .user-chip strong { font-size: 11px; color: #e8edf1; }
 .user-chip span { font-size: 10px; text-transform: capitalize; color: #82909c; }
 .app-main { min-width: 0; padding: 24px 28px 40px; }
+.app-shell.ghl-navigation-mode { display: block; }
+.app-shell.ghl-navigation-mode .app-main { min-height: 100vh; }
 .mobile-menu, .sidebar-close, .mobile-scrim { display: none; }
 
 .page { max-width: 1500px; margin: 0 auto; }
