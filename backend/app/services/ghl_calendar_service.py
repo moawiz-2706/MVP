@@ -92,28 +92,14 @@ class GHLCalendarService:
             params={"locationId": operator.ghl_location_id},
         )
         calendars = result.get("calendars", []) if isinstance(result, dict) else []
-        candidates = [
-            remote for remote in calendars if isinstance(remote, dict) and remote.get("id")
-        ]
-        slug_matches = [remote for remote in candidates if remote.get("slug") == calendar.slug]
-        if len(slug_matches) == 1:
-            return str(slug_matches[0]["id"])
-
-        # Older Passport-created calendars did not send a slug. Only recover by
-        # name when it is unambiguous; otherwise creating a new calendar is safer
-        # than updating an operator's unrelated GHL calendar.
-        name_matches = [remote for remote in candidates if remote.get("name") == calendar.name]
-        if len(name_matches) == 1:
-            return str(name_matches[0]["id"])
-
-        description = self._calendar_description(calendar)
-        description_matches = [
-            remote
-            for remote in name_matches
-            if (remote.get("description") or "") == description
-        ]
-        if len(description_matches) == 1:
-            return str(description_matches[0]["id"])
+        for remote in calendars:
+            if (
+                isinstance(remote, dict)
+                and remote.get("name") == calendar.name
+                and (remote.get("description") or "") == self._calendar_description(calendar)
+                and remote.get("id")
+            ):
+                return str(remote["id"])
         return None
 
     def sync(self, calendar_id: uuid.UUID) -> str | None:
@@ -149,7 +135,6 @@ class GHLCalendarService:
             self.db.flush()
         common_body = {
             "name": calendar.name,
-            "slug": calendar.slug,
             "isActive": calendar.is_active,
             "description": self._calendar_description(calendar),
             "locationConfigurations": (
