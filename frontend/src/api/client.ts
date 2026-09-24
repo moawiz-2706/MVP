@@ -55,7 +55,7 @@ export async function api<T>(
     window.dispatchEvent(new CustomEvent("passport:operation", {
       detail: { method, path, success: false, message },
     }));
-    throw new ApiError(response.status, message, body.error?.details);
+    throw new ApiError(response.status, `${message} (HTTP ${response.status}; ${method} ${path})`, body.error?.details);
   }
   if (method !== "GET" && method !== "HEAD") {
     window.dispatchEvent(new CustomEvent("passport:operation", {
