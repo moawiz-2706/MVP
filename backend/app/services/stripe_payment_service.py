@@ -41,3 +41,19 @@ class StripePaymentService:
 
     def retrieve_payment_intent(self, payment_intent_id: str):
         return self.client.v1.payment_intents.retrieve(payment_intent_id, {"expand": ["latest_charge"]})
+
+    def find_payment_intent_for_order(self, order_id: str):
+        """Find a provider-created intent after a network timeout.
+
+        Stripe metadata is written before the provider call and the local
+        request has a stable idempotency key. Search is deliberately narrowed
+        to the immutable order identity; callers still validate amount,
+        currency, and operator metadata before attaching the result.
+        """
+        result = self.client.v1.payment_intents.search({
+            "query": f"metadata['booking_order_id']:'{order_id}'",
+            "limit": 10,
+        })
+        data = result.to_dict_recursive() if hasattr(result, "to_dict_recursive") else dict(result)
+        matches = data.get("data", [])
+        return matches[0] if matches else None

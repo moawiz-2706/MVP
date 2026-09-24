@@ -12,6 +12,7 @@ from app.core.database import get_session_factory
 from app.models.entities import GHLInstallation
 from app.services.ghl_staff_user_service import GHLStaffUserService
 from app.services.outbox_service import OutboxService
+from app.services.reservation_lifecycle_service import ReservationLifecycleService
 
 logger = logging.getLogger("passport.staff_sync_worker")
 _stop = threading.Event()
@@ -70,6 +71,13 @@ def process_outbox() -> dict[str, int]:
     return result
 
 
+def expire_holds() -> dict[str, int]:
+    with get_session_factory()() as db:
+        result = ReservationLifecycleService(db).expire_pending_holds()
+    logger.info("Expired payment holds: %s", result)
+    return result
+
+
 def main() -> None:
     settings = get_settings()
     settings.validate_runtime()
@@ -81,6 +89,10 @@ def main() -> None:
     while not _stop.is_set():
         started = time.monotonic()
         sync_all_operators()
+        try:
+            expire_holds()
+        except Exception:
+            logger.exception("Payment-hold expiration failed")
         try:
             process_outbox()
         except Exception:
@@ -98,4 +110,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["main", "process_outbox", "sync_all_operators"]
+__all__ = ["expire_holds", "main", "process_outbox", "sync_all_operators"]

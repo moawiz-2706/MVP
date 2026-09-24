@@ -16,6 +16,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings
 from app.models.entities import (
     Booking,
     GHLInstallation,
@@ -51,12 +52,15 @@ def reminder_still_due(kind: str, start_at: datetime, now: datetime, time_zone: 
 
 
 class ReminderService:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, settings: Settings | None = None) -> None:
         self.db = db
+        self.settings = settings
 
     def enqueue(self, now: datetime | None = None) -> dict[str, int]:
         now = now or datetime.now(UTC)
         counts = {"customer_reminders_queued": 0, "staff_reminders_queued": 0}
+        if self.settings is not None and not self.settings.ghl_notifications_enabled:
+            return counts
         operators = self.db.execute(
             select(Operator, OperatorSettings.confirmation_email_enabled)
             .outerjoin(OperatorSettings, OperatorSettings.operator_id == Operator.id)

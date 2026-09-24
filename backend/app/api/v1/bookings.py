@@ -17,6 +17,8 @@ from app.schemas.booking import (
     BookingNoteCreate,
     BookingNoteRead,
     BookingNotificationsResponse,
+    BookingParticipantRead,
+    BookingParticipantWrite,
     BookingUpdate,
     DashboardSlot,
 )
@@ -77,6 +79,35 @@ def booking_slots(
 def booking_detail(booking_id: uuid.UUID, principal: CurrentPrincipal, db: DB):
     require_permission(principal, Permission.VIEW_BOOKINGS)
     return BookingAdminService(db, principal.operator_id).detail(booking_id)
+
+
+@router.get("/bookings/{booking_id}/participants", response_model=list[BookingParticipantRead])
+def list_participants(booking_id: uuid.UUID, principal: CurrentPrincipal, db: DB):
+    require_permission(principal, Permission.VIEW_BOOKINGS)
+    return BookingAdminService(db, principal.operator_id).list_participants(booking_id)
+
+
+@router.put("/bookings/{booking_id}/participants", response_model=BookingParticipantRead)
+def upsert_participant(
+    data: BookingParticipantWrite,
+    booking_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    db: DB,
+):
+    require_permission(principal, Permission.OPERATE_BOOKINGS)
+    return BookingAdminService(db, principal.operator_id).upsert_participant(booking_id, data)
+
+
+@router.delete("/bookings/{booking_id}/participants/{participant_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_participant(
+    booking_id: uuid.UUID,
+    participant_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    db: DB,
+) -> Response:
+    require_permission(principal, Permission.OPERATE_BOOKINGS)
+    BookingAdminService(db, principal.operator_id).delete_participant(booking_id, participant_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/bookings", response_model=OrderCreateResponse, status_code=status.HTTP_201_CREATED)

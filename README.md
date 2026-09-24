@@ -90,6 +90,13 @@ reconciliation runs. The operator workspace exposes Customers and Migration &
 reconciliation sections. Validate an export before committing it; no live
 FareHarbor cutover should happen while blocking errors remain.
 
+Migration `supabase/migrations/021_production_booking_hardening.sql` is required
+before paid production bookings. It adds participant manifests, append-only
+booking and payment event ledgers, hold-expiry and lookup indexes, credential
+invariants, booking-total checks, staff-assignment overlap protection, and
+append-only database triggers. Apply it after 020 and verify it on a staging
+PostgreSQL clone before production.
+
 The detailed API contract and GHL integration boundary are documented in
 `docs/FAREHARBOR_REPLICA_IMPLEMENTATION_SPEC.md`.
 
@@ -110,6 +117,13 @@ its protected daily cron remains a fallback reconciliation mechanism only. Set
 the same production environment variables on the worker as on the API, including
 `DATABASE_URL`, the encrypted GHL credentials, `GHL_STAFF_USER_SYNC_ENABLED`,
 `GHL_STAFF_SYNC_INTERVAL_SECONDS`, and the production secrets.
+
+The same worker expires pending-payment holds on every loop. Expired holds are
+transitioned locally, public access credentials are revoked, booking events are
+recorded, and idempotent GHL appointment-cancellation jobs are queued. The
+protected `/api/v1/internal/cron/daily` endpoint performs the same sweep as a
+fallback, but an always-on worker remains the required primary lifecycle
+process.
 
 Calendar, resource, availability, and booking endpoints commit Passport data and
 enqueue GHL work without waiting for external HTTP requests. This keeps the user

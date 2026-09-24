@@ -11,6 +11,7 @@ from app.models.entities import GHLInstallation
 from app.services.ghl_staff_user_service import GHLStaffUserService
 from app.services.outbox_service import OutboxService
 from app.services.reminder_service import ReminderService
+from app.services.reservation_lifecycle_service import ReservationLifecycleService
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 DB = Annotated[Session, Depends(get_db)]
@@ -55,7 +56,8 @@ def daily_cron(
     failures due for retry, are sent. Safe to invoke more than once a day.
     """
     _authorize(settings, authorization, x_cron_secret)
-    queued = ReminderService(db).enqueue()
+    queued = ReminderService(db, settings).enqueue()
+    expired = ReservationLifecycleService(db).expire_pending_holds()
     directory_synced = directory_failed = deactivated = 0
     availability_synced = availability_failed = 0
     operator_ids = list(
@@ -80,6 +82,7 @@ def daily_cron(
             directory_failed += 1
     return {
         **queued,
+        **expired,
         "directory_synced": directory_synced,
         "directory_failed": directory_failed,
         "deactivated": deactivated,

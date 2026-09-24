@@ -155,6 +155,12 @@ class StaffService:
 
     def _queue_job(self, job_type: str, key: str, payload: dict[str, Any]) -> None:
         """Queue a HighLevel side effect in the same transaction as the change."""
+        if job_type in {
+            "ghl_staff_assigned_email",
+            "ghl_staff_unassigned_email",
+            "ghl_staff_reminder",
+        } and not get_settings().ghl_notifications_enabled:
+            return
         self.db.add(
             OutboxJob(
                 operator_id=self.operator_id,
@@ -458,7 +464,6 @@ class StaffService:
         )
         ids = [member.id for member in staff]
         hours, overlaps = self._hours(ids), self._overlaps(ids, start_at, end_at)
-        zone = self._zone()
         result = []
         for member in staff:
             reason = self._unavailable_reason(

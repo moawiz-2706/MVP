@@ -1147,3 +1147,58 @@ class MigrationImportRow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="staged")
     errors: Mapped[list | None] = mapped_column(JSONB)
+
+
+class BookingParticipant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "booking_participants"
+    __table_args__ = (UniqueConstraint("booking_id", "sequence"),)
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    booking_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_name: Mapped[str] = mapped_column(Text, nullable=False)
+    last_name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(Text)
+    date_of_birth: Mapped[date | None] = mapped_column(Date)
+    is_minor: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    guardian_name: Mapped[str | None] = mapped_column(Text)
+    emergency_contact: Mapped[dict | None] = mapped_column(JSONB)
+    operational_notes: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="checkout")
+
+
+class BookingEvent(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "booking_events"
+    __table_args__ = (Index("ix_booking_events_booking_time", "booking_id", "occurred_at"),)
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    booking_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False)
+    order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("booking_orders.id"))
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(30))
+    to_status: Mapped[str | None] = mapped_column(String(30))
+    actor_type: Mapped[str] = mapped_column(String(30), nullable=False, default="system")
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    reason: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict | None] = mapped_column(JSONB)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaymentEvent(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "payment_events"
+    __table_args__ = (UniqueConstraint("provider_event_id"), Index("ix_payment_events_payment_time", "payment_id", "occurred_at"))
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    payment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("payments.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider_event_id: Mapped[str] = mapped_column(Text, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    provider_status: Mapped[str | None] = mapped_column(String(40))
+    amount_minor: Mapped[int | None] = mapped_column(BigInteger)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    payload_hash: Mapped[str | None] = mapped_column(String(128))
+    payload: Mapped[dict | None] = mapped_column(JSONB)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reconciliation_status: Mapped[str] = mapped_column(String(30), nullable=False, default="observed")

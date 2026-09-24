@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
@@ -72,6 +72,36 @@ class BookingNoteCreate(BaseModel):
         return value.strip() if isinstance(value, str) else value
 
 
+class BookingParticipantRead(BaseModel):
+    id: uuid.UUID
+    sequence: int
+    first_name: str
+    last_name: str
+    email: EmailStr | None
+    phone: str | None
+    date_of_birth: date | None
+    is_minor: bool
+    guardian_name: str | None
+    emergency_contact: dict | None
+    operational_notes: str | None
+    status: str
+    source: str
+
+
+class BookingParticipantWrite(BaseModel):
+    sequence: int = Field(gt=0)
+    first_name: str = Field(min_length=1, max_length=160)
+    last_name: str = Field(min_length=1, max_length=160)
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, max_length=60)
+    date_of_birth: date | None = None
+    is_minor: bool = False
+    guardian_name: str | None = Field(default=None, max_length=160)
+    emergency_contact: dict | None = None
+    operational_notes: str | None = Field(default=None, max_length=2000)
+    status: str = Field(default="active", pattern="^(active|cancelled|no_show)$")
+
+
 class BookingDetail(BookingListItem):
     customer_phone: str | None
     location_name: str | None
@@ -96,6 +126,7 @@ class BookingDetail(BookingListItem):
     created_at: datetime
     waiver: WaiverSummary
     notes: list[BookingNoteRead]
+    participants: list[BookingParticipantRead]
 
 
 class BookingUpdate(BaseModel):

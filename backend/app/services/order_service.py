@@ -17,6 +17,7 @@ from app.models.entities import (
     BookingLineItem,
     BookingCustomFieldDefinition,
     BookingCustomFieldValue,
+    BookingParticipant,
     BookingOrder,
     BookingResource,
     Calendar,
@@ -531,6 +532,18 @@ class OrderService:
                     booking_fee_minor=item.booking_fee_minor,
                     tax_minor=item.tax_minor,
                     line_total_minor=item.line_total_minor,
+                )
+            )
+            self.db.add(
+                BookingParticipant(
+                    operator_id=operator.id,
+                    booking_id=booking.id,
+                    sequence=1,
+                    first_name=order.customer_first_name,
+                    last_name=order.customer_last_name,
+                    email=order.customer_email,
+                    phone=order.customer_phone,
+                    source="checkout",
                 )
             )
             self.db.add_all(

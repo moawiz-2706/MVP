@@ -11,7 +11,7 @@ import { ArrowLeft, CalendarPlus, Check, ChevronRight, Copy, ExternalLink, Searc
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useLocation } from "react-router-dom";
 import { api, json } from "../api/client";
-import type { Booking, BookingDetail, BookingNote, BookingNotificationsResponse, Calendar, Category, DashboardSlot, SlotCalendar, StaffAssignment, StaffCandidate } from "../api/types";
+import type { Booking, BookingDetail, BookingNote, BookingNotificationsResponse, BookingParticipant, Calendar, Category, DashboardSlot, SlotCalendar, StaffAssignment, StaffCandidate } from "../api/types";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
 import { useSession } from "../auth/GHLSessionProvider";
@@ -97,6 +97,17 @@ function NotesSection({ bookingId, notes }: { bookingId: string; notes: BookingN
   );
 }
 
+function ParticipantsSection({ bookingId, participants, units }: { bookingId: string; participants: BookingParticipant[]; units: number }) {
+  const client = useQueryClient();
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const save = useMutation({ mutationFn: () => api<BookingParticipant>(`/bookings/${bookingId}/participants`, json("PUT", { sequence: participants.length + 1, first_name: firstName.trim(), last_name: lastName.trim(), email: email.trim() || null, phone: phone.trim() || null })), onSuccess: async () => { setFirstName(""); setLastName(""); setEmail(""); setPhone(""); await client.invalidateQueries({ queryKey: ["booking", bookingId] }); } });
+  const remove = useMutation({ mutationFn: (participantId: string) => api<void>(`/bookings/${bookingId}/participants/${participantId}`, { method: "DELETE" }), onSuccess: () => client.invalidateQueries({ queryKey: ["booking", bookingId] }) });
+  return <div className="detail-section"><h3>Participant manifest</h3>{participants.length ? <div className="notes-list">{participants.map(participant => <div className="note" key={participant.id}><div className="toolbar" style={{ justifyContent: "space-between" }}><strong>{participant.sequence}. {participant.first_name} {participant.last_name}</strong><button className="icon-button" aria-label={`Remove ${participant.first_name}`} onClick={() => remove.mutate(participant.id)}><Trash2 size={13}/></button></div><span className="muted-note">{participant.email || participant.phone || "No contact details"} · {participant.status}</span></div>)}</div> : <p className="muted-note">No individual participants have been added yet.</p>}<p className="muted-note">{participants.length} of {units} booked place{units === 1 ? "" : "s"} identified.</p><form className="form-grid" onSubmit={event => { event.preventDefault(); if (firstName.trim() && lastName.trim()) save.mutate(); }}><label className="field"><span>First name</span><input required value={firstName} onChange={event => setFirstName(event.target.value)}/></label><label className="field"><span>Last name</span><input required value={lastName} onChange={event => setLastName(event.target.value)}/></label><label className="field"><span>Email (optional)</span><input type="email" value={email} onChange={event => setEmail(event.target.value)}/></label><label className="field"><span>Phone (optional)</span><input value={phone} onChange={event => setPhone(event.target.value)}/></label><button className="button small" disabled={save.isPending || participants.length >= units}>{save.isPending ? "Saving…" : "Add participant"}</button></form>{save.error && <div className="error-banner">{save.error.message}</div>}</div>;
+}
+
 function BookingDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { me } = useSession();
   const tz = me.operator.time_zone;
@@ -138,6 +149,7 @@ function BookingDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               </dl>
             </div>
             <NotesSection bookingId={data.id} notes={data.notes} />
+            <ParticipantsSection bookingId={data.id} participants={data.participants} units={data.units} />
             <div className="detail-section"><h3>Customer</h3><dl className="detail-list"><dt>Email</dt><dd>{data.customer_email}</dd><dt>Phone</dt><dd>{data.customer_phone || "—"}</dd></dl></div>
             <div className="detail-section"><h3>Resources</h3><dl className="detail-list">{data.resources.length ? data.resources.map((resource) => <span style={{ display: "contents" }} key={resource.resource_id}><dt>{resource.name}</dt><dd>{resource.quantity}</dd></span>) : <><dt>Inventory</dt><dd>No mapped resources</dd></>}</dl></div>
             <div className="detail-section"><h3>FareHarbor-style rate line</h3><dl className="detail-list"><dt>Customer type</dt><dd>{data.customer_type_name || "Legacy calendar unit"}</dd><dt>Seats</dt><dd>{data.seat_count}</dd><dt>Policy version</dt><dd>{data.booking_policy_version ?? "Default"}</dd><dt>Resources</dt><dd>{data.resources.length ? data.resources.map(resource => `${resource.name} × ${resource.quantity}`).join(", ") : "No mapped resources"}</dd></dl></div>
@@ -155,7 +167,7 @@ function BookingDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-interface CreatedOrder { public_reference: string; status: string; client_secret: string | null }
+interface CreatedOrder { public_reference: string; status: string; client_secret: string | null; access_token?: string | null }
 interface BookingField { id: string; key: string; label: string; field_type: string; required: boolean; options: unknown[] | null }
 function NewBookingForm({ calendars, onDone }: { calendars: Calendar[]; onDone: () => void }) {
   const { me } = useSession();
@@ -168,7 +180,7 @@ function NewBookingForm({ calendars, onDone }: { calendars: Calendar[]; onDone: 
   const [created, setCreated] = useState<CreatedOrder | null>(null);
   const fields = useQuery({ queryKey: ["booking-fields", calendarId], queryFn: () => api<BookingField[]>(`/booking-custom-fields?calendar_id=${calendarId}`), enabled: Boolean(calendarId) });
   const mutation = useMutation({ mutationFn: () => api<CreatedOrder>("/bookings", json("POST", { items: [{ calendar_id: calendarId, start_at: zonedWallTimeToISO(start, tz), units }], customer: { first_name: first, last_name: last, email, phone: phone || null }, custom_fields: customFields })), onSuccess: async (result) => { setCreated(result); await Promise.all([client.invalidateQueries({ queryKey: ["bookings"] }), client.invalidateQueries({ queryKey: ["booking-notifications"] })]); if (!result.client_secret) onDone(); } });
-  if (created?.client_secret) return <div><p style={{fontSize:12,color:"#697386",marginTop:0}}>Inventory is held while the customer payment is completed.</p><PaymentPanel clientSecret={created.client_secret} publicReference={created.public_reference} /></div>;
+  if (created?.client_secret) return <div><p style={{fontSize:12,color:"#697386",marginTop:0}}>Inventory is held while the customer payment is completed.</p><PaymentPanel clientSecret={created.client_secret} publicReference={created.public_reference} accessToken={created.access_token} /></div>;
   return <form onSubmit={(e: FormEvent) => { e.preventDefault(); mutation.mutate(); }}><p className="muted-note" style={{ marginTop: 0, marginBottom: 12 }}>Passport validates calendar hours, blocks, customer-type rates, and resource inventory. Staff assignment remains an operational step and does not block a valid booking.</p><div className="form-grid"><label className="field full"><span>Calendar</span><select required value={calendarId} onChange={(e) => { setCalendarId(e.target.value); setCustomFields({}); }}>{calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}</option>)}</select></label><label className="field"><span>Date and time</span><input type="datetime-local" required value={start} onChange={(e) => setStart(e.target.value)} /></label><label className="field"><span>Quantity</span><input type="number" min={1} required value={units} onChange={(e) => setUnits(Number(e.target.value))} /></label><label className="field"><span>First name</span><input required value={first} onChange={(e) => setFirst(e.target.value)} /></label><label className="field"><span>Last name</span><input required value={last} onChange={(e) => setLast(e.target.value)} /></label><label className="field"><span>Email</span><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label><label className="field"><span>Phone (optional)</span><input value={phone} onChange={(e) => setPhone(e.target.value)} /></label>{fields.data?.map(field => <label className="field full" key={field.id}><span>{field.label}{field.required ? " *" : ""}</span>{field.field_type === "select" ? <select required={field.required} value={String(customFields[field.key] || "")} onChange={e => setCustomFields({ ...customFields, [field.key]: e.target.value })}><option value="">Choose…</option>{(field.options || []).map(option => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</select> : field.field_type === "boolean" ? <input type="checkbox" checked={Boolean(customFields[field.key])} onChange={e => setCustomFields({ ...customFields, [field.key]: e.target.checked })}/> : <input required={field.required} type={field.field_type === "number" ? "number" : field.field_type === "date" ? "date" : "text"} value={String(customFields[field.key] || "")} onChange={e => setCustomFields({ ...customFields, [field.key]: e.target.value })}/>}</label>)}</div>{mutation.error && <div className="error-banner" style={{marginTop:12}}>{mutation.error.message}</div>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={onDone}>Cancel</button><button className="button" disabled={mutation.isPending || !calendarId}>{mutation.isPending ? "Checking availability…" : "Create booking"}</button></div></form>;
 }
 

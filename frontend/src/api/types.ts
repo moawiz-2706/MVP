@@ -106,6 +106,7 @@ export interface BookingDetail extends Booking {
   created_at: string;
   waiver: WaiverSummary;
   notes: BookingNote[];
+  participants: BookingParticipant[];
 }
 
 export interface BookingNotification {
@@ -175,6 +176,7 @@ export interface AvailabilityResponse { date: string; time_zone: string; calenda
 
 export interface WaiverSummary { status: "signed" | "pending" | "not_set_up" | "not_applicable"; signed_at: string | null; url: string | null }
 export interface BookingNote { id: Id; author_user_id: Id | null; author_name: string | null; body: string; created_at: string }
+export interface BookingParticipant { id: Id; sequence: number; first_name: string; last_name: string; email: string | null; phone: string | null; date_of_birth: string | null; is_minor: boolean; guardian_name: string | null; emergency_contact: Record<string, unknown> | null; operational_notes: string | null; status: string; source: string }
 
 export interface WaiverPerson { first_name: string; last_name: string; date_of_birth: string }
 export interface WaiverSigner extends WaiverPerson { email: string; phone: string }

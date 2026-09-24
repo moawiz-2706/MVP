@@ -12,7 +12,6 @@ from app.models.entities import (
     BookingOrder,
     Operator,
     Payment,
-    PublicAccessCredential,
 )
 from app.schemas.order import (
     OrderCreateRequest,
@@ -82,6 +81,14 @@ def order_status(
     if row is None:
         raise NotFoundError("Order not found")
     order, payment, operator = row
+    if access_token:
+        from app.services.public_access_service import PublicAccessService
+
+        PublicAccessService(db).verify(
+            access_token, purpose="order_status", order_id=order.id
+        )
+    else:
+        raise NotFoundError("Order access link is required")
     if reconcile and payment.status == "processing" and payment.stripe_payment_intent_id:
         try:
             StripePaymentReconciliationService(db, get_settings()).reconcile(payment.id)
@@ -98,20 +105,6 @@ def order_status(
             # Status polling must remain available even when Stripe is temporarily
             # unreachable. The scheduled reconciliation job remains the fallback.
             db.rollback()
-    if access_token:
-        from app.services.public_access_service import PublicAccessService
-
-        PublicAccessService(db).verify(
-            access_token, purpose="order_status", order_id=order.id
-        )
-    elif db.scalar(
-        select(PublicAccessCredential.id).where(
-            PublicAccessCredential.order_id == order.id,
-            PublicAccessCredential.purpose == "order_status",
-            PublicAccessCredential.revoked_at.is_(None),
-        )
-    ):
-        raise NotFoundError("Order access link is required")
     bookings = list(
         db.scalars(
             select(Booking)
