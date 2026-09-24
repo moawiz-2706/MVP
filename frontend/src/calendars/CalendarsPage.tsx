@@ -36,13 +36,82 @@ function ResourceEditor({calendar,allResources}:{calendar:Calendar;allResources:
   return <div><p style={{fontSize:12,color:"#697386"}}>Each booking unit consumes the configured quantity from every selected shared pool.</p>{allResources.length?allResources.map(resource=><div key={resource.id} style={{display:"grid",gridTemplateColumns:"1fr 140px",gap:12,alignItems:"center",padding:"11px 0",borderTop:"1px solid #eef0f2"}}><label className="check-field"><input type="checkbox" checked={resource.id in selected} onChange={(e)=>{const next={...selected};if(e.target.checked)next[resource.id]=1;else delete next[resource.id];setSelected(next);setSuccess(null);}}/><span><strong>{resource.name}</strong><br/><small>{resource.quantity} total</small></span></label>{resource.id in selected&&<label className="field"><span>Per booking unit</span><input type="number" min={1} value={selected[resource.id]} onChange={(e)=>setSelected({...selected,[resource.id]:Number(e.target.value)})}/></label>}</div>):<EmptyState title="No resources" copy="Create a resource pool before mapping inventory."/>}<MutationNotice success={success} error={save.error}/><div className="dialog-actions"><button className="button" onClick={()=>{setSuccess(null);save.mutate();}} disabled={save.isPending}>Save resources</button></div></div>;
 }
 
-type RateDraft={price_minor:number;booking_fee_bps:number;tax_bps:number;resources:Record<string,number>};
+type RateResourceDraft={resource_id:string;quantity_per_unit:number};
+type RateDraft={price_minor:number;booking_fee_bps:number;tax_bps:number;resources:RateResourceDraft[]};
 function RateEditor({calendar,allResources}:{calendar:Calendar;allResources:Resource[]}) {
-  const client=useQueryClient(); const types=useQuery({queryKey:["customer-types"],queryFn:()=>api<CustomerType[]>("/customer-types")}); const rates=useQuery({queryKey:["calendar-rates",calendar.id],queryFn:()=>api<CalendarRate[]>(`/calendars/${calendar.id}/rates`)}); const [drafts,setDrafts]=useState<Record<string,RateDraft>>({}); const [newName,setNewName]=useState(""); const [newPlural,setNewPlural]=useState(""); const [newSeats,setNewSeats]=useState(1); const [success,setSuccess]=useState<string|null>(null);
-  useEffect(()=>{if(!types.data)return;const existing=Object.fromEntries((rates.data||[]).map(rate=>[rate.customer_type_id,{price_minor:rate.price_minor,booking_fee_bps:rate.booking_fee_bps,tax_bps:rate.tax_bps,resources:Object.fromEntries(rate.resources.map(resource=>[resource.resource_id,resource.quantity_per_unit]))}]));setDrafts(current=>Object.fromEntries(types.data!.map(type=>[type.id,current[type.id]||existing[type.id]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:{}}])));},[types.data,rates.data]);
-  const save=useMutation({mutationFn:()=>api<CalendarRate[]>(`/calendars/${calendar.id}/rates`,json("PUT",{rates:(types.data||[]).filter(type=>type.is_active).map(type=>{const draft=drafts[type.id]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:{}};return {customer_type_id:type.id,price_minor:draft.price_minor,booking_fee_bps:draft.booking_fee_bps,tax_bps:draft.tax_bps,resources:Object.entries(draft.resources).map(([resource_id,quantity_per_unit])=>({resource_id,quantity_per_unit}))};})})),onSuccess:()=>{setSuccess("Rate plans saved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});}});
-  const createType=useMutation({mutationFn:()=>api<CustomerType>("/customer-types",json("POST",{name:newName,plural_name:newPlural||newName,note:null,seat_count:newSeats})),onSuccess:()=>{setNewName("");setNewPlural("");setNewSeats(1);setSuccess("Customer type created. Configure its price below.");void client.invalidateQueries({queryKey:["customer-types"]});}});
-  return <div><p style={{fontSize:12,color:"#697386"}}>Rates own customer-facing prices and decide which physical resource pool each selection consumes. For Kayak Swamp Tour, create Single Kayak and Tandem Kayak types, then map them to separate resources.</p><div className="form-grid"><label className="field"><span>New customer type</span><input value={newName} placeholder="Single Kayak" onChange={e=>setNewName(e.target.value)}/></label><label className="field"><span>Plural label</span><input value={newPlural} placeholder="Single Kayaks" onChange={e=>setNewPlural(e.target.value)}/></label><label className="field"><span>Seats</span><input type="number" min={1} value={newSeats} onChange={e=>setNewSeats(Number(e.target.value))}/></label><div className="field"><span>&nbsp;</span><button type="button" className="button secondary" disabled={!newName||createType.isPending} onClick={()=>createType.mutate()}>{createType.isPending?"Creating…":"Add customer type"}</button></div></div>{(types.data||[]).map(type=>{const draft=drafts[type.id]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:{}};return <fieldset className="field full" key={type.id} style={{marginTop:14}}><legend>{type.name} · {type.seat_count} seat{type.seat_count===1?"":"s"}</legend><div className="form-grid"><label className="field"><span>Price (minor units)</span><input type="number" min={0} value={draft.price_minor} onChange={e=>setDrafts({...drafts,[type.id]:{...draft,price_minor:Number(e.target.value)}})}/></label><label className="field"><span>Booking fee (basis points)</span><input type="number" min={0} value={draft.booking_fee_bps} onChange={e=>setDrafts({...drafts,[type.id]:{...draft,booking_fee_bps:Number(e.target.value)}})}/></label><label className="field"><span>Tax (basis points)</span><input type="number" min={0} value={draft.tax_bps} onChange={e=>setDrafts({...drafts,[type.id]:{...draft,tax_bps:Number(e.target.value)}})}/></label></div>{allResources.map(resource=><label className="check-field" key={resource.id} style={{marginRight:14}}><input type="checkbox" checked={resource.id in draft.resources} onChange={e=>{const next={...draft.resources};if(e.target.checked)next[resource.id]=1;else delete next[resource.id];setDrafts({...drafts,[type.id]:{...draft,resources:next}})}}/>{resource.name}<small style={{marginLeft:5}}>({resource.quantity})</small></label>)}</fieldset>})}<MutationNotice success={success} error={save.error||createType.error}/><div className="dialog-actions"><button type="button" className="button" onClick={()=>save.mutate()} disabled={save.isPending||!types.data?.length}>{save.isPending?"Saving…":"Save rate plans"}</button></div></div>;
+  const client=useQueryClient();
+  const types=useQuery({queryKey:["customer-types"],queryFn:()=>api<CustomerType[]>("/customer-types")});
+  const rates=useQuery({queryKey:["calendar-rates",calendar.id],queryFn:()=>api<CalendarRate[]>(`/calendars/${calendar.id}/rates`)});
+  const [drafts,setDrafts]=useState<Record<string,RateDraft>>({});
+  const [enabled,setEnabled]=useState<Record<string,boolean>>({});
+  const [newName,setNewName]=useState("");
+  const [newPlural,setNewPlural]=useState("");
+  const [newSeats,setNewSeats]=useState(1);
+  const [success,setSuccess]=useState<string|null>(null);
+
+  useEffect(()=>{
+    if(!types.data||!rates.data)return;
+    const existing=Object.fromEntries(rates.data.map(rate=>[rate.customer_type_id,{
+      price_minor:rate.price_minor,
+      booking_fee_bps:rate.booking_fee_bps,
+      tax_bps:rate.tax_bps,
+      resources:rate.resources.map(resource=>({resource_id:resource.resource_id,quantity_per_unit:resource.quantity_per_unit})),
+    }]));
+    setDrafts(current=>Object.fromEntries(types.data!.map(type=>[type.id,current[type.id]||existing[type.id]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:[]}])));
+    setEnabled(current=>Object.fromEntries(types.data!.map(type=>[type.id,current[type.id]??Boolean(existing[type.id])] )));
+  },[types.data,rates.data]);
+
+  const save=useMutation({
+    mutationFn:()=>api<CalendarRate[]>(`/calendars/${calendar.id}/rates`,json("PUT",{
+      rates:(types.data||[]).filter(type=>type.is_active&&enabled[type.id]).map(type=>{
+        const draft=drafts[type.id]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:[]};
+        return {customer_type_id:type.id,price_minor:draft.price_minor,booking_fee_bps:draft.booking_fee_bps,tax_bps:draft.tax_bps,resources:draft.resources};
+      }),
+    })),
+    onSuccess:()=>{setSuccess("Rate plans and resource requirements saved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});},
+  });
+  const createType=useMutation({
+    mutationFn:()=>api<CustomerType>("/customer-types",json("POST",{name:newName,plural_name:newPlural||newName,note:null,seat_count:newSeats})),
+    onSuccess:(created)=>{setNewName("");setNewPlural("");setNewSeats(1);setEnabled(current=>({...current,[created.id]:true}));setSuccess("Customer type created. Add its price and resource requirement below.");void client.invalidateQueries({queryKey:["customer-types"]});},
+  });
+  const deleteRate=useMutation({
+    mutationFn:(customerTypeId:string)=>api<void>(`/calendars/${calendar.id}/rates/${customerTypeId}`,{method:"DELETE"}),
+    onSuccess:(_,customerTypeId)=>{setEnabled(current=>({...current,[customerTypeId]:false}));setSuccess("Rate removed from this calendar. Historical bookings were preserved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});},
+  });
+  const updateDraft=(typeId:string,patch:Partial<RateDraft>)=>setDrafts(current=>({...current,[typeId]:{...(current[typeId]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:[]}),...patch}}));
+  const addResource=(typeId:string)=>{
+    const draft=drafts[typeId]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:[]};
+    const used=new Set(draft.resources.map(item=>item.resource_id));
+    const next=allResources.find(resource=>!used.has(resource.id));
+    if(!next)return;
+    updateDraft(typeId,{resources:[...draft.resources,{resource_id:next.id,quantity_per_unit:1}]});
+  };
+  const updateResource=(typeId:string,index:number,patch:Partial<RateResourceDraft>)=>{
+    const draft=drafts[typeId]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:[]};
+    updateDraft(typeId,{resources:draft.resources.map((item,itemIndex)=>itemIndex===index?{...item,...patch}:item)});
+  };
+  const removeResource=(typeId:string,index:number)=>{
+    const draft=drafts[typeId]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:[]};
+    updateDraft(typeId,{resources:draft.resources.filter((_,itemIndex)=>itemIndex!==index)});
+  };
+  return <div className="rate-editor">
+    <div className="rate-editor-intro"><strong>Customer types, prices & resource requirements</strong><p>Rates are customer-facing options. Select the resource pool each option consumes and the quantity used per booking unit, just like FareHarbor.</p></div>
+    <div className="rate-create-row"><label className="field"><span>New customer type</span><input value={newName} placeholder="Single Kayak" onChange={e=>setNewName(e.target.value)}/></label><label className="field"><span>Plural label</span><input value={newPlural} placeholder="Single Kayaks" onChange={e=>setNewPlural(e.target.value)}/></label><label className="field compact-field"><span>Seats</span><input type="number" min={1} value={newSeats} onChange={e=>setNewSeats(Number(e.target.value))}/></label><div className="field rate-create-action"><span>&nbsp;</span><button type="button" className="button secondary" disabled={!newName.trim()||createType.isPending} onClick={()=>createType.mutate()}>{createType.isPending?"Creating…":"Add customer type"}</button></div></div>
+    {types.isLoading||rates.isLoading?<div className="loading">Loading rate plans…</div>:!types.data?.length?<EmptyState title="No customer types" copy="Add a customer type above to create the first bookable rate."/>:<div className="rate-card-list">{types.data.filter(type=>type.is_active).map(type=>{
+      const draft=drafts[type.id]||{price_minor:0,booking_fee_bps:0,tax_bps:0,resources:[]};
+      const isEnabled=Boolean(enabled[type.id]);
+      const availableResources=allResources.filter(resource=>!draft.resources.some(item=>item.resource_id===resource.id));
+      return <fieldset className={`rate-card ${isEnabled?"rate-card-active":"rate-card-disabled"}`} key={type.id}>
+        <legend><span><strong>{type.name}</strong><small>{type.seat_count} seat{type.seat_count===1?"":"s"}{type.note?` · ${type.note}`:""}</small></span><span className={`badge ${isEnabled?"success":""}`}>{isEnabled?"On this calendar":"Not configured"}</span></legend>
+        {!isEnabled?<div className="rate-disabled-row"><span>Add this customer type as a rate to make it bookable on this calendar.</span><button type="button" className="button secondary small" onClick={()=>setEnabled(current=>({...current,[type.id]:true}))}>Add rate</button></div>:<>
+          <div className="rate-fields"><label className="field"><span>Price (minor units / cents)</span><input type="number" min={0} value={draft.price_minor} onChange={e=>updateDraft(type.id,{price_minor:Number(e.target.value)})}/></label><label className="field"><span>Booking fee (basis points)</span><input type="number" min={0} value={draft.booking_fee_bps} onChange={e=>updateDraft(type.id,{booking_fee_bps:Number(e.target.value)})}/></label><label className="field"><span>Tax (basis points)</span><input type="number" min={0} value={draft.tax_bps} onChange={e=>updateDraft(type.id,{tax_bps:Number(e.target.value)})}/></label></div>
+          <div className="rate-requirements"><div className="rate-section-heading"><div><strong>Resource requirements</strong><small>Choose the inventory pool and units consumed by one booking unit.</small></div><button type="button" className="button secondary small" disabled={!availableResources.length} onClick={()=>addResource(type.id)}><Plus size={14}/>Add resource</button></div>{!allResources.length?<div className="inline-warning">Create resources first, then attach them to this rate.</div>:!draft.resources.length?<div className="empty-inline">No resources attached. Add a resource requirement to make inventory-aware availability work.</div>:draft.resources.map((mapping,index)=><div className="rate-resource-row" key={`${type.id}-${index}`}><label className="field"><span>Resource</span><select value={mapping.resource_id} onChange={e=>updateResource(type.id,index,{resource_id:e.target.value})}>{allResources.filter(resource=>resource.id===mapping.resource_id||!draft.resources.some((item,itemIndex)=>itemIndex!==index&&item.resource_id===resource.id)).map(resource=><option key={resource.id} value={resource.id}>{resource.name} · {resource.quantity} total</option>)}</select></label><label className="field"><span>Units required</span><input type="number" min={1} value={mapping.quantity_per_unit} onChange={e=>updateResource(type.id,index,{quantity_per_unit:Number(e.target.value)})}/></label><button type="button" className="icon-button danger-icon" title="Remove resource requirement" onClick={()=>removeResource(type.id,index)}>×</button></div>)}</div>
+          <div className="rate-card-actions"><button type="button" className="button link-danger" disabled={deleteRate.isPending} onClick={()=>deleteRate.mutate(type.id)}><Trash2 size={14}/>Remove rate from calendar</button></div>
+        </>}
+      </fieldset>;
+    })}</div>}
+    <MutationNotice success={success} error={save.error||createType.error||deleteRate.error}/><div className="dialog-actions"><button type="button" className="button" onClick={()=>{setSuccess(null);save.mutate();}} disabled={save.isPending||!types.data?.length}>{save.isPending?"Saving…":"Save rates & requirements"}</button></div>
+  </div>;
 }
 
 function CalendarEditor({calendar,categories,locations,resources,onClose}:{calendar:Calendar|null;categories:Category[];locations:Location[];resources:Resource[];onClose:()=>void}) {

@@ -401,6 +401,25 @@ class ConfigurationService:
         self._queue_ghl_calendar_sync(calendar)
         return self.list_calendar_rates(calendar_id)
 
+    def delete_calendar_rate(self, calendar_id: uuid.UUID, customer_type_id: uuid.UUID) -> None:
+        """Soft-delete a rate while retaining its identity for old bookings."""
+        calendar = self._owned(Calendar, calendar_id, active=False)
+        rate = self.db.scalar(
+            select(CalendarRate).where(
+                CalendarRate.calendar_id == calendar.id,
+                CalendarRate.operator_id == self.operator_id,
+                CalendarRate.customer_type_id == customer_type_id,
+                CalendarRate.deleted_at.is_(None),
+            )
+        )
+        if rate is None:
+            raise NotFoundError("Rate not found")
+        rate.deleted_at = datetime.now(UTC)
+        rate.is_active = False
+        self.db.execute(delete(CalendarRateResource).where(CalendarRateResource.rate_id == rate.id))
+        self.db.commit()
+        self._queue_ghl_calendar_sync(calendar)
+
     def list_categories(self) -> list[dict[str, Any]]:
         count = (
             select(func.count(Calendar.id))

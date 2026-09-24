@@ -335,3 +335,15 @@ def replace_calendar_rates(
 ):
     require_admin(principal)
     return service(db, principal).replace_calendar_rates(calendar_id, data)
+
+
+@router.delete("/calendars/{calendar_id}/rates/{customer_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_calendar_rate(
+    calendar_id: uuid.UUID,
+    customer_type_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    db: DB,
+) -> Response:
+    require_admin(principal, delete=True)
+    service(db, principal).delete_calendar_rate(calendar_id, customer_type_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
