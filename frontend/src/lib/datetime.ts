@@ -20,15 +20,25 @@ export function safeTimeZone(timeZone?: string | null): string {
 }
 
 export function formatTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Time unavailable";
+  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), hour: "numeric", minute: "2-digit" }).format(date);
 }
 
 export function formatDay(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), month: "short", day: "numeric" }).format(new Date(iso));
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), month: "short", day: "numeric" }).format(date);
 }
 
 export function formatLongDate(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), dateStyle: "long" }).format(new Date(iso));
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat(undefined, { timeZone: safeTimeZone(timeZone), dateStyle: "long" }).format(date);
+}
+
+export function isValidDateTime(value: string | null | undefined): value is string {
+  return Boolean(value && Number.isFinite(new Date(value).getTime()));
 }
 
 /** YYYY-MM-DD as seen in the operator's zone, for <input type="date">. */
