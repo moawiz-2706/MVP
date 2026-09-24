@@ -11,6 +11,7 @@ interface OrderCreateResponse {
   public_reference: string;
   status: string;
   client_secret: string | null;
+  access_token?: string | null;
 }
 
 export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar; onDone: () => void }) {
@@ -53,7 +54,7 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
   });
 
   if (created?.client_secret) {
-    return <div><p className="muted-note">Inventory is held while payment is completed.</p><PaymentPanel clientSecret={created.client_secret} publicReference={created.public_reference} /></div>;
+    return <div><p className="muted-note">Inventory is held while payment is completed.</p><PaymentPanel clientSecret={created.client_secret} publicReference={created.public_reference} accessToken={created.access_token} /></div>;
   }
   if (created) {
     return <div><div className="success-banner">Booking {created.public_reference} was created successfully.</div><div className="dialog-actions"><button className="button" onClick={onDone}>Done</button></div></div>;

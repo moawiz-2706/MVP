@@ -37,11 +37,21 @@ export interface Calendar extends Entity {
   currency: string;
   availability_mode: string;
   required_staff_roles: string[];
+  minimum_party_size: number | null;
+  maximum_party_size: number | null;
+  booking_fee_bps: number;
+  tax_bps: number;
+  public_booking_mode: string;
+  booking_cutoff_minutes: number | null;
+  call_to_book_phone: string | null;
 }
 export interface CalendarHour extends Entity { calendar_id: Id; day_of_week: number; start_time: string; end_time: string }
 export interface CalendarDateHour extends Entity { calendar_id: Id; start_date: string; end_date: string; start_time: string; end_time: string }
 export interface CalendarBlock extends Entity { calendar_id: Id; start_at: string; end_at: string; start_date: string; end_date: string; reason: string | null }
 export interface CalendarResource { resource_id: Id; name: string; total_quantity: number; default_quantity_per_unit: number }
+export interface CustomerType extends Entity { name: string; plural_name: string; note: string | null; seat_count: number; external_provider: string | null; external_id: string | null; is_active: boolean }
+export interface CalendarRateResource { resource_id: Id; name: string; quantity_per_unit: number; total_quantity: number }
+export interface CalendarRate extends Entity { calendar_id: Id; customer_type_id: Id; customer_type_name: string; customer_type_plural_name: string; customer_type_note: string | null; seat_count: number; price_minor: number; booking_fee_bps: number; tax_bps: number; is_tax_inclusive: boolean; is_fee_inclusive: boolean; external_provider: string | null; external_id: string | null; is_active: boolean; resources: CalendarRateResource[] }
 export interface PushedSlot extends Entity { calendar_id: Id; start_at: string; end_at: string }
 
 export interface StaffHour { day_of_week: number; start_time: string; end_time: string }
@@ -80,6 +90,13 @@ export interface BookingDetail extends Booking {
   subtotal_minor: number;
   platform_fee_and_taxes_minor: number;
   customer_total_minor: number;
+  rate_id: Id | null;
+  customer_type_name: string | null;
+  seat_count: number;
+  booking_fee_minor: number;
+  tax_minor: number;
+  line_total_minor: number;
+  booking_policy_version: number | null;
   ghl_contact_sync_status: string;
   ghl_confirmation_email_status: string;
   ghl_appointment_sync_status: string;
@@ -89,6 +106,7 @@ export interface BookingDetail extends Booking {
   created_at: string;
   waiver: WaiverSummary;
   notes: BookingNote[];
+  participants: BookingParticipant[];
 }
 
 export interface BookingNotification {
@@ -150,11 +168,15 @@ export interface PublicCalendar {
 
 export interface PublicCatalog { name: string; slug: string; time_zone: string; calendars: PublicCalendar[] }
 export interface PublicCategoryPage { operator_name: string; operator_slug: string; time_zone: string; category_name: string; category_slug: string; calendars: PublicCalendar[] }
-export interface AvailabilitySlot { start_at: string; end_at: string; max_bookable_units: number; available: boolean }
+export interface PublicRateResource { resource_id: Id; name: string; quantity_per_unit: number; total_quantity: number }
+export interface PublicRate { id: Id; customer_type_name: string; customer_type_plural_name: string; note: string | null; seat_count: number; price_minor: number; booking_fee_bps: number; tax_bps: number; resources: PublicRateResource[] }
+export interface PublicCustomField { id: Id; key: string; label: string; field_type: string; required: boolean; options: unknown[] | null }
+export interface AvailabilitySlot { start_at: string; end_at: string; max_bookable_units: number; available: boolean; status?: string; rates?: { rate_id: Id; customer_type_name: string; seat_count: number; available_quantity: number; available_seats: number }[] }
 export interface AvailabilityResponse { date: string; time_zone: string; calendar: unknown; slots: AvailabilitySlot[] }
 
 export interface WaiverSummary { status: "signed" | "pending" | "not_set_up" | "not_applicable"; signed_at: string | null; url: string | null }
 export interface BookingNote { id: Id; author_user_id: Id | null; author_name: string | null; body: string; created_at: string }
+export interface BookingParticipant { id: Id; sequence: number; first_name: string; last_name: string; email: string | null; phone: string | null; date_of_birth: string | null; is_minor: boolean; guardian_name: string | null; emergency_contact: Record<string, unknown> | null; operational_notes: string | null; status: string; source: string }
 
 export interface WaiverPerson { first_name: string; last_name: string; date_of_birth: string }
 export interface WaiverSigner extends WaiverPerson { email: string; phone: string }

@@ -14,14 +14,18 @@ from app.models.entities import (
     CalendarBlock,
     CalendarDateHour,
     CalendarHour,
+    CalendarRate,
+    CalendarRateResource,
     CalendarPushedSlot,
     CalendarResource,
+    CustomerType,
     DepartureLocation,
     Operator,
     Resource,
 )
 from app.schemas.availability import (
     AvailabilityCheckResponse,
+    AvailabilityRate,
     AvailabilitySlot,
     PublicAvailabilityResponse,
     PublicCalendarSummary,
@@ -76,6 +80,34 @@ class AvailabilityService:
                 .order_by(Resource.id)
             ).all()
         )
+
+    def _rate_mappings(
+        self, calendar_id: uuid.UUID
+    ) -> list[tuple[CalendarRate, CustomerType, list[tuple[Resource, int]]]]:
+        rows = self.db.execute(
+            select(CalendarRate, CustomerType)
+            .join(CustomerType, CustomerType.id == CalendarRate.customer_type_id)
+            .where(
+                CalendarRate.calendar_id == calendar_id,
+                CalendarRate.deleted_at.is_(None),
+                CalendarRate.is_active.is_(True),
+                CustomerType.deleted_at.is_(None),
+                CustomerType.is_active.is_(True),
+            )
+            .order_by(CalendarRate.name_snapshot)
+        ).all()
+        result = []
+        for rate, customer_type in rows:
+            mappings = list(
+                self.db.execute(
+                    select(Resource, CalendarRateResource.quantity_per_unit)
+                    .join(CalendarRateResource, CalendarRateResource.resource_id == Resource.id)
+                    .where(CalendarRateResource.rate_id == rate.id)
+                    .order_by(Resource.id)
+                ).all()
+            )
+            result.append((rate, customer_type, mappings))
+        return result
 
     def _openings_for_date(self, calendar: Calendar, local_date: date) -> list[tuple[time, time]]:
         """Opening intervals that apply on a given operator-local date.
@@ -199,6 +231,7 @@ class AvailabilityService:
         operator_id: uuid.UUID | None = None,
         public: bool = False,
         exclude_booking_ids: set[uuid.UUID] | None = None,
+        resource_mappings: list[tuple[Resource, int]] | None = None,
     ) -> AvailabilityCheckResponse:
         if start_at.tzinfo is None:
             raise ValueError("start_at must include an offset")
@@ -208,7 +241,19 @@ class AvailabilityService:
         end_at = start_at + timedelta(minutes=calendar.duration_minutes)
         within_hours = self._within_hours(calendar, operator, start_at, end_at)
         blocked = self._is_blocked(calendar.id, start_at, end_at)
-        mappings = self._mappings(calendar.id)
+        policy_reason = None
+        if public and calendar.public_booking_mode == "closed":
+            policy_reason = "Online booking is closed for this calendar"
+        elif public and calendar.public_booking_mode == "call_to_book":
+            policy_reason = "This experience requires a call to book"
+        elif (
+            public
+            and calendar.booking_cutoff_minutes is not None
+            and datetime.now(UTC)
+            >= start_at.astimezone(UTC) - timedelta(minutes=calendar.booking_cutoff_minutes)
+        ):
+            policy_reason = "Online booking has passed the cutoff time"
+        mappings = self._mappings(calendar.id) if resource_mappings is None else resource_mappings
         reservations = self._reservations(
             [resource.id for resource, _ in mappings],
             start_at,
@@ -255,6 +300,8 @@ class AvailabilityService:
         reason = None
         if not calendar.is_active:
             reason = "Calendar is inactive"
+        elif policy_reason:
+            reason = policy_reason
         elif not within_hours:
             reason = "Requested time is outside calendar hours"
         elif blocked:
@@ -347,6 +394,7 @@ class AvailabilityService:
             range_start = min(candidates)
             range_end = max(candidates) + timedelta(minutes=calendar.duration_minutes)
             mappings = self._mappings(calendar.id)
+            rate_mappings = self._rate_mappings(calendar.id)
             reservations = self._reservations(
                 [resource.id for resource, _ in mappings], range_start, range_end
             )
@@ -382,20 +430,85 @@ class AvailabilityService:
                         else min(inventory_max, resource_max)
                     )
                 if inventory_max is None:
-                    inventory_max = calendar.max_units_per_booking or 1
+                    rate_inventory_maxes: list[int] = []
+                    for _rate, _customer_type, rate_resources in rate_mappings:
+                        rate_max: int | None = None
+                        for resource, per_unit in rate_resources:
+                            reserved = reserved_for_interval(
+                                reservations.get(resource.id, []), candidate, end_at
+                            )
+                            resource_available = (
+                                max(0, resource.quantity - reserved)
+                                if resource.is_active and resource.deleted_at is None
+                                else 0
+                            )
+                            resource_max = floor(resource_available / per_unit)
+                            rate_max = resource_max if rate_max is None else min(rate_max, resource_max)
+                        if rate_max is not None:
+                            rate_inventory_maxes.append(rate_max)
+                    inventory_max = max(rate_inventory_maxes, default=calendar.max_units_per_booking or 1)
                 elif calendar.max_units_per_booking is not None:
                     inventory_max = min(inventory_max, calendar.max_units_per_booking)
                 # Staff assignment is an operational concern, not a booking
                 # capacity rule. A slot remains bookable when no staff member
                 # or required role is currently available. Calendar hours,
                 # blocks, and resource inventory remain authoritative here.
-                available = not blocked and inventory_max > 0
+                inventory_available = not blocked and inventory_max > 0
+                cutoff_passed = (
+                    calendar.booking_cutoff_minutes is not None
+                    and now >= candidate.astimezone(UTC)
+                    - timedelta(minutes=calendar.booking_cutoff_minutes)
+                )
+                if blocked:
+                    slot_status = "blocked"
+                elif calendar.public_booking_mode == "closed":
+                    slot_status = "closed"
+                elif calendar.public_booking_mode == "call_to_book":
+                    slot_status = "call_to_book"
+                elif cutoff_passed:
+                    slot_status = "past_cutoff"
+                elif inventory_available:
+                    slot_status = "bookable_online"
+                else:
+                    slot_status = "sold_out"
+                available = slot_status == "bookable_online"
+                rate_details: list[AvailabilityRate] = []
+                for rate, customer_type, rate_resources in rate_mappings:
+                    rate_max: int | None = None
+                    for resource, per_unit in rate_resources:
+                        reserved = reserved_for_interval(
+                            reservations.get(resource.id, []), candidate, end_at
+                        )
+                        resource_available = (
+                            max(0, resource.quantity - reserved)
+                            if resource.is_active and resource.deleted_at is None
+                            else 0
+                        )
+                        resource_max = floor(resource_available / per_unit)
+                        rate_max = resource_max if rate_max is None else min(rate_max, resource_max)
+                    if rate_max is None:
+                        rate_max = calendar.max_units_per_booking or 1
+                    if calendar.max_units_per_booking is not None:
+                        rate_max = min(rate_max, calendar.max_units_per_booking)
+                    rate_details.append(
+                        AvailabilityRate(
+                            rate_id=rate.id,
+                            customer_type_name=customer_type.name,
+                            seat_count=customer_type.seat_count,
+                            available_quantity=max(0, rate_max) if not blocked else 0,
+                            available_seats=max(0, rate_max * customer_type.seat_count)
+                            if not blocked
+                            else 0,
+                        )
+                    )
                 slots.append(
                     AvailabilitySlot(
                         start_at=candidate,
                         end_at=end_at,
                         max_bookable_units=inventory_max if available else 0,
                         available=available,
+                        status=slot_status,
+                        rates=rate_details,
                     )
                 )
         slots.sort(key=lambda item: item.start_at)

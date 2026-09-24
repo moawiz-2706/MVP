@@ -262,8 +262,11 @@ class StripeWebhookService:
         jobs = [
             ("stripe_create_transfer", f"order:{order.id}:stripe_transfer"),
             ("ghl_upsert_contact", f"order:{order.id}:ghl_contact"),
-            ("ghl_send_confirmation_email", f"order:{order.id}:ghl_email"),
         ]
+        if self.settings.ghl_notifications_enabled:
+            jobs.append(("ghl_send_confirmation_email", f"order:{order.id}:ghl_email"))
+        else:
+            order.ghl_confirmation_email_status = "disabled"
         for job_type, key in jobs:
             if job_type == "stripe_create_transfer" and payment.operator_transfer_minor == 0:
                 continue

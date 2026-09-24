@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 CUSTOMER_MARKUP_BPS = 1300
 OPERATOR_TRANSFER_MARKUP_BPS = 700
@@ -25,8 +25,23 @@ class PaymentBreakdown:
     platform_gross_retained_minor: int
 
 
-def calculate_payment(subtotal_minor: int) -> PaymentBreakdown:
-    platform_fee = apply_basis_points(subtotal_minor, CUSTOMER_MARKUP_BPS)
+def calculate_payment(
+    subtotal_minor: int,
+    *,
+    booking_fee_minor: int | None = None,
+    tax_minor: int | None = None,
+) -> PaymentBreakdown:
+    """Calculate a payment using explicit components or the legacy markup.
+
+    Existing calendars have no rate-level fee/tax configuration, so they retain
+    the original markup behavior. New rate-aware calendars pass explicit fee and
+    tax totals, allowing the customer-facing quote to match the configured rate.
+    """
+    platform_fee = (
+        apply_basis_points(subtotal_minor, CUSTOMER_MARKUP_BPS)
+        if booking_fee_minor is None and tax_minor is None
+        else (booking_fee_minor or 0) + (tax_minor or 0)
+    )
     operator_bonus = apply_basis_points(subtotal_minor, OPERATOR_TRANSFER_MARKUP_BPS)
     customer_total = subtotal_minor + platform_fee
     operator_transfer = subtotal_minor + operator_bonus
@@ -37,4 +52,3 @@ def calculate_payment(subtotal_minor: int) -> PaymentBreakdown:
         operator_transfer_minor=operator_transfer,
         platform_gross_retained_minor=customer_total - operator_transfer,
     )
-

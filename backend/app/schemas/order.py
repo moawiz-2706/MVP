@@ -7,13 +7,24 @@ from pydantic import BaseModel, EmailStr, Field, model_validator
 class OrderItemRequest(BaseModel):
     calendar_id: uuid.UUID
     start_at: datetime
-    units: int = Field(gt=0, le=100_000)
+    rate_id: uuid.UUID | None = None
+    quantity: int | None = Field(default=None, gt=0, le=100_000)
+    # Legacy clients may continue sending units until the customer-type UI is live.
+    units: int | None = Field(default=None, gt=0, le=100_000)
 
     @model_validator(mode="after")
     def aware_start(self) -> "OrderItemRequest":
         if self.start_at.tzinfo is None:
             raise ValueError("start_at must include an offset")
+        if self.quantity is None and self.units is None:
+            raise ValueError("quantity is required")
+        if self.quantity is not None and self.units is not None and self.quantity != self.units:
+            raise ValueError("quantity and units must match when both are supplied")
         return self
+
+    @property
+    def requested_quantity(self) -> int:
+        return self.quantity if self.quantity is not None else self.units  # type: ignore[return-value]
 
 
 class OrderCustomer(BaseModel):
@@ -29,6 +40,7 @@ class OrderQuoteRequest(BaseModel):
 
 class OrderCreateRequest(OrderQuoteRequest):
     customer: OrderCustomer
+    custom_fields: dict[str, object] = Field(default_factory=dict)
 
 
 class QuotedItem(BaseModel):
@@ -39,8 +51,17 @@ class QuotedItem(BaseModel):
     units: int
     base_price_minor: int
     line_subtotal_minor: int
-    departure_location_name: str | None
-    departure_location_address: str | None
+    rate_id: uuid.UUID | None = None
+    customer_type_name: str | None = None
+    customer_type_note: str | None = None
+    seat_count: int = 1
+    unit_price_minor: int | None = None
+    booking_fee_minor: int = 0
+    tax_minor: int = 0
+    line_total_minor: int | None = None
+    resources: list[dict] = Field(default_factory=list)
+    departure_location_name: str | None = None
+    departure_location_address: str | None = None
 
 
 class OrderQuoteResponse(BaseModel):
@@ -49,6 +70,8 @@ class OrderQuoteResponse(BaseModel):
     subtotal_minor: int
     platform_fee_and_taxes_minor: int
     customer_total_minor: int
+    booking_fee_minor: int = 0
+    tax_minor: int = 0
 
 
 class OrderCreateResponse(BaseModel):

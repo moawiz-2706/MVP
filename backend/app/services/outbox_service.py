@@ -119,6 +119,14 @@ class OutboxService:
 
     def _run(self, job: OutboxJob) -> None:
         payload = job.payload or {}
+        if job.job_type in {
+            "ghl_booking_reminder",
+            "ghl_staff_assigned_email",
+            "ghl_staff_reminder",
+            "ghl_staff_unassigned_email",
+            "ghl_send_confirmation_email",
+        } and not self.settings.ghl_notifications_enabled:
+            return
         if job.job_type == "ghl_booking_reminder":
             GHLEmailService(self.db, job.operator_id).send_booking_reminder(
                 uuid.UUID(payload["booking_id"]), payload["kind"]

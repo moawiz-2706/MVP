@@ -1,4 +1,5 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1").replace(/\/$/, "");
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
+const API_BASE = (configuredApiBase || (import.meta.env.DEV ? "http://localhost:8000/api/v1" : "/api/v1")).replace(/\/$/, "");
 
 let sessionToken: string | null = null;
 let refreshSession: (() => Promise<void>) | null = null;

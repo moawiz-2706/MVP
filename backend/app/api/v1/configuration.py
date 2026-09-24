@@ -16,6 +16,8 @@ from app.schemas.configuration import (
     CalendarDateHoursReplace,
     CalendarHourRead,
     CalendarHoursReplace,
+    CalendarRateRead,
+    CalendarRatesReplace,
     CalendarRead,
     CalendarResourceRead,
     CalendarResourcesReplace,
@@ -23,6 +25,9 @@ from app.schemas.configuration import (
     CategoryCreate,
     CategoryRead,
     CategoryUpdate,
+    CustomerTypeCreate,
+    CustomerTypeRead,
+    CustomerTypeUpdate,
     LocationCreate,
     LocationRead,
     LocationUpdate,
@@ -33,7 +38,6 @@ from app.schemas.configuration import (
     ResourceUpdate,
 )
 from app.services.configuration_service import ConfigurationService
-
 
 router = APIRouter(tags=["configuration"])
 DB = Annotated[Session, Depends(get_db)]
@@ -105,6 +109,34 @@ def update_resource(data: ResourceUpdate, entity_id: uuid.UUID, principal: Curre
 def delete_resource(entity_id: uuid.UUID, principal: CurrentPrincipal, db: DB) -> Response:
     require_admin(principal, delete=True)
     service(db, principal).delete_resource(entity_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/customer-types", response_model=list[CustomerTypeRead])
+def list_customer_types(principal: CurrentPrincipal, db: DB):
+    return service(db, principal).list_customer_types()
+
+
+@router.post(
+    "/customer-types", response_model=CustomerTypeRead, status_code=status.HTTP_201_CREATED
+)
+def create_customer_type(data: CustomerTypeCreate, principal: CurrentPrincipal, db: DB):
+    require_admin(principal)
+    return service(db, principal).create_customer_type(data)
+
+
+@router.patch("/customer-types/{entity_id}", response_model=CustomerTypeRead)
+def update_customer_type(
+    data: CustomerTypeUpdate, entity_id: uuid.UUID, principal: CurrentPrincipal, db: DB
+):
+    require_admin(principal)
+    return service(db, principal).update_customer_type(entity_id, data)
+
+
+@router.delete("/customer-types/{entity_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_customer_type(entity_id: uuid.UUID, principal: CurrentPrincipal, db: DB) -> Response:
+    require_admin(principal, delete=True)
+    service(db, principal).delete_customer_type(entity_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -288,3 +320,18 @@ def replace_calendar_resources(
     require_admin(principal)
     return service(db, principal).replace_calendar_resources(calendar_id, data)
 
+
+@router.get("/calendars/{calendar_id}/rates", response_model=list[CalendarRateRead])
+def list_calendar_rates(calendar_id: uuid.UUID, principal: CurrentPrincipal, db: DB):
+    return service(db, principal).list_calendar_rates(calendar_id)
+
+
+@router.put("/calendars/{calendar_id}/rates", response_model=list[CalendarRateRead])
+def replace_calendar_rates(
+    data: CalendarRatesReplace,
+    calendar_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    db: DB,
+):
+    require_admin(principal)
+    return service(db, principal).replace_calendar_rates(calendar_id, data)

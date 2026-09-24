@@ -72,6 +72,7 @@ class CategoryRead(EntityModel):
 
 
 AvailabilityMode = Literal["day_wise", "date_wise", "pushed"]
+PublicBookingMode = Literal["online", "call_to_book", "closed"]
 StaffPoolRole = Literal["Captain", "First Mate", "Guide", "Deckhand", "Instructor"]
 
 
@@ -96,6 +97,13 @@ class CalendarCreate(BaseModel):
     currency: str = Field(default="usd", pattern=r"^[a-zA-Z]{3}$")
     availability_mode: AvailabilityMode = "day_wise"
     required_staff_roles: list[StaffPoolRole] = Field(default_factory=lambda: ["Captain"], max_length=5)
+    minimum_party_size: int | None = Field(default=None, gt=0, le=100_000)
+    maximum_party_size: int | None = Field(default=None, gt=0, le=100_000)
+    booking_fee_bps: int = Field(default=0, ge=0, le=10_000)
+    tax_bps: int = Field(default=0, ge=0, le=10_000)
+    public_booking_mode: PublicBookingMode = "online"
+    booking_cutoff_minutes: int | None = Field(default=None, ge=0, le=100_000)
+    call_to_book_phone: str | None = Field(default=None, max_length=40)
 
     @field_validator("required_staff_roles")
     @classmethod
@@ -106,6 +114,13 @@ class CalendarCreate(BaseModel):
     @classmethod
     def normalize_currency(cls, value: str) -> str:
         return value.lower()
+
+    @model_validator(mode="after")
+    def validate_party_size(self) -> "CalendarCreate":
+        if self.minimum_party_size is not None and self.maximum_party_size is not None:
+            if self.minimum_party_size > self.maximum_party_size:
+                raise ValueError("minimum_party_size cannot exceed maximum_party_size")
+        return self
 
 
 class CalendarUpdate(BaseModel):
@@ -123,6 +138,13 @@ class CalendarUpdate(BaseModel):
     currency: str | None = Field(default=None, pattern=r"^[a-zA-Z]{3}$")
     availability_mode: AvailabilityMode | None = None
     required_staff_roles: list[StaffPoolRole] | None = Field(default=None, max_length=5)
+    minimum_party_size: int | None = Field(default=None, gt=0, le=100_000)
+    maximum_party_size: int | None = Field(default=None, gt=0, le=100_000)
+    booking_fee_bps: int | None = Field(default=None, ge=0, le=10_000)
+    tax_bps: int | None = Field(default=None, ge=0, le=10_000)
+    public_booking_mode: PublicBookingMode | None = None
+    booking_cutoff_minutes: int | None = Field(default=None, ge=0, le=100_000)
+    call_to_book_phone: str | None = Field(default=None, max_length=40)
 
     @field_validator("currency")
     @classmethod
@@ -150,6 +172,13 @@ class CalendarRead(EntityModel):
     currency: str
     availability_mode: str
     required_staff_roles: list[str]
+    minimum_party_size: int | None
+    maximum_party_size: int | None
+    booking_fee_bps: int
+    tax_bps: int
+    public_booking_mode: str
+    booking_cutoff_minutes: int | None
+    call_to_book_phone: str | None
 
 
 class CalendarHourWrite(BaseModel):
@@ -285,6 +314,89 @@ class CalendarResourceRead(BaseModel):
     name: str
     total_quantity: int
     default_quantity_per_unit: int
+
+
+class CustomerTypeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    plural_name: str = Field(min_length=1, max_length=160)
+    note: str | None = Field(default=None, max_length=1000)
+    seat_count: int = Field(default=1, gt=0, le=1000)
+    external_provider: str | None = Field(default=None, max_length=80)
+    external_id: str | None = Field(default=None, max_length=160)
+    is_active: bool = True
+
+
+class CustomerTypeUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    plural_name: str | None = Field(default=None, min_length=1, max_length=160)
+    note: str | None = Field(default=None, max_length=1000)
+    seat_count: int | None = Field(default=None, gt=0, le=1000)
+    is_active: bool | None = None
+
+
+class CustomerTypeRead(EntityModel):
+    name: str
+    plural_name: str
+    note: str | None
+    seat_count: int
+    external_provider: str | None
+    external_id: str | None
+    is_active: bool
+
+
+class RateResourceWrite(BaseModel):
+    resource_id: uuid.UUID
+    quantity_per_unit: int = Field(gt=0, le=1_000_000)
+
+
+class CalendarRateWrite(BaseModel):
+    customer_type_id: uuid.UUID
+    price_minor: int = Field(ge=0)
+    note: str | None = Field(default=None, max_length=1000)
+    booking_fee_bps: int = Field(default=0, ge=0, le=10_000)
+    tax_bps: int = Field(default=0, ge=0, le=10_000)
+    is_tax_inclusive: bool = False
+    is_fee_inclusive: bool = False
+    external_provider: str | None = Field(default=None, max_length=80)
+    external_id: str | None = Field(default=None, max_length=160)
+    is_active: bool = True
+    resources: list[RateResourceWrite] = Field(default_factory=list, max_length=100)
+
+
+class CalendarRatesReplace(BaseModel):
+    rates: list[CalendarRateWrite] = Field(max_length=100)
+
+    @model_validator(mode="after")
+    def unique_types(self) -> "CalendarRatesReplace":
+        ids = [item.customer_type_id for item in self.rates]
+        if len(ids) != len(set(ids)):
+            raise ValueError("A calendar can only have one active rate per customer type")
+        return self
+
+
+class RateResourceRead(BaseModel):
+    resource_id: uuid.UUID
+    name: str
+    quantity_per_unit: int
+    total_quantity: int
+
+
+class CalendarRateRead(EntityModel):
+    calendar_id: uuid.UUID
+    customer_type_id: uuid.UUID
+    customer_type_name: str
+    customer_type_plural_name: str
+    customer_type_note: str | None
+    seat_count: int
+    price_minor: int
+    booking_fee_bps: int
+    tax_bps: int
+    is_tax_inclusive: bool
+    is_fee_inclusive: bool
+    external_provider: str | None
+    external_id: str | None
+    is_active: bool
+    resources: list[RateResourceRead] = Field(default_factory=list)
 
 
 class OperatorUpdate(BaseModel):

@@ -19,6 +19,7 @@ from app.models.entities import (
     BookingFinancialAllocation,
     BookingNote,
     BookingOrder,
+    BookingParticipant,
     BookingResource,
     Calendar,
     CalendarCategory,
@@ -249,6 +250,13 @@ class BookingAdminService:
             "subtotal_minor": order.subtotal_minor,
             "platform_fee_and_taxes_minor": order.platform_fee_and_taxes_minor,
             "customer_total_minor": order.customer_total_minor,
+            "rate_id": booking.rate_id,
+            "customer_type_name": booking.customer_type_name_snapshot,
+            "seat_count": booking.seat_count,
+            "booking_fee_minor": booking.booking_fee_minor,
+            "tax_minor": booking.tax_minor,
+            "line_total_minor": booking.line_total_minor,
+            "booking_policy_version": booking.booking_policy_version,
             "ghl_contact_sync_status": order.ghl_contact_sync_status,
             "ghl_confirmation_email_status": order.ghl_confirmation_email_status,
             "ghl_appointment_sync_status": (
@@ -267,7 +275,76 @@ class BookingAdminService:
             "created_at": booking.created_at,
             "waiver": WaiverService(self.db).summary(booking),
             "notes": self._notes(booking.id),
+            "participants": [
+                {
+                    "id": participant.id,
+                    "sequence": participant.sequence,
+                    "first_name": participant.first_name,
+                    "last_name": participant.last_name,
+                    "email": participant.email,
+                    "phone": participant.phone,
+                    "date_of_birth": participant.date_of_birth,
+                    "is_minor": participant.is_minor,
+                    "guardian_name": participant.guardian_name,
+                    "emergency_contact": participant.emergency_contact,
+                    "operational_notes": participant.operational_notes,
+                    "status": participant.status,
+                    "source": participant.source,
+                }
+                for participant in self.db.scalars(
+                    select(BookingParticipant)
+                    .where(BookingParticipant.booking_id == booking.id)
+                    .order_by(BookingParticipant.sequence)
+                )
+            ],
         }
+
+    def list_participants(self, booking_id: uuid.UUID) -> list[dict]:
+        booking = self._booking(booking_id)
+        return [
+            {
+                "id": participant.id,
+                "sequence": participant.sequence,
+                "first_name": participant.first_name,
+                "last_name": participant.last_name,
+                "email": participant.email,
+                "phone": participant.phone,
+                "date_of_birth": participant.date_of_birth,
+                "is_minor": participant.is_minor,
+                "guardian_name": participant.guardian_name,
+                "emergency_contact": participant.emergency_contact,
+                "operational_notes": participant.operational_notes,
+                "status": participant.status,
+                "source": participant.source,
+            }
+            for participant in self.db.scalars(
+                select(BookingParticipant).where(BookingParticipant.booking_id == booking.id).order_by(BookingParticipant.sequence)
+            )
+        ]
+
+    def upsert_participant(self, booking_id: uuid.UUID, data) -> dict:
+        booking = self._booking(booking_id)
+        participant = self.db.scalar(
+            select(BookingParticipant).where(
+                BookingParticipant.booking_id == booking.id,
+                BookingParticipant.sequence == data.sequence,
+            ).with_for_update()
+        )
+        if participant is None:
+            participant = BookingParticipant(operator_id=self.operator_id, booking_id=booking.id, source="operator")
+            self.db.add(participant)
+        for key, value in data.model_dump().items():
+            setattr(participant, key, value)
+        self.db.commit()
+        return next(item for item in self.list_participants(booking.id) if item["id"] == participant.id)
+
+    def delete_participant(self, booking_id: uuid.UUID, participant_id: uuid.UUID) -> None:
+        booking = self._booking(booking_id)
+        participant = self.db.scalar(select(BookingParticipant).where(BookingParticipant.id == participant_id, BookingParticipant.booking_id == booking.id))
+        if participant is None:
+            raise NotFoundError("Participant not found")
+        participant.status = "cancelled"
+        self.db.commit()
 
     def cancel(self, booking_id: uuid.UUID) -> None:
         booking = self.db.scalar(
