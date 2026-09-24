@@ -94,6 +94,33 @@ a { color: inherit; text-decoration: none; }
 .field input:focus, .field textarea:focus, .field select:focus, .control:focus { border-color: #5c9d91; box-shadow: 0 0 0 3px rgba(22,107,92,.09); }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .field.full { grid-column: 1 / -1; }
+.rate-editor { display: grid; gap: 14px; }
+.rate-editor-intro { padding: 13px 14px; border: 1px solid #dce9e5; border-radius: 9px; background: #f7fbfa; color: #24453f; font-size: 12px; }
+.rate-editor-intro p { margin: 5px 0 0; color: #65736f; line-height: 1.5; }
+.rate-create-row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.25fr) 90px auto; gap: 10px; align-items: end; }
+.compact-field { min-width: 80px; }
+.rate-create-action { min-width: 145px; }
+.rate-card-list { display: grid; gap: 12px; }
+.rate-card { min-width: 0; margin: 0; padding: 14px; border: 1px solid #dce2e1; border-radius: 10px; background: #fff; }
+.rate-card-active { border-color: #b8d8d0; box-shadow: 0 2px 8px rgba(34, 78, 70, .05); }
+.rate-card-disabled { background: #fafbfb; }
+.rate-card legend { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px 12px; color: #24332f; font-size: 13px; }
+.rate-card legend > span:first-child { display: grid; gap: 3px; }
+.rate-card legend small { color: #77837f; font-size: 11px; font-weight: 400; }
+.rate-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.rate-requirements { margin-top: 14px; padding: 13px; border: 1px solid #e4e9e7; border-radius: 8px; background: #fbfcfc; }
+.rate-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.rate-section-heading > div { display: grid; gap: 3px; }
+.rate-section-heading small { color: #78827f; font-size: 11px; }
+.rate-resource-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px 32px; gap: 10px; align-items: end; padding: 10px 0; border-top: 1px solid #e8eceb; }
+.danger-icon { color: #b5473c; font-size: 18px; }
+.danger-icon:hover { color: #8f2f27; background: #fff0ee; }
+.rate-card-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.link-danger { background: transparent; color: #a13a32; border-color: transparent; box-shadow: none; }
+.link-danger:hover { background: #fff0ee; color: #8f2f27; }
+.rate-disabled-row, .empty-inline, .inline-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px; border-radius: 7px; color: #667085; font-size: 11.5px; line-height: 1.4; }
+.empty-inline { background: #f7f8f8; }
+.inline-warning { background: #fff8eb; border: 1px solid #f4d7a4; color: #8a5717; }
 .check-field { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #475467; }
 .check-field input { accent-color: var(--accent); }
 .dialog-overlay { position: fixed; inset: 0; background: rgba(15, 23, 32, .48); backdrop-filter: blur(2px); z-index: 80; animation: fade-in 120ms ease; }
@@ -294,6 +321,9 @@ a { color: inherit; text-decoration: none; }
   .service-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .tour-detail-hero { grid-template-columns: 1fr; gap: 16px; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rate-create-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rate-create-action { min-width: 0; }
+  .rate-fields { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 620px) {
@@ -311,6 +341,9 @@ a { color: inherit; text-decoration: none; }
   .stripe-card { align-items: flex-start; flex-direction: column; }
   .report-filter { max-width: none; }
   .metric-grid { grid-template-columns: 1fr; }
+  .rate-create-row { grid-template-columns: 1fr; }
+  .rate-resource-row { grid-template-columns: 1fr 100px 32px; }
+  .rate-section-heading { align-items: flex-start; flex-direction: column; }
 }
 
 /* Waivers */

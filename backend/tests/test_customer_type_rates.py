@@ -49,6 +49,7 @@ def _kayak_setup(db):
         availability_mode="day_wise",
         is_active=True,
         public_booking_enabled=True,
+        required_staff_roles=[],
     )
     single_resource = Resource(operator_id=operator.id, name="Single Kayaks", quantity=20)
     tandem_resource = Resource(operator_id=operator.id, name="Tandem Kayaks", quantity=6)
