@@ -97,6 +97,11 @@ invariants, booking-total checks, staff-assignment overlap protection, and
 append-only database triggers. Apply it after 020 and verify it on a staging
 PostgreSQL clone before production.
 
+Migration `supabase/migrations/024_resource_metadata_repair.sql` repairs older
+databases whose `resources` table still lacks `resource_type`, `capacity_limit`,
+or `notes`. It is idempotent and should be applied before opening the Resources
+page.
+
 The detailed API contract and GHL integration boundary are documented in
 `docs/FAREHARBOR_REPLICA_IMPLEMENTATION_SPEC.md`.
 

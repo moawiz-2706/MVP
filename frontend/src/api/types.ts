@@ -78,7 +78,7 @@ export interface Booking {
 }
 
 export interface SlotStaff { id: Id; staff_id: Id; staff_name: string; role: string | null }
-export interface SlotCalendar { calendar_id: Id; calendar_name: string; category_color: string | null; end_at: string; pushed: boolean; bookings: Booking[]; staff: SlotStaff[] }
+export interface SlotCalendar { calendar_id: Id; calendar_name: string; category_color: string | null; end_at: string; pushed: boolean; bookings: Booking[]; staff: SlotStaff[]; capacity: number | null; booked_units: number }
 /** Everything starting at one instant on the dashboard, grouped by calendar. */
 export interface DashboardSlot { start_at: string; calendars: SlotCalendar[] }
 

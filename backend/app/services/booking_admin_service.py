@@ -142,15 +142,20 @@ class BookingAdminService:
                     "pushed": False,
                     "bookings": [],
                     "staff": [],
+                    "capacity": calendar.maximum_party_size if calendar else None,
+                    "booked_units": 0,
                 }
             else:
                 current["end_at"] = max(current["end_at"], end_at)
             return current
 
         for booking in bookings:
-            entry(
+            calendar_entry = entry(
                 booking["start_at"], booking["calendar_id"], booking["end_at"], booking["calendar_name"]
-            )["bookings"].append(booking)
+            )
+            calendar_entry["bookings"].append(booking)
+            if booking["status"] not in {"cancelled", "failed"}:
+                calendar_entry["booked_units"] += booking["units"]
 
         if calendars:
             assignments = self.db.execute(

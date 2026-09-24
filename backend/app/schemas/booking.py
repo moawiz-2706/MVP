@@ -40,6 +40,8 @@ class SlotCalendar(BaseModel):
     pushed: bool
     bookings: list[BookingListItem]
     staff: list[SlotStaff]
+    capacity: int | None = None
+    booked_units: int = 0
 
 
 class DashboardSlot(BaseModel):

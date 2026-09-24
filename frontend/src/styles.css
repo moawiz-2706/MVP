@@ -111,24 +111,32 @@ a { color: inherit; text-decoration: none; }
 .spinner { width: 27px; height: 27px; border: 3px solid #dfe9e7; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 .result-error-icon { color: #a13a32; background: #fdecea; }
 
-.booking-layout { display: grid; grid-template-columns: 214px minmax(0, 1fr); gap: 12px; align-items: start; }
-.filter-panel { padding: 12px; position: sticky; top: 24px; }
-.filter-panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .055em; color: #7b8492; margin: 6px 5px 10px; }
-.filter-list { display: grid; gap: 2px; }
-.filter-button { width: 100%; border: 0; background: transparent; border-radius: 6px; min-height: 33px; display: flex; align-items: center; gap: 8px; padding: 0 8px; text-align: left; color: #566170; font-size: 11.5px; }
+.booking-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.filter-panel { padding: 0; position: static; background: transparent; border: 0; box-shadow: none; }
+.filter-panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .055em; color: #7b8492; margin: 0 5px 6px; }
+.filter-list { display: flex; flex-wrap: wrap; gap: 3px; }
+.filter-button { width: auto; border: 0; background: transparent; border-radius: 6px; min-height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 9px; text-align: left; color: #566170; font-size: 11.5px; }
 .filter-button:hover { background: #f4f6f7; }
 .filter-button.active { background: var(--accent-soft); color: #125b4e; font-weight: 650; }
 .filter-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
-.filter-calendar { padding-left: 25px; }
-.calendar-card { padding: 14px; min-width: 0; }
-.calendar-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.filter-calendar { padding-left: 9px; }
+.calendar-card { padding: 8px; min-width: 0; border-radius: 3px; }
+.calendar-toolbar { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; border-bottom: 1px solid #e5e7eb; padding: 4px 4px 10px; }
 .calendar-toolbar .control { max-width: 220px; }
-.fc { --fc-border-color: #e5e8ec; --fc-button-bg-color: #fff; --fc-button-border-color: #d9dde2; --fc-button-text-color: #475467; --fc-button-hover-bg-color: #f5f7f8; --fc-button-hover-border-color: #ccd2d8; --fc-button-active-bg-color: #e9f2f0; --fc-button-active-border-color: #b8d8d1; --fc-today-bg-color: #f3f8f7; font-size: 12px; }
+.fc { --fc-border-color: #e1e4e8; --fc-button-bg-color: #fff; --fc-button-border-color: #d9dde2; --fc-button-text-color: #475467; --fc-button-hover-bg-color: #f5f7f8; --fc-button-hover-border-color: #ccd2d8; --fc-button-active-bg-color: #e9f2f0; --fc-button-active-border-color: #b8d8d1; --fc-today-bg-color: #fffbe8; font-size: 12px; }
 .fc .fc-toolbar-title { font-size: 16px; font-weight: 700; letter-spacing: -.015em; }
 .fc .fc-button { box-shadow: none !important; font-size: 11px !important; font-weight: 600 !important; text-transform: capitalize !important; padding: .45em .7em !important; }
 .fc .fc-col-header-cell-cushion { color: #667085; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 8px 4px; }
 .fc .fc-daygrid-day-number { font-size: 11px; color: #667085; padding: 7px; }
-.fc-event { border-radius: 4px !important; border-width: 0 0 0 3px !important; padding: 1px 3px !important; cursor: pointer; }
+.fc-event { border-radius: 4px !important; border-width: 1px 1px 1px 3px !important; padding: 2px 4px !important; cursor: pointer; box-shadow: 0 1px 1px rgba(16,24,40,.04); }
+.fc .fc-daygrid-day-frame { min-height: 112px; }
+.fc .fc-daygrid-day.fc-day-today { background: #fffdf0; }
+.fc .fc-daygrid-day-number { font-weight: 600; }
+.event-compact { overflow: hidden; line-height: 1.3; font-size: 11px; }
+.event-title { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.event-lock { display: inline-block; margin-right: 4px; color: #8c6a42; }
+.event-customer { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; margin-top: 2px; }
+.event-meta { display: flex; gap: 8px; color: #8c6a42; font-size: 10px; margin-top: 2px; }
 .event-compact { min-width: 0; display: flex; gap: 4px; align-items: center; overflow: hidden; font-size: 10px; line-height: 1.45; color: #27313c; }
 .event-compact time { font-variant-numeric: tabular-nums; font-weight: 700; }
 .event-compact span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
