@@ -190,8 +190,8 @@ class Calendar(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     required_staff_roles: Mapped[list[str]] = mapped_column(
         JSONB,
         nullable=False,
-        default=lambda: ["Captain"],
-        server_default=text("'[\"Captain\"]'::jsonb"),
+        default=list,
+        server_default=text("'[]'::jsonb"),
     )
     minimum_party_size: Mapped[int | None] = mapped_column(Integer)
     maximum_party_size: Mapped[int | None] = mapped_column(Integer)
