@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from types import SimpleNamespace
 
 import pytest
@@ -81,6 +81,27 @@ def test_highlevel_calendar_schedule_is_complete_week() -> None:
         "sunday",
     ]
     assert all(rule["intervals"] == [{"from": "00:00", "to": "00:00"}] for rule in rules)
+
+
+def test_day_wise_calendar_hours_are_translated_to_highlevel_rules() -> None:
+    service = GHLCalendarService.__new__(GHLCalendarService)
+    service.db = SimpleNamespace(
+        scalars=lambda _query: [
+            SimpleNamespace(day_of_week=0, start_time=time(9, 0), end_time=time(17, 30)),
+            SimpleNamespace(day_of_week=4, start_time=time(10, 15), end_time=time(12, 0)),
+        ]
+    )
+    calendar = SimpleNamespace(id=uuid.uuid4(), availability_mode="day_wise")
+
+    rules = service._calendar_schedule_rules(calendar)
+
+    assert rules[0] == {
+        "type": "wday",
+        "day": "monday",
+        "intervals": [{"from": "09:00", "to": "17:30"}],
+    }
+    assert rules[4]["intervals"] == [{"from": "10:15", "to": "12:00"}]
+    assert rules[6]["intervals"] == []
 
 
 def test_appointment_title_uses_contact_name_and_base_unit_price() -> None:

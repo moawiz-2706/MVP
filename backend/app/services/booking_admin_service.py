@@ -384,7 +384,7 @@ class BookingAdminService:
         )
         self.db.commit()
         try:
-            OutboxService(self.db, get_settings()).process(limit=20)
+            OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)
         except Exception:
             logger.exception("Inline outbox processing failed after booking cancellation")
 
@@ -523,7 +523,7 @@ class BookingAdminService:
         )
         self.db.commit()
         try:
-            OutboxService(self.db, get_settings()).process(limit=20)
+            OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)
         except Exception:
             logger.exception("Inline outbox processing failed after booking update")
         return self.detail(booking.id)

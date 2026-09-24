@@ -38,8 +38,7 @@ async def stripe_webhook(
     # booking are already committed, and anything that does not succeed here stays
     # queued with backoff for the outbox to retry.
     try:
-        OutboxService(db, settings).process(limit=5)
+        OutboxService(db, settings).process(limit=100, prefer_newest=True)
     except Exception:
         logger.exception("Inline outbox processing failed; jobs remain queued for retry")
     return {"received": True}
-

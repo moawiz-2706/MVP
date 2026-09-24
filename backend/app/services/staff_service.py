@@ -219,7 +219,7 @@ class StaffService:
             )
         self.db.commit()
         try:
-            OutboxService(self.db, get_settings()).process(limit=20)
+            OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)
         except Exception:
             # The local staff change is committed; appointment jobs retry through
             # the durable outbox if HighLevel is unavailable.

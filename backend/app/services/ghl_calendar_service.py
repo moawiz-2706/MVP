@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.entities import (
     Calendar,
+    CalendarHour,
     DepartureLocation,
     GHLCalendarMapping,
     Operator,
@@ -48,7 +49,7 @@ class GHLCalendarService:
         ]
 
     def _sync_schedule(self, calendar: Calendar, operator: Operator, remote_id: str) -> None:
-        body = {"rules": self._schedule_rules(), "timezone": operator.time_zone}
+        body = {"rules": self._calendar_schedule_rules(calendar), "timezone": operator.time_zone}
         path = f"/calendars/schedules/event-calendar/{remote_id}"
         try:
             self.client.request("PUT", path, version="v3", json=body)
@@ -56,6 +57,44 @@ class GHLCalendarService:
             if exc.status_code != 404:
                 raise
             self.client.request("POST", path, version="v3", json=body)
+
+    def _calendar_schedule_rules(self, calendar: Calendar) -> list[dict[str, Any]]:
+        """Convert Passport's weekly hours to HighLevel rules when applicable.
+
+        Date-wise and pushed-slot calendars remain open in HighLevel because
+        Passport is the source of truth for those finite availability modes and
+        appointment writes intentionally bypass HighLevel free-slot validation.
+        """
+        if calendar.availability_mode != "day_wise":
+            return self._schedule_rules()
+        rows = list(
+            self.db.scalars(
+                select(CalendarHour)
+                .where(CalendarHour.calendar_id == calendar.id)
+                .order_by(CalendarHour.day_of_week, CalendarHour.start_time)
+            )
+        )
+        day_names = (
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+        )
+        intervals: dict[int, list[dict[str, str]]] = {day: [] for day in range(7)}
+        for row in rows:
+            intervals[row.day_of_week].append(
+                {
+                    "from": row.start_time.strftime("%H:%M"),
+                    "to": row.end_time.strftime("%H:%M"),
+                }
+            )
+        return [
+            {"type": "wday", "day": day_names[day], "intervals": intervals[day]}
+            for day in range(7)
+        ]
 
     def _calendar_description(self, calendar: Calendar) -> str:
         staff_names = list(

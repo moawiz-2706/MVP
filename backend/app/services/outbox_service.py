@@ -23,7 +23,7 @@ class OutboxService:
         self.db = db
         self.settings = settings
 
-    def process(self, limit: int = 20) -> dict[str, int]:
+    def process(self, limit: int = 20, *, prefer_newest: bool = False) -> dict[str, int]:
         now = datetime.now(UTC)
         stale = now - timedelta(minutes=self.settings.outbox_lease_minutes)
         worker_id = str(uuid.uuid4())
@@ -41,7 +41,7 @@ class OutboxService:
                         & (OutboxJob.updated_at < stale),
                     )
                 )
-                .order_by(OutboxJob.created_at)
+                .order_by(OutboxJob.created_at.desc() if prefer_newest else OutboxJob.created_at)
                 .limit(limit)
                 .with_for_update(skip_locked=True)
             )

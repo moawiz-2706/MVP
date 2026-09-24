@@ -392,7 +392,7 @@ class ConfigurationService:
             )
         self.db.commit()
         try:
-            OutboxService(self.db, get_settings()).process(limit=20)
+            OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)
         except Exception:
             logger.exception("Inline outbox processing failed after calendar mutation")
 
@@ -483,6 +483,10 @@ class ConfigurationService:
                 )
             )
         self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)
+        except Exception:
+            logger.exception("Inline outbox processing failed after calendar deletion")
 
     def list_hours(self, calendar_id: uuid.UUID) -> list[CalendarHour]:
         self.get_calendar(calendar_id)
@@ -615,6 +619,7 @@ class ConfigurationService:
             ]
         )
         self.db.commit()
+        self._queue_ghl_calendar_sync(self.get_calendar(calendar_id))
         return self.list_blocks(calendar_id)
 
     def _operator_zone(self):
@@ -668,6 +673,7 @@ class ConfigurationService:
         _apply(entity, data.model_dump())
         self.db.commit()
         self.db.refresh(entity)
+        self._queue_ghl_calendar_sync(self.get_calendar(calendar_id))
         return self._block_payload(entity, self._operator_zone())
 
     def delete_block(self, calendar_id: uuid.UUID, block_id: uuid.UUID) -> None:
@@ -680,6 +686,7 @@ class ConfigurationService:
         if result.rowcount != 1:
             raise NotFoundError()
         self.db.commit()
+        self._queue_ghl_calendar_sync(self.get_calendar(calendar_id))
 
     def list_calendar_resources(self, calendar_id: uuid.UUID) -> list[dict[str, Any]]:
         self.get_calendar(calendar_id)

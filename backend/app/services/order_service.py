@@ -400,7 +400,7 @@ class OrderService:
         # booking transaction is durable. Failed external calls remain in the
         # outbox with backoff and must not make the local booking fail.
         try:
-            OutboxService(self.db, self.settings).process(limit=20)
+            OutboxService(self.db, self.settings).process(limit=100, prefer_newest=True)
         except Exception:
             logger.exception("Inline outbox processing failed after booking creation")
 
