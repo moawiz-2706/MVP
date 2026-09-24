@@ -1,7 +1,10 @@
 from datetime import UTC, date, datetime, time, timedelta
+import csv
+import io
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -62,4 +65,52 @@ def report_summary(
         taxes_minor=sum(booking.tax_minor for booking in active),
         upcoming_bookings=sum(booking.status in {"confirmed", "pending_payment"} and booking.start_at >= datetime.now(UTC) for booking, _order in rows),
         failed_sync_jobs=failed_jobs,
+    )
+
+
+@router.get("/reports/bookings.csv")
+def booking_export(
+    principal: CurrentPrincipal,
+    db: DB,
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+) -> StreamingResponse:
+    require_permission(principal, Permission.VIEW_BOOKINGS)
+    today = datetime.now(UTC).date()
+    start = start_date or today
+    end = end_date or (today + timedelta(days=30))
+    if end < start:
+        raise ValueError("end_date must be on or after start_date")
+    rows = db.execute(
+        select(Booking, BookingOrder)
+        .join(BookingOrder, BookingOrder.id == Booking.booking_order_id)
+        .where(
+            Booking.operator_id == principal.operator_id,
+            Booking.start_at >= datetime.combine(start, time.min, tzinfo=UTC),
+            Booking.start_at < datetime.combine(end + timedelta(days=1), time.min, tzinfo=UTC),
+        )
+        .order_by(Booking.start_at, Booking.id)
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["public_reference", "booking_id", "calendar", "start_at", "end_at", "units", "status", "customer_name", "customer_email", "subtotal_minor", "fees_and_taxes_minor", "total_minor"])
+    for booking, order in rows:
+        writer.writerow([
+            order.public_reference,
+            booking.id,
+            booking.calendar_name_snapshot,
+            booking.start_at.isoformat(),
+            booking.end_at.isoformat(),
+            booking.units,
+            booking.status,
+            f"{order.customer_first_name} {order.customer_last_name}",
+            order.customer_email,
+            order.subtotal_minor,
+            order.platform_fee_and_taxes_minor,
+            order.customer_total_minor,
+        ])
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="passport-bookings-{start}-{end}.csv"'},
     )

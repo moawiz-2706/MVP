@@ -26,16 +26,16 @@ This inventory defines the production scope for turning Passport into a FareHarb
 | Custom fields | Field definitions, options, required validation, booking snapshots | Optional contact custom fields | Map selected safe fields to contact/appointment | Complete for core path |
 | Waivers | Waiver settings, signed documents, participant signatures, status | None | Link and status in appointment/contact metadata | Complete for core path |
 | Cancellation | Policy versioning, operator cancellation, customer policy display, token-authenticated self-service cancellation | Appointment cancellation projection | Idempotent cancel and status update | Partial; refund/credit outcome UX remains |
-| Rescheduling | Booking time update, availability recheck, fee/policy evaluation | Appointment update projection | Idempotent appointment update | Partial; operator path exists, public self-service missing |
-| Weather closures | Closure event, affected-booking workflow, credit/refund decision | Appointment cancellation/update | Batch outbox and audit log | Partial |
+| Rescheduling | Booking time update, availability recheck, cutoff enforcement, zero-fee public self-service, fee/policy evaluation | Appointment update projection | Idempotent appointment update | Partial; fee-bearing adjustment remains operator-assisted |
+| Weather closures | Idempotent closure event, affected-booking workflow, refund/credit/manual-review decision | Appointment cancellation/update | Batch outbox and audit log | Complete for core workflow |
 | No-show/completion | Booking status and operational notes | Appointment status/notes where supported | Status projection | Partial |
 | Notifications | In-app operational notices, email policy, reminders | Only approved calendar/contact sync | Do not require GHL messaging scopes | Partial |
 | Customer communications | Passport confirmation/status/waiver links; optional provider adapter | CRM contact timeline if explicitly enabled | Capability-gated | Partial |
 | Booking confirmation | Public confirmation page, payment state, access token | Appointment/contact projection | Include reference and sync status | Complete for core path |
-| Customer self-service | Status, waiver, cancellation link, and reschedule roadmap | None | Token-authenticated Passport endpoints | Partial; cancellation complete, rescheduling remains |
+| Customer self-service | Status, waiver, cancellation link, live-slot rescheduling, and policy-aware outcome | None | Token-authenticated Passport endpoints | Partial; fee-bearing reschedules remain operator-assisted |
 | Operator bookings | Search, dashboard, detail, notes, participants, assignment, cancel, sync retry | Calendar event projection | Booking mutation outbox | Complete for core path |
 | Calendar operations | Date slot grid, slot details, filters, capacity/resource indicators, blocks, and manual booking drawer | Calendar projection | No availability authority in GHL | Partial; core date-slot/manual-booking flow complete |
-| Reports | Revenue, bookings, utilization, capacity, cancellations, customer metrics, exports | Optional CRM attribution | Read-only aggregated Passport queries | Partial; summary workspace added, detailed exports remain |
+| Reports | Revenue, bookings, utilization, capacity, cancellations, customer metrics, summary dashboard, CSV export | Optional CRM attribution | Read-only aggregated Passport queries | Partial; detailed drilldowns remain |
 | Dashboard | Today, upcoming bookings, revenue, capacity warnings, sync failures, staff gaps | None | Surface outbox health | Partial |
 | Business settings | Payment, waiver, timezone, policies, booking defaults, branding | OAuth/location install | Secure settings and audit trail | Partial |
 | Audit trail | Booking, payment, policy, sync, refund, import-independent event records | Provider request IDs | Correlation IDs and retention | Partial |

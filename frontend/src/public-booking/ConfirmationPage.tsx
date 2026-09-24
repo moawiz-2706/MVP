@@ -2,11 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Clock3, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
-import { formatLongDate, formatTime, zoneLabel } from "../lib/datetime";
+import { api, json } from "../api/client";
+import type { AvailabilityResponse } from "../api/types";
+import { formatLongDate, formatTime, isoDayInZone, tomorrowInZone, zoneLabel } from "../lib/datetime";
 
 interface Status {
   public_reference: string;
+  operator_slug: string;
   status: string;
   time_zone: string;
   payment_status: string;
@@ -23,6 +25,8 @@ interface Status {
     units: number;
     departure_location_name: string | null;
     departure_location_address: string | null;
+    booking_id?: string;
+    calendar_slug?: string;
     waiver_url: string | null;
     waiver_signed: boolean;
   }[];
@@ -119,6 +123,7 @@ export function ConfirmationPage() {
                   {item.waiver_signed ? <span className="badge success">Waiver signed</span> : <a className="button small" href={item.waiver_url}>Sign waiver for {item.units} {item.units === 1 ? "person" : "people"}</a>}
                 </div>
               )}
+              {!cancelled && accessToken && <RescheduleControl order={order} item={item} accessToken={accessToken} onDone={() => queryClient.invalidateQueries({ queryKey: ["order-status", publicReference] })} />}
             </div>
           ))}
           <div style={{ paddingTop: 12, borderTop: "1px solid #e6e9e8" }}>
@@ -131,4 +136,21 @@ export function ConfirmationPage() {
       </main>
     </div>
   );
+}
+
+function RescheduleControl({ order, item, accessToken, onDone }: { order: Status; item: Status["items"][number]; accessToken: string; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [day, setDay] = useState(() => isoDayInZone(new Date(item.start_at), order.time_zone));
+  const [selected, setSelected] = useState(item.start_at);
+  const availability = useQuery({
+    queryKey: ["public-reschedule-availability", order.operator_slug, item.calendar_slug, day],
+    queryFn: () => api<AvailabilityResponse>(`/public/${order.operator_slug}/calendars/${item.calendar_slug}/availability?date=${day}`),
+    enabled: Boolean(open && item.booking_id && item.calendar_slug),
+  });
+  const mutation = useMutation({
+    mutationFn: () => api(`/public/orders/${order.public_reference}/bookings/${item.booking_id}/reschedule?access_token=${encodeURIComponent(accessToken)}`, json("POST", { start_at: selected })),
+    onSuccess: () => { setOpen(false); onDone(); },
+  });
+  if (!item.booking_id || !item.calendar_slug) return null;
+  return <div style={{ marginTop: 12 }}><button className="button small secondary" onClick={() => setOpen((value) => !value)}>{open ? "Close reschedule" : "Change date or time"}</button>{open && <div className="reschedule-box"><label className="field"><span>New date ({zoneLabel(order.time_zone)})</span><input type="date" min={tomorrowInZone(order.time_zone)} value={day} onChange={(event) => { setDay(event.target.value); setSelected(""); }} /></label>{availability.isLoading ? <div className="loading">Loading available times…</div> : availability.error ? <div className="error-banner">{availability.error.message}</div> : <div className="slot-grid">{availability.data?.slots.filter((slot) => slot.available).map((slot) => <button type="button" key={slot.start_at} className={`slot ${selected === slot.start_at ? "selected" : ""}`} onClick={() => setSelected(slot.start_at)}>{formatTime(slot.start_at, order.time_zone)}<span>{slot.max_bookable_units} available</span></button>)}</div>}{availability.data && !availability.data.slots.some((slot) => slot.available) && <div className="muted-note">No available times on this date.</div>}<button className="button" disabled={!selected || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? "Updating booking…" : "Confirm new time"}</button>{mutation.error && <div className="error-banner">{mutation.error.message}</div>}</div>}</div>;
 }

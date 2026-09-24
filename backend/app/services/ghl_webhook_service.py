@@ -38,9 +38,7 @@ class GHLWebhookService:
             raise ValueError("Invalid HighLevel webhook signature") from exc
 
     def process(self, payload: dict[str, Any], raw_body: bytes) -> bool:
-        event_type = str(payload.get("type") or payload.get("event") or "").upper()
-        if event_type not in {"INSTALL", "UNINSTALL"}:
-            return False
+        event_type = str(payload.get("type") or payload.get("event") or "UNKNOWN").upper()
         event_id = str(payload.get("webhookId") or payload.get("id") or hashlib.sha256(raw_body).hexdigest())
         location_id = payload.get("locationId")
         digest = hashlib.sha256(raw_body).hexdigest()
@@ -59,6 +57,14 @@ class GHLWebhookService:
         )
         if inserted is None:
             self.db.rollback()
+            return False
+        if event_type not in {"INSTALL", "UNINSTALL"}:
+            event_row = self.db.get(GHLWebhookEvent, inserted)
+            if event_row:
+                event_row.status = "ignored"
+                event_row.processed_at = datetime.now(UTC)
+                event_row.payload = {**payload, "processing_note": "Verified event type is not a lifecycle event handled by Passport"}
+            self.db.commit()
             return False
         if not location_id:
             raise ValueError("HighLevel lifecycle event has no locationId")
