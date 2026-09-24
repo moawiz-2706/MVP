@@ -1,4 +1,4 @@
-import { CalendarDays, Database, MapPin, Menu, Settings, Shapes, Users, UserRound, Warehouse, X, Bell } from "lucide-react";
+import { CalendarDays, Database, MapPin, Menu, Settings, Shapes, SlidersHorizontal, Users, UserRound, Warehouse, X, Bell } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -16,6 +16,7 @@ const links = [
   { to: "/app/staff", label: "Staff", icon: Users },
   { to: "/app/customers", label: "Customers", icon: UserRound },
   { to: "/app/migration", label: "Migration", icon: Database },
+  { to: "/app/booking-setup", label: "Booking setup", icon: SlidersHorizontal },
 ];
 
 function StaffRoleBadge() {

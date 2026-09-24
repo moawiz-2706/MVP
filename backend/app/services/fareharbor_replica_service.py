@@ -173,6 +173,33 @@ class FareHarborReplicaService:
         field.active = False
         self.db.commit()
 
+    def update_custom_field(self, field_id: uuid.UUID, data) -> dict[str, Any]:
+        field = self.db.scalar(
+            select(BookingCustomFieldDefinition).where(
+                BookingCustomFieldDefinition.id == field_id,
+                BookingCustomFieldDefinition.operator_id == self.operator_id,
+            ).with_for_update()
+        )
+        if field is None:
+            raise NotFoundError("Custom field not found")
+        if data.calendar_id:
+            self._calendar(data.calendar_id)
+        if data.field_type == "select" and not data.options:
+            raise ConflictError("Select fields require at least one option")
+        for key, value in data.model_dump().items():
+            setattr(field, key, value)
+        self.db.commit()
+        return {
+            "id": field.id,
+            "calendar_id": field.calendar_id,
+            "key": field.key,
+            "label": field.label,
+            "field_type": field.field_type,
+            "required": field.required,
+            "options": field.options,
+            "active": field.active,
+        }
+
     def _customer_item(self, customer: Customer) -> dict[str, Any]:
         booking_count = self.db.scalar(
             select(func.count(BookingOrder.id)).where(BookingOrder.customer_id == customer.id)

@@ -80,6 +80,17 @@ def delete_custom_field(field_id: uuid.UUID, principal: CurrentPrincipal, db: DB
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.patch("/booking-custom-fields/{field_id}", response_model=BookingCustomFieldDefinitionRead)
+def update_custom_field(
+    field_id: uuid.UUID,
+    data: BookingCustomFieldDefinitionWrite,
+    principal: CurrentPrincipal,
+    db: DB,
+):
+    manage(principal)
+    return service(db, principal).update_custom_field(field_id, data)
+
+
 @router.get("/customers", response_model=list[CustomerListItem])
 def list_customers(principal: CurrentPrincipal, db: DB, search: str | None = None):
     operate(principal)
