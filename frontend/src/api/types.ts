@@ -20,7 +20,7 @@ export interface UserContext {
 
 export interface Entity { id: Id; created_at: string; updated_at: string }
 export interface Location extends Entity { name: string; address: string; is_active: boolean; calendars_count: number }
-export interface Resource extends Entity { name: string; quantity: number; is_active: boolean; calendars_count: number }
+export interface Resource extends Entity { name: string; resource_type: string; quantity: number; capacity_limit: number | null; notes: string | null; is_active: boolean; calendars_count: number }
 export interface Category extends Entity { name: string; slug: string; display_color: string | null; sort_order: number; is_active: boolean; calendars_count: number }
 export interface Calendar extends Entity {
   calendar_category_id: Id | null;

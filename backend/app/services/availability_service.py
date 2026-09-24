@@ -32,6 +32,7 @@ from app.schemas.availability import (
     ResourceAvailability,
 )
 from app.services.capacity import CapacityInterval, reserved_for_interval
+from app.services.staffing_service import pool_readiness_for_interval
 from app.utils.timezone import local_datetime, require_timezone
 
 
@@ -297,6 +298,11 @@ class AvailabilityService:
         elif calendar.max_units_per_booking is not None:
             inventory_max = min(inventory_max, calendar.max_units_per_booking)
         resource_sufficient = all(detail.sufficient for detail in details)
+        staffing = (
+            pool_readiness_for_interval(self.db, operator_id, calendar.id, start_at, end_at)
+            if operator_id and calendar.required_staff_roles
+            else None
+        )
         reason = None
         if not calendar.is_active:
             reason = "Calendar is inactive"
@@ -308,6 +314,8 @@ class AvailabilityService:
             reason = "Requested time is blocked"
         elif not resource_sufficient or units > inventory_max:
             reason = "Insufficient resource inventory"
+        elif staffing is not None and not staffing.ready:
+            reason = staffing.reason or "Required staff are unavailable for this time"
         return AvailabilityCheckResponse(
             available=reason is None,
             start_at=start_at,
@@ -459,6 +467,13 @@ class AvailabilityService:
                     and now >= candidate.astimezone(UTC)
                     - timedelta(minutes=calendar.booking_cutoff_minutes)
                 )
+                staffing = (
+                    pool_readiness_for_interval(
+                        self.db, calendar.operator_id, calendar.id, candidate, end_at
+                    )
+                    if calendar.required_staff_roles
+                    else None
+                )
                 if blocked:
                     slot_status = "blocked"
                 elif calendar.public_booking_mode == "closed":
@@ -467,6 +482,8 @@ class AvailabilityService:
                     slot_status = "call_to_book"
                 elif cutoff_passed:
                     slot_status = "past_cutoff"
+                elif staffing is not None and not staffing.ready:
+                    slot_status = "staff_unavailable"
                 elif inventory_available:
                     slot_status = "bookable_online"
                 else:

@@ -40,6 +40,10 @@ Use a consistent FareHarbor-inspired visual system: activity-first public cards,
 
 Release only after each inventory row has a database/API/UI/test status, no unresolved import or migration errors, and a clean repository package containing complete Git history.
 
+## Completed in the current Kayak increment
+
+The current increment restores required staff-role coverage as a real availability constraint, adds resource type/capacity/notes metadata and migration support, upgrades the manual booking drawer to show every valid slot for the selected date, adds customer-type/rate selection and rate-specific quantity limits, and surfaces crew-unavailable status in public and operator slot grids.
+
 ## Immediate next implementation increment
 
-The next code increment should implement the missing customer self-service cancellation/reschedule workflow, reporting/dashboard read models, and conflict-focused booking tests. These provide the highest production value after the already-completed public checkout, rate/resource capacity, policy display, payment, waiver, booking operations, and GHL outbox foundation.
+The next code increment should implement the missing customer self-service reschedule workflow, promotions and gift-card liability ledgers, weather-closure batch outcomes, detailed reports/exports, and staff assignment conflict reporting. These provide the highest production value after the public checkout, rate/resource capacity, staff-aware availability, policy display, payment, waiver, booking operations, and GHL outbox foundation.

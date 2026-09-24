@@ -12,9 +12,9 @@ This inventory defines the production scope for turning Passport into a FareHarb
 | Staff directory | Cached staff records, Passport role/resource assignments, booking assignments | Staff creation, profile, permissions, employment status | Directory sync and staff identity mapping | Partial |
 | Products/activities | Calendars, categories, descriptions, duration, locations, public links | Calendar projection | Create/update/delete sync with idempotent outbox | Complete for core path |
 | Customer types and rates | Customer types, prices, taxes, fees, seat counts, resource rules | None | Include snapshots in contacts/appointments | Complete for core path |
-| Resource inventory | Quantity pools and per-rate consumption | None | Include capacity summary in appointment metadata | Complete for core path |
+| Resource inventory | Quantity pools, resource type, capacity/use limit, notes, archive state, and per-rate consumption | None | Include capacity summary in appointment metadata | Complete for core path |
 | Weekly/date availability | Hours, date hours, pushed times, blackout blocks, cutoff rules | Calendar projection only | Requeue calendar and future-appointment sync | Complete for core path |
-| Staff-role eligibility | Required roles and role assignment | Staff directory source | Sync staff then apply Passport role rules | Partial; must finish role conflict rules |
+| Staff-role eligibility | Required roles, GHL staff availability windows, role assignment, and slot eligibility | Staff directory source | Sync staff then apply Passport role rules | Partial; slot eligibility complete, assignment conflict reporting remains |
 | Public booking page | Catalog, category, calendar page, timezone, slots, rates, custom fields, policy, payment | None | Optional GHL embed/link distribution | Complete for core path |
 | Multiple booking items | Cart and quote model | None | One appointment per booked activity where configured | Partial; needs stronger cross-item conflict tests |
 | Participants/manifest | Primary customer, participant CRUD, minor/guardian/emergency fields | Contact remains the primary CRM identity | Appointment metadata and contact association | Complete for operator core |
@@ -25,16 +25,16 @@ This inventory defines the production scope for turning Passport into a FareHarb
 | Taxes/fees | Basis-point pricing, line-item quote, immutable snapshots | None | Include totals in appointment metadata | Complete for core path |
 | Custom fields | Field definitions, options, required validation, booking snapshots | Optional contact custom fields | Map selected safe fields to contact/appointment | Complete for core path |
 | Waivers | Waiver settings, signed documents, participant signatures, status | None | Link and status in appointment/contact metadata | Complete for core path |
-| Cancellation | Policy versioning, operator cancellation, customer policy display | Appointment cancellation projection | Idempotent cancel and status update | Partial; customer self-service endpoint needed |
+| Cancellation | Policy versioning, operator cancellation, customer policy display, token-authenticated self-service cancellation | Appointment cancellation projection | Idempotent cancel and status update | Partial; refund/credit outcome UX remains |
 | Rescheduling | Booking time update, availability recheck, fee/policy evaluation | Appointment update projection | Idempotent appointment update | Partial; operator path exists, public self-service missing |
 | Weather closures | Closure event, affected-booking workflow, credit/refund decision | Appointment cancellation/update | Batch outbox and audit log | Partial |
 | No-show/completion | Booking status and operational notes | Appointment status/notes where supported | Status projection | Partial |
 | Notifications | In-app operational notices, email policy, reminders | Only approved calendar/contact sync | Do not require GHL messaging scopes | Partial |
 | Customer communications | Passport confirmation/status/waiver links; optional provider adapter | CRM contact timeline if explicitly enabled | Capability-gated | Partial |
 | Booking confirmation | Public confirmation page, payment state, access token | Appointment/contact projection | Include reference and sync status | Complete for core path |
-| Customer self-service | Status, waiver, cancellation/reschedule links | None | Token-authenticated Passport endpoints | Partial |
+| Customer self-service | Status, waiver, cancellation link, and reschedule roadmap | None | Token-authenticated Passport endpoints | Partial; cancellation complete, rescheduling remains |
 | Operator bookings | Search, dashboard, detail, notes, participants, assignment, cancel, sync retry | Calendar event projection | Booking mutation outbox | Complete for core path |
-| Calendar operations | Month/week/day views, slot details, filters, capacity indicators | Calendar projection | No availability authority in GHL | Partial |
+| Calendar operations | Date slot grid, slot details, filters, capacity/resource indicators, blocks, and manual booking drawer | Calendar projection | No availability authority in GHL | Partial; core date-slot/manual-booking flow complete |
 | Reports | Revenue, bookings, utilization, capacity, cancellations, customer metrics, exports | Optional CRM attribution | Read-only aggregated Passport queries | Partial; summary workspace added, detailed exports remain |
 | Dashboard | Today, upcoming bookings, revenue, capacity warnings, sync failures, staff gaps | None | Surface outbox health | Partial |
 | Business settings | Payment, waiver, timezone, policies, booking defaults, branding | OAuth/location install | Secure settings and audit trail | Partial |
