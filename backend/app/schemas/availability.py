@@ -42,6 +42,16 @@ class AvailabilitySlot(BaseModel):
     end_at: datetime
     max_bookable_units: int
     available: bool
+    status: str = "bookable_online"
+    rates: list["AvailabilityRate"] = Field(default_factory=list)
+
+
+class AvailabilityRate(BaseModel):
+    rate_id: uuid.UUID
+    customer_type_name: str
+    seat_count: int
+    available_quantity: int
+    available_seats: int
 
 
 class PublicCalendarSummary(BaseModel):
@@ -63,4 +73,3 @@ class PublicAvailabilityResponse(BaseModel):
     time_zone: str
     calendar: PublicCalendarSummary
     slots: list[AvailabilitySlot]
-

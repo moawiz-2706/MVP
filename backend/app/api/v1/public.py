@@ -6,12 +6,23 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import NotFoundError
-from app.models.entities import Calendar, CalendarCategory, DepartureLocation, Operator
+from app.models.entities import (
+    Calendar,
+    CalendarCategory,
+    CalendarRate,
+    CalendarRateResource,
+    CustomerType,
+    DepartureLocation,
+    Operator,
+    Resource,
+)
 from app.schemas.public import (
     PublicCalendar,
     PublicCategoryPage,
     PublicLocation,
     PublicOperatorCatalog,
+    PublicRate,
+    PublicRateResource,
 )
 
 router = APIRouter(prefix="/public", tags=["public catalog"])
@@ -127,3 +138,76 @@ def public_category(
         category_slug=category.slug,
         calendars=[_public_calendar(calendar, category, location) for calendar, location in rows],
     )
+
+
+@router.get("/{operator_slug}/calendars/{calendar_slug}/rates", response_model=list[PublicRate])
+def public_rates(
+    operator_slug: str,
+    calendar_slug: str,
+    db: Annotated[Session, Depends(get_db)],
+    response: Response,
+) -> list[PublicRate]:
+    response.headers["Cache-Control"] = "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
+    row = db.execute(
+        select(Calendar, Operator)
+        .join(Operator, Operator.id == Calendar.operator_id)
+        .where(
+            Operator.slug == operator_slug,
+            Operator.is_active.is_(True),
+            Operator.public_booking_enabled.is_(True),
+            Calendar.slug == calendar_slug,
+            Calendar.is_active.is_(True),
+            Calendar.public_booking_enabled.is_(True),
+            Calendar.deleted_at.is_(None),
+        )
+    ).one_or_none()
+    if row is None:
+        raise NotFoundError("Booking page not found")
+    calendar, _operator = row
+    rates = db.execute(
+        select(CalendarRate, CustomerType)
+        .join(CustomerType, CustomerType.id == CalendarRate.customer_type_id)
+        .where(
+            CalendarRate.calendar_id == calendar.id,
+            CalendarRate.deleted_at.is_(None),
+            CalendarRate.is_active.is_(True),
+            CustomerType.deleted_at.is_(None),
+            CustomerType.is_active.is_(True),
+        )
+        .order_by(CalendarRate.name_snapshot)
+    ).all()
+    result: list[PublicRate] = []
+    for rate, customer_type in rates:
+        resources = db.execute(
+            select(
+                CalendarRateResource.resource_id,
+                Resource.name,
+                CalendarRateResource.quantity_per_unit,
+                Resource.quantity,
+            )
+            .join(Resource, Resource.id == CalendarRateResource.resource_id)
+            .where(CalendarRateResource.rate_id == rate.id)
+            .order_by(Resource.name)
+        ).all()
+        result.append(
+            PublicRate(
+                id=rate.id,
+                customer_type_name=customer_type.name,
+                customer_type_plural_name=customer_type.plural_name,
+                note=customer_type.note or rate.note_snapshot,
+                seat_count=customer_type.seat_count,
+                price_minor=rate.price_minor,
+                booking_fee_bps=rate.booking_fee_bps,
+                tax_bps=rate.tax_bps,
+                resources=[
+                    PublicRateResource(
+                        resource_id=resource_id,
+                        name=name,
+                        quantity_per_unit=quantity_per_unit,
+                        total_quantity=quantity,
+                    )
+                    for resource_id, name, quantity_per_unit, quantity in resources
+                ],
+            )
+        )
+    return result

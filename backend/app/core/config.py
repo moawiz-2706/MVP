@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     outbox_lease_minutes: int = Field(default=15, ge=1, le=60)
     outbox_max_attempts: int = Field(default=12, ge=1, le=100)
     ghl_calendar_sync_enabled: bool = True
+    # Passport owns customer communication by default. GHL remains limited to
+    # calendar, appointment, contact, and staff synchronization.
+    ghl_notifications_enabled: bool = False
     # Existing GHL account-user directory sync is automatic after migration 012
     # and the users.readonly scope is available.
     ghl_staff_user_sync_enabled: bool = True

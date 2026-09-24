@@ -2,8 +2,10 @@
 
 Passport is a multi-tenant rental scheduling platform embedded in a
 GoHighLevel Marketplace Custom Page. PostgreSQL is authoritative for calendars,
-inventory, bookings, and payments. GoHighLevel is used only for installation,
-embedded-user identity, Contacts, and confirmation email delivery.
+inventory, customer-type rates, bookings, payments, waivers, and booking
+policies. GoHighLevel is used only for installation, embedded-user identity,
+the contacts required by appointments, calendar/appointment synchronization,
+and staff identity synchronization.
 
 The repository is split into independently deployable applications:
 
@@ -23,7 +25,7 @@ The repository is split into independently deployable applications:
 7. Public booking and multi-occurrence checkout.
 8. Stripe Connect onboarding.
 9. Payments, verified webhooks, transfers, and refund foundation.
-10. Reliable GHL contact and confirmation-email jobs.
+10. Reliable Passport-owned booking and payment workflows with minimal GHL projection.
 11. Deployment hardening and QA.
 
 See [Architecture](docs/architecture.md) for the entity graph, trust boundaries,
@@ -69,6 +71,18 @@ automatically; the Staff page and assignment tools use them for operational
 staffing information, but they do not block public booking slots.
 Passport cannot edit GHL-managed staff details or availability.
 
+Migration `supabase/migrations/018_customer_type_rates_and_line_items.sql` is
+required for customer-type pricing and resource-aware bookings. It adds
+customer types, calendar rates, rate-to-resource mappings, booking line-item
+snapshots, and configurable party-size and rate-level fee/tax fields. Apply it
+after migration 017 before enabling the Kayak rate editor or public rate-aware
+checkout.
+
+Migration `supabase/migrations/019_calendar_bookability_policy.sql` adds
+Passport-owned `online`, `call_to_book`, and `closed` calendar modes plus an
+optional booking cutoff. Apply it after migration 018. GHL calendar hours and
+staff schedules do not replace these Passport booking rules.
+
 Calendar editors can configure one or more independent staff pools for
 assignment and GHL ownership. Existing calendars default to `Captain`; these
 pools no longer make a booking slot unavailable when a staff member or role is
@@ -89,8 +103,10 @@ the same production environment variables on the worker as on the API, including
 
 Calendar, resource, availability, and booking endpoints commit Passport data and
 enqueue GHL work without waiting for external HTTP requests. This keeps the user
-response fast; the worker must be running for queued GHL calendar, contact, email,
-and appointment jobs to be applied promptly. The final booking validation remains
+response fast; the worker must be running for queued GHL calendar, contact, staff,
+and appointment jobs to be applied promptly. GHL notifications are disabled by
+default through `GHL_NOTIFICATIONS_ENABLED=false`; Passport remains the owner of
+customer communication unless that flag is intentionally enabled. The final booking validation remains
 inside the database transaction, so asynchronous synchronization does not allow
 an invalid or duplicate booking.
 

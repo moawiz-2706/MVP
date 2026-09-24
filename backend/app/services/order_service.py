@@ -14,10 +14,14 @@ from app.core.config import Settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
+    BookingLineItem,
     BookingOrder,
     BookingResource,
     Calendar,
+    CalendarRate,
+    CalendarRateResource,
     CalendarResource,
+    CustomerType,
     DepartureLocation,
     Operator,
     OutboxJob,
@@ -40,7 +44,7 @@ from app.services.outbox_service import OutboxService
 from app.services.staffing_service import lock_calendars
 from app.services.stripe_payment_service import StripePaymentService
 from app.utils.identifiers import public_reference
-from app.utils.money import PaymentBreakdown, calculate_payment
+from app.utils.money import PaymentBreakdown, apply_basis_points, calculate_payment
 
 
 logger = logging.getLogger("passport.order")
@@ -49,12 +53,23 @@ logger = logging.getLogger("passport.order")
 @dataclass(slots=True)
 class PreparedItem:
     request_calendar_id: uuid.UUID
+    rate_id: uuid.UUID | None
     start_at: datetime
     end_at: datetime
     units: int
     calendar: Calendar
     location: DepartureLocation | None
     resources: list[tuple[Resource, int]]
+    customer_type_name: str | None
+    customer_type_note: str | None
+    seat_count: int
+    unit_price_minor: int
+    booking_fee_bps: int
+    tax_bps: int
+    booking_fee_minor: int
+    tax_minor: int
+    line_subtotal_minor: int
+    line_total_minor: int
 
     def quote(self) -> QuotedItem:
         return QuotedItem(
@@ -63,8 +78,20 @@ class PreparedItem:
             start_at=self.start_at,
             end_at=self.end_at,
             units=self.units,
-            base_price_minor=self.calendar.base_price_minor,
-            line_subtotal_minor=self.calendar.base_price_minor * self.units,
+            base_price_minor=self.unit_price_minor,
+            line_subtotal_minor=self.line_subtotal_minor,
+            rate_id=self.rate_id,
+            customer_type_name=self.customer_type_name,
+            customer_type_note=self.customer_type_note,
+            seat_count=self.seat_count,
+            unit_price_minor=self.unit_price_minor,
+            booking_fee_minor=self.booking_fee_minor,
+            tax_minor=self.tax_minor,
+            line_total_minor=self.line_total_minor,
+            resources=[
+                {"resource_id": resource.id, "name": resource.name, "quantity": self.units * per_unit}
+                for resource, per_unit in self.resources
+            ],
             departure_location_name=self.location.name if self.location else None,
             departure_location_address=self.location.address if self.location else None,
         )
@@ -90,7 +117,10 @@ class OrderService:
     def _prepare(self, operator: Operator, items: Iterable) -> list[PreparedItem]:
         prepared: list[PreparedItem] = []
         availability = AvailabilityService(self.db)
+        seats_by_calendar: dict[uuid.UUID, int] = defaultdict(int)
+        calendars_by_id: dict[uuid.UUID, Calendar] = {}
         for item in items:
+            quantity = item.requested_quantity
             row = self.db.execute(
                 select(Calendar, DepartureLocation)
                 .outerjoin(DepartureLocation, DepartureLocation.id == Calendar.departure_location_id)
@@ -105,30 +135,100 @@ class OrderService:
             if row is None:
                 raise NotFoundError("Calendar not found")
             calendar, location = row
+            calendars_by_id[calendar.id] = calendar
+            rate = customer_type = None
+            if item.rate_id is not None:
+                rate_row = self.db.execute(
+                    select(CalendarRate, CustomerType)
+                    .join(CustomerType, CustomerType.id == CalendarRate.customer_type_id)
+                    .where(
+                        CalendarRate.id == item.rate_id,
+                        CalendarRate.calendar_id == calendar.id,
+                        CalendarRate.operator_id == operator.id,
+                        CalendarRate.deleted_at.is_(None),
+                        CalendarRate.is_active.is_(True),
+                        CustomerType.deleted_at.is_(None),
+                        CustomerType.is_active.is_(True),
+                    )
+                ).one_or_none()
+                if rate_row is None:
+                    raise NotFoundError("Booking rate not found")
+                rate, customer_type = rate_row
+                mappings = list(
+                    self.db.execute(
+                        select(Resource, CalendarRateResource.quantity_per_unit)
+                        .join(CalendarRateResource, CalendarRateResource.resource_id == Resource.id)
+                        .where(CalendarRateResource.rate_id == rate.id)
+                        .order_by(Resource.id)
+                    ).all()
+                )
+                unit_price = rate.price_minor
+                customer_name = customer_type.name
+                customer_note = customer_type.note or rate.note_snapshot
+                seat_count = customer_type.seat_count
+                fee_bps = rate.booking_fee_bps
+                tax_bps = rate.tax_bps
+                fee_inclusive = rate.is_fee_inclusive
+                tax_inclusive = rate.is_tax_inclusive
+            else:
+                mappings = list(
+                    self.db.execute(
+                        select(Resource, CalendarResource.default_quantity_per_unit)
+                        .join(CalendarResource, CalendarResource.resource_id == Resource.id)
+                        .where(CalendarResource.calendar_id == calendar.id)
+                        .order_by(Resource.id)
+                    ).all()
+                )
+                unit_price = calendar.base_price_minor
+                customer_name = None
+                customer_note = None
+                seat_count = 1
+                fee_bps = calendar.booking_fee_bps
+                tax_bps = calendar.tax_bps
+                fee_inclusive = False
+                tax_inclusive = False
             result = availability.check(
-                calendar.id, item.start_at, item.units, operator_id=operator.id, public=True
+                calendar.id,
+                item.start_at,
+                quantity,
+                operator_id=operator.id,
+                public=True,
+                resource_mappings=mappings,
             )
             if not result.available:
                 raise ConflictError(result.reason or "Requested booking is unavailable")
-            mappings = list(
-                self.db.execute(
-                    select(Resource, CalendarResource.default_quantity_per_unit)
-                    .join(CalendarResource, CalendarResource.resource_id == Resource.id)
-                    .where(CalendarResource.calendar_id == calendar.id)
-                    .order_by(Resource.id)
-                ).all()
-            )
+            line_subtotal = unit_price * quantity
+            booking_fee = 0 if fee_inclusive else apply_basis_points(line_subtotal, fee_bps)
+            tax = 0 if tax_inclusive else apply_basis_points(line_subtotal, tax_bps)
             prepared.append(
                 PreparedItem(
                     request_calendar_id=item.calendar_id,
+                    rate_id=rate.id if rate else None,
                     start_at=item.start_at,
                     end_at=result.end_at,
-                    units=item.units,
+                    units=quantity,
                     calendar=calendar,
                     location=location,
                     resources=mappings,
+                    customer_type_name=customer_name,
+                    customer_type_note=customer_note,
+                    seat_count=seat_count,
+                    unit_price_minor=unit_price,
+                    booking_fee_bps=fee_bps,
+                    tax_bps=tax_bps,
+                    booking_fee_minor=booking_fee,
+                    tax_minor=tax,
+                    line_subtotal_minor=line_subtotal,
+                    line_total_minor=line_subtotal + booking_fee + tax,
                 )
             )
+            seats_by_calendar[calendar.id] += quantity * seat_count
+        for calendar_id, seats in seats_by_calendar.items():
+            calendar = calendars_by_id[calendar_id]
+            if calendar.minimum_party_size is not None and seats < calendar.minimum_party_size:
+                raise ConflictError(f"The minimum party size is {calendar.minimum_party_size}")
+            if calendar.maximum_party_size is not None and seats > calendar.maximum_party_size:
+                raise ConflictError(f"The maximum party size is {calendar.maximum_party_size}")
         currencies = {item.calendar.currency for item in prepared}
         if len(currencies) != 1:
             raise ConflictError("All items in an order must use the same currency")
@@ -171,7 +271,14 @@ class OrderService:
     def _quote(prepared: list[PreparedItem]) -> tuple[OrderQuoteResponse, PaymentBreakdown]:
         quoted_items = [item.quote() for item in prepared]
         subtotal = sum(item.line_subtotal_minor for item in quoted_items)
-        payment = calculate_payment(subtotal)
+        booking_fee = sum(item.booking_fee_minor for item in prepared)
+        tax = sum(item.tax_minor for item in prepared)
+        has_explicit_components = any(item.rate_id is not None for item in prepared)
+        payment = calculate_payment(
+            subtotal,
+            booking_fee_minor=booking_fee if has_explicit_components else None,
+            tax_minor=tax if has_explicit_components else None,
+        )
         return (
             OrderQuoteResponse(
                 currency=prepared[0].calendar.currency,
@@ -179,6 +286,8 @@ class OrderService:
                 subtotal_minor=payment.subtotal_minor,
                 platform_fee_and_taxes_minor=payment.platform_fee_and_taxes_minor,
                 customer_total_minor=payment.customer_total_minor,
+                booking_fee_minor=booking_fee if has_explicit_components else payment.platform_fee_and_taxes_minor,
+                tax_minor=tax if has_explicit_components else 0,
             ),
             payment,
         )
@@ -199,6 +308,11 @@ class OrderService:
     ) -> OrderCreateResponse:
         if order.checkout_request_hash and order.checkout_request_hash != checkout_hash:
             raise ConflictError("Checkout key was already used with different booking details")
+        bookings = list(
+            self.db.scalars(
+                select(Booking).where(Booking.booking_order_id == order.id).order_by(Booking.start_at)
+            )
+        )
         items = [
             QuotedItem(
                 calendar_id=booking.calendar_id,
@@ -207,13 +321,18 @@ class OrderService:
                 end_at=booking.end_at,
                 units=booking.units,
                 base_price_minor=booking.base_price_minor,
-                line_subtotal_minor=booking.base_price_minor * booking.units,
+                line_subtotal_minor=booking.line_subtotal_minor or booking.base_price_minor * booking.units,
+                rate_id=booking.rate_id,
+                customer_type_name=booking.customer_type_name_snapshot,
+                seat_count=booking.seat_count,
+                unit_price_minor=booking.base_price_minor,
+                booking_fee_minor=booking.booking_fee_minor,
+                tax_minor=booking.tax_minor,
+                line_total_minor=booking.line_total_minor or booking.base_price_minor * booking.units,
                 departure_location_name=booking.departure_location_name_snapshot,
                 departure_location_address=booking.departure_location_address_snapshot,
             )
-            for booking in self.db.scalars(
-                select(Booking).where(Booking.booking_order_id == order.id).order_by(Booking.start_at)
-            )
+            for booking in bookings
         ]
         quote = OrderQuoteResponse(
             currency=order.currency,
@@ -221,6 +340,8 @@ class OrderService:
             subtotal_minor=order.subtotal_minor,
             platform_fee_and_taxes_minor=order.platform_fee_and_taxes_minor,
             customer_total_minor=order.customer_total_minor,
+            booking_fee_minor=sum(booking.booking_fee_minor for booking in bookings),
+            tax_minor=sum(booking.tax_minor for booking in bookings),
         )
         client_secret = None
         if payment.stripe_payment_intent_id:
@@ -315,6 +436,9 @@ class OrderService:
             checkout_key=checkout_key,
             checkout_request_hash=request_hash,
             status="pending_payment" if paid else "confirmed",
+            ghl_confirmation_email_status=(
+                "pending" if self.settings.ghl_notifications_enabled else "disabled"
+            ),
         )
         self.db.add(order)
         self.db.flush()
@@ -327,7 +451,14 @@ class OrderService:
                 start_at=item.start_at,
                 end_at=item.end_at,
                 units=item.units,
-                base_price_minor=item.calendar.base_price_minor,
+                base_price_minor=item.unit_price_minor,
+                rate_id=item.rate_id,
+                customer_type_name_snapshot=item.customer_type_name,
+                seat_count=item.seat_count,
+                line_subtotal_minor=item.line_subtotal_minor,
+                booking_fee_minor=item.booking_fee_minor,
+                tax_minor=item.tax_minor,
+                line_total_minor=item.line_total_minor,
                 status="pending_payment" if paid else "confirmed",
                 hold_expires_at=hold_expires,
                 calendar_name_snapshot=item.calendar.name,
@@ -336,6 +467,21 @@ class OrderService:
             )
             self.db.add(booking)
             self.db.flush()
+            self.db.add(
+                BookingLineItem(
+                    booking_id=booking.id,
+                    rate_id=item.rate_id,
+                    customer_type_name_snapshot=item.customer_type_name or item.calendar.name,
+                    note_snapshot=item.customer_type_note,
+                    quantity=item.units,
+                    seat_count_snapshot=item.seat_count,
+                    unit_price_minor=item.unit_price_minor,
+                    line_subtotal_minor=item.line_subtotal_minor,
+                    booking_fee_minor=item.booking_fee_minor,
+                    tax_minor=item.tax_minor,
+                    line_total_minor=item.line_total_minor,
+                )
+            )
             self.db.add_all(
                 [
                     BookingResource(
@@ -462,14 +608,17 @@ class OrderService:
                     idempotency_key=f"order:{order_id}:ghl_contact",
                     status="pending",
                 ),
+            ]
+        if self.settings.ghl_notifications_enabled:
+            jobs.append(
                 OutboxJob(
                     operator_id=operator_id,
                     booking_order_id=order_id,
                     job_type="ghl_send_confirmation_email",
                     idempotency_key=f"order:{order_id}:ghl_email",
                     status="pending",
-                ),
-            ]
+                )
+            )
         self.db.add_all(jobs)
 
     def _enqueue_appointment_jobs(self, operator_id: uuid.UUID, order_id: uuid.UUID) -> None:

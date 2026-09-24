@@ -21,7 +21,10 @@ from app.models.entities import (
     CalendarDateHour,
     CalendarHour,
     CalendarPushedSlot,
+    CalendarRate,
+    CalendarRateResource,
     CalendarResource,
+    CustomerType,
     DepartureLocation,
     GHLAppointmentMapping,
     GHLCalendarMapping,
@@ -36,10 +39,13 @@ from app.schemas.configuration import (
     CalendarCreate,
     CalendarDateHoursReplace,
     CalendarHoursReplace,
+    CalendarRatesReplace,
     CalendarResourcesReplace,
     CalendarUpdate,
     CategoryCreate,
     CategoryUpdate,
+    CustomerTypeCreate,
+    CustomerTypeUpdate,
     LocationCreate,
     LocationUpdate,
     PushedSlotsCreate,
@@ -221,6 +227,178 @@ class ConfigurationService:
         entity.is_active = False
         self.db.execute(delete(CalendarResource).where(CalendarResource.resource_id == entity_id))
         self.db.commit()
+
+    def list_customer_types(self) -> list[CustomerType]:
+        return list(
+            self.db.scalars(
+                select(CustomerType)
+                .where(CustomerType.operator_id == self.operator_id, CustomerType.deleted_at.is_(None))
+                .order_by(CustomerType.name)
+            )
+        )
+
+    def create_customer_type(self, data: CustomerTypeCreate) -> CustomerType:
+        entity = CustomerType(operator_id=self.operator_id, **data.model_dump())
+        self.db.add(entity)
+        try:
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise ConflictError("A customer type with that name already exists") from exc
+        self.db.refresh(entity)
+        return entity
+
+    def update_customer_type(self, entity_id: uuid.UUID, data: CustomerTypeUpdate) -> CustomerType:
+        entity = self._owned(CustomerType, entity_id)
+        _apply(entity, data.model_dump(exclude_unset=True))
+        try:
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise ConflictError("A customer type with that name already exists") from exc
+        self.db.refresh(entity)
+        return entity
+
+    def delete_customer_type(self, entity_id: uuid.UUID) -> None:
+        entity = self._owned(CustomerType, entity_id)
+        if self.db.scalar(
+            select(CalendarRate.id).where(
+                CalendarRate.customer_type_id == entity_id,
+                CalendarRate.deleted_at.is_(None),
+            )
+        ):
+            raise ConflictError("Remove this customer type from calendars before deleting it")
+        entity.deleted_at = datetime.now(UTC)
+        entity.is_active = False
+        self.db.commit()
+
+    def _rate_read(self, rate: CalendarRate) -> dict[str, Any]:
+        customer_type = self.db.scalar(
+            select(CustomerType).where(CustomerType.id == rate.customer_type_id)
+        )
+        resources = list(
+            self.db.execute(
+                select(
+                    CalendarRateResource.resource_id,
+                    Resource.name,
+                    CalendarRateResource.quantity_per_unit,
+                    Resource.quantity,
+                )
+                .join(Resource, Resource.id == CalendarRateResource.resource_id)
+                .where(CalendarRateResource.rate_id == rate.id)
+                .order_by(Resource.name)
+            )
+        )
+        return {
+            **rate.__dict__,
+            "customer_type_name": customer_type.name if customer_type else rate.name_snapshot,
+            "customer_type_plural_name": customer_type.plural_name if customer_type else rate.name_snapshot,
+            "customer_type_note": customer_type.note if customer_type else rate.note_snapshot,
+            "seat_count": customer_type.seat_count if customer_type else 1,
+            "resources": [
+                {
+                    "resource_id": resource_id,
+                    "name": name,
+                    "quantity_per_unit": quantity_per_unit,
+                    "total_quantity": quantity,
+                }
+                for resource_id, name, quantity_per_unit, quantity in resources
+            ],
+        }
+
+    def list_calendar_rates(self, calendar_id: uuid.UUID) -> list[dict[str, Any]]:
+        self.get_calendar(calendar_id)
+        rates = self.db.scalars(
+            select(CalendarRate)
+            .where(
+                CalendarRate.calendar_id == calendar_id,
+                CalendarRate.operator_id == self.operator_id,
+                CalendarRate.deleted_at.is_(None),
+            )
+            .order_by(CalendarRate.name_snapshot)
+        )
+        return [self._rate_read(rate) for rate in rates]
+
+    def replace_calendar_rates(
+        self, calendar_id: uuid.UUID, data: CalendarRatesReplace
+    ) -> list[dict[str, Any]]:
+        calendar = self.get_calendar(calendar_id)
+        customer_type_ids = {item.customer_type_id for item in data.rates}
+        owned_types = set(
+            self.db.scalars(
+                select(CustomerType.id).where(
+                    CustomerType.operator_id == self.operator_id,
+                    CustomerType.id.in_(customer_type_ids),
+                    CustomerType.deleted_at.is_(None),
+                    CustomerType.is_active.is_(True),
+                )
+            )
+        ) if customer_type_ids else set()
+        if owned_types != customer_type_ids:
+            raise NotFoundError("Customer type not found")
+        old_rates = list(
+            self.db.scalars(
+                select(CalendarRate).where(
+                    CalendarRate.calendar_id == calendar_id,
+                    CalendarRate.operator_id == self.operator_id,
+                )
+            )
+        )
+        old_by_type = {rate.customer_type_id: rate for rate in old_rates}
+        incoming: set[uuid.UUID] = set()
+        for item in data.rates:
+            incoming.add(item.customer_type_id)
+            customer_type = self.db.scalar(
+                select(CustomerType).where(CustomerType.id == item.customer_type_id)
+            )
+            if customer_type is None:
+                raise NotFoundError("Customer type not found")
+            rate = old_by_type.get(item.customer_type_id)
+            values = item.model_dump(exclude={"resources", "note"})
+            values.update(
+                operator_id=self.operator_id,
+                calendar_id=calendar.id,
+                name_snapshot=customer_type.name,
+                note_snapshot=item.note if item.note is not None else customer_type.note,
+                deleted_at=None,
+            )
+            if rate is None:
+                rate = CalendarRate(**values)
+                self.db.add(rate)
+                self.db.flush()
+            else:
+                _apply(rate, values)
+                self.db.flush()
+            self.db.execute(delete(CalendarRateResource).where(CalendarRateResource.rate_id == rate.id))
+            resource_ids = {resource.resource_id for resource in item.resources}
+            owned_resources = set(
+                self.db.scalars(
+                    select(Resource.id).where(
+                        Resource.operator_id == self.operator_id,
+                        Resource.id.in_(resource_ids),
+                        Resource.deleted_at.is_(None),
+                        Resource.is_active.is_(True),
+                    )
+                )
+            ) if resource_ids else set()
+            if owned_resources != resource_ids:
+                raise NotFoundError("Resource not found")
+            self.db.add_all(
+                [
+                    CalendarRateResource(
+                        rate_id=rate.id,
+                        resource_id=resource.resource_id,
+                        quantity_per_unit=resource.quantity_per_unit,
+                    )
+                    for resource in item.resources
+                ]
+            )
+        for rate in old_rates:
+            if rate.customer_type_id not in incoming:
+                rate.deleted_at = datetime.now(UTC)
+                rate.is_active = False
+        self.db.commit()
+        return self.list_calendar_rates(calendar_id)
 
     def list_categories(self) -> list[dict[str, Any]]:
         count = (

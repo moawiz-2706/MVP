@@ -187,6 +187,69 @@ class Calendar(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=lambda: ["Captain"],
         server_default=text("'[\"Captain\"]'::jsonb"),
     )
+    minimum_party_size: Mapped[int | None] = mapped_column(Integer)
+    maximum_party_size: Mapped[int | None] = mapped_column(Integer)
+    booking_fee_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tax_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    public_booking_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="online")
+    booking_cutoff_minutes: Mapped[int | None] = mapped_column(Integer)
+    call_to_book_phone: Mapped[str | None] = mapped_column(Text)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CustomerType(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "customer_types"
+    __table_args__ = (
+        Index(
+            "uq_customer_types_active_name",
+            "operator_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    plural_name: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    seat_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    external_provider: Mapped[str | None] = mapped_column(Text)
+    external_id: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CalendarRate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "calendar_rates"
+    __table_args__ = (
+        UniqueConstraint("calendar_id", "customer_type_id"),
+        CheckConstraint("price_minor >= 0", name="price_nonnegative"),
+        CheckConstraint("booking_fee_bps BETWEEN 0 AND 10000", name="fee_bps_valid"),
+        CheckConstraint("tax_bps BETWEEN 0 AND 10000", name="tax_bps_valid"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
+    )
+    calendar_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendars.id", ondelete="CASCADE"), nullable=False
+    )
+    customer_type_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("customer_types.id"), nullable=False
+    )
+    name_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    note_snapshot: Mapped[str | None] = mapped_column(Text)
+    price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    booking_fee_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tax_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_tax_inclusive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_fee_inclusive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    external_provider: Mapped[str | None] = mapped_column(Text)
+    external_id: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -279,6 +342,19 @@ class CalendarResource(Base):
         UUID(as_uuid=True), ForeignKey("resources.id"), primary_key=True, index=True
     )
     default_quantity_per_unit: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class CalendarRateResource(Base):
+    __tablename__ = "calendar_rate_resources"
+    __table_args__ = (CheckConstraint("quantity_per_unit > 0", name="quantity_positive"),)
+
+    rate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_rates.id", ondelete="CASCADE"), primary_key=True
+    )
+    resource_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("resources.id"), primary_key=True, index=True
+    )
+    quantity_per_unit: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 class Staff(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -456,6 +532,13 @@ class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     base_price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("calendar_rates.id"))
+    customer_type_name_snapshot: Mapped[str | None] = mapped_column(Text)
+    seat_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    line_subtotal_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    booking_fee_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    tax_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    line_total_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     hold_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     calendar_name_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
@@ -474,6 +557,34 @@ class BookingResource(Base):
         UUID(as_uuid=True), ForeignKey("resources.id"), primary_key=True, index=True
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class BookingLineItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "booking_line_items"
+    __table_args__ = (
+        UniqueConstraint("booking_id"),
+        CheckConstraint("quantity > 0", name="quantity_positive"),
+        CheckConstraint("seat_count_snapshot > 0", name="seat_count_positive"),
+        CheckConstraint("unit_price_minor >= 0", name="unit_price_nonnegative"),
+        CheckConstraint(
+            "line_subtotal_minor >= 0 AND booking_fee_minor >= 0 AND tax_minor >= 0 AND line_total_minor >= 0",
+            name="line_money_nonnegative",
+        ),
+    )
+
+    booking_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False
+    )
+    rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("calendar_rates.id"))
+    customer_type_name_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    note_snapshot: Mapped[str | None] = mapped_column(Text)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    seat_count_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    line_subtotal_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    booking_fee_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    tax_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    line_total_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
 class BookingWaiver(UUIDPrimaryKeyMixin, TimestampMixin, Base):
