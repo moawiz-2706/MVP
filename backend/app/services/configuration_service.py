@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import UTC, datetime, time, timedelta
 from typing import Any, TypeVar
@@ -46,8 +47,11 @@ from app.schemas.configuration import (
     ResourceUpdate,
 )
 from app.utils.timezone import local_datetime, require_timezone, wall_time_exists
+from app.services.outbox_service import OutboxService
 
 ModelT = TypeVar("ModelT")
+
+logger = logging.getLogger("passport.configuration")
 
 
 def _apply(model: Any, values: dict[str, Any]) -> None:
@@ -387,6 +391,10 @@ class ConfigurationService:
                 )
             )
         self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=20)
+        except Exception:
+            logger.exception("Inline outbox processing failed after calendar mutation")
 
     def delete_calendar(self, entity_id: uuid.UUID) -> None:
         entity = self.get_calendar(entity_id)

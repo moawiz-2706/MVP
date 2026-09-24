@@ -2,6 +2,7 @@
 # `-> list[dict]` would resolve to that method at import time on Python 3.12.
 from __future__ import annotations
 
+import logging
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -10,6 +11,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, DomainError, NotFoundError
 from app.models.entities import (
     AppUser,
@@ -34,7 +36,11 @@ from app.models.entities import (
 )
 from app.schemas.booking import BookingUpdate
 from app.services.availability_service import AvailabilityService
+from app.services.outbox_service import OutboxService
 from app.services.waiver_service import WaiverService
+
+
+logger = logging.getLogger("passport.booking_admin")
 
 
 class BookingAdminService:
@@ -377,6 +383,10 @@ class BookingAdminService:
             )
         )
         self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=20)
+        except Exception:
+            logger.exception("Inline outbox processing failed after booking cancellation")
 
     def _ensure_financial_allocations(
         self, order: BookingOrder, payment: Payment, bookings: list[Booking]
@@ -512,6 +522,10 @@ class BookingAdminService:
             )
         )
         self.db.commit()
+        try:
+            OutboxService(self.db, get_settings()).process(limit=20)
+        except Exception:
+            logger.exception("Inline outbox processing failed after booking update")
         return self.detail(booking.id)
 
     def _booking(self, booking_id: uuid.UUID) -> Booking:

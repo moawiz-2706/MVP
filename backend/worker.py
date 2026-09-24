@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.database import get_session_factory
 from app.models.entities import GHLInstallation
 from app.services.ghl_staff_user_service import GHLStaffUserService
+from app.services.outbox_service import OutboxService
 
 logger = logging.getLogger("passport.staff_sync_worker")
 _stop = threading.Event()
@@ -60,6 +61,15 @@ def sync_all_operators() -> dict[str, int]:
     return summary
 
 
+def process_outbox() -> dict[str, int]:
+    """Apply pending external side effects without waiting for the daily cron."""
+    settings = get_settings()
+    with get_session_factory()() as db:
+        result = OutboxService(db, settings).process(limit=20)
+    logger.info("GHL outbox processing completed: %s", result)
+    return result
+
+
 def main() -> None:
     settings = get_settings()
     settings.validate_runtime()
@@ -71,6 +81,12 @@ def main() -> None:
     while not _stop.is_set():
         started = time.monotonic()
         sync_all_operators()
+        try:
+            process_outbox()
+        except Exception:
+            # Staff reconciliation and outbox processing are independent. A
+            # database or worker error must not terminate the long-running loop.
+            logger.exception("GHL outbox processing failed")
         remaining = max(0.0, interval - (time.monotonic() - started))
         _stop.wait(remaining)
 
@@ -82,4 +98,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["main", "sync_all_operators"]
+__all__ = ["main", "process_outbox", "sync_all_operators"]
