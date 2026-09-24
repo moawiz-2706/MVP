@@ -381,6 +381,11 @@ class OrderService:
                 status="pending",
             )
             self.db.add(payment_request)
+        # Create the GHL appointment for every booking immediately. Paid
+        # bookings start as pending_payment/new in GHL and are promoted to
+        # confirmed by the Stripe webhook; staff assignment later updates the
+        # same appointment description from Unassigned to the assigned names.
+        self._enqueue_appointment_jobs(operator.id, order.id)
         if not paid:
             self._enqueue_confirmation_jobs(operator.id, order.id)
         access_token = PublicAccessService(self.db).issue(
@@ -465,19 +470,23 @@ class OrderService:
                     status="pending",
                 ),
             ]
-        bookings = list(self.db.scalars(select(Booking).where(Booking.booking_order_id == order_id)))
-        jobs.extend(
-            OutboxJob(
-                operator_id=operator_id,
-                booking_order_id=order_id,
-                job_type="ghl_sync_appointment",
-                    idempotency_key=f"booking:{booking.id}:ghl_appointment:create",
-                payload={
-                    "booking_id": str(booking.id),
-                    "booking_order_id": str(order_id),
-                },
-                status="pending",
-            )
-            for booking in bookings
-        )
         self.db.add_all(jobs)
+
+    def _enqueue_appointment_jobs(self, operator_id: uuid.UUID, order_id: uuid.UUID) -> None:
+        bookings = list(self.db.scalars(select(Booking).where(Booking.booking_order_id == order_id)))
+        self.db.add_all(
+            [
+                OutboxJob(
+                    operator_id=operator_id,
+                    booking_order_id=order_id,
+                    job_type="ghl_sync_appointment",
+                    idempotency_key=f"booking:{booking.id}:ghl_appointment:create",
+                    payload={
+                        "booking_id": str(booking.id),
+                        "booking_order_id": str(order_id),
+                    },
+                    status="pending",
+                )
+                for booking in bookings
+            ]
+        )

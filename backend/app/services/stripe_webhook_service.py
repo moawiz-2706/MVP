@@ -356,6 +356,18 @@ class StripeWebhookService:
             if booking.status == "pending_payment":
                 booking.status = "failed"
                 booking.hold_expires_at = None
+                self.db.execute(
+                    insert(OutboxJob)
+                    .values(
+                        operator_id=booking.operator_id,
+                        booking_order_id=booking.booking_order_id,
+                        job_type="ghl_sync_appointment",
+                        idempotency_key=f"booking:{booking.id}:ghl_appointment:payment-failed",
+                        payload={"booking_id": str(booking.id)},
+                        status="pending",
+                    )
+                    .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
+                )
 
     def _account_updated(self, account: dict[str, Any]) -> None:
         connection = self.db.scalar(
