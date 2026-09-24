@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.core.exceptions import NotFoundError
 from app.models.entities import (
     Calendar,
+    CalendarBookingPolicy,
     CalendarCategory,
     CalendarRate,
     CalendarRateResource,
@@ -19,6 +20,7 @@ from app.models.entities import (
 )
 from app.schemas.public import (
     PublicCalendar,
+    PublicBookingPolicy,
     PublicCategoryPage,
     PublicCustomField,
     PublicLocation,
@@ -38,6 +40,7 @@ def _public_calendar(
     calendar: Calendar,
     category: CalendarCategory | None,
     location: DepartureLocation | None,
+    policy: CalendarBookingPolicy | None = None,
 ) -> PublicCalendar:
     return PublicCalendar(
         id=calendar.id,
@@ -52,6 +55,22 @@ def _public_calendar(
         category_slug=category.slug if category else None,
         category_color=category.display_color if category else None,
         location=PublicLocation(name=location.name, address=location.address) if location else None,
+        public_booking_mode=calendar.public_booking_mode,
+        booking_cutoff_minutes=calendar.booking_cutoff_minutes,
+        call_to_book_phone=calendar.call_to_book_phone,
+        booking_policy=(
+            PublicBookingPolicy(
+                cancellation_cutoff_minutes=policy.cancellation_cutoff_minutes,
+                cancellation_fee_bps=policy.cancellation_fee_bps,
+                weather_refund_mode=policy.weather_refund_mode,
+                reschedule_cutoff_minutes=policy.reschedule_cutoff_minutes,
+                reschedule_fee_minor=policy.reschedule_fee_minor,
+                no_show_mode=policy.no_show_mode,
+                requires_waiver=policy.requires_waiver,
+            )
+            if policy
+            else None
+        ),
     )
 
 
@@ -88,11 +107,21 @@ def public_catalog(
         )
         .order_by(CalendarCategory.sort_order.nulls_last(), Calendar.name)
     )
+    policies: dict = {}
+    for policy in db.scalars(
+        select(CalendarBookingPolicy)
+        .where(
+            CalendarBookingPolicy.operator_id == operator.id,
+            CalendarBookingPolicy.active.is_(True),
+        )
+        .order_by(CalendarBookingPolicy.version.desc())
+    ):
+        policies.setdefault(policy.calendar_id, policy)
     return PublicOperatorCatalog(
         name=operator.name,
         slug=operator.slug,
         time_zone=_operator_time_zone(operator),
-        calendars=[_public_calendar(*row) for row in rows],
+        calendars=[_public_calendar(*row, policies.get(row[0].id)) for row in rows],
     )
 
 
@@ -132,13 +161,24 @@ def public_category(
     # A category page is only public if it actually offers something bookable.
     if not rows:
         raise NotFoundError("Booking page not found")
+    policy: dict = {}
+    for item in db.scalars(
+        select(CalendarBookingPolicy)
+        .where(
+            CalendarBookingPolicy.operator_id == operator.id,
+            CalendarBookingPolicy.calendar_id.in_([calendar.id for calendar, _ in rows]),
+            CalendarBookingPolicy.active.is_(True),
+        )
+        .order_by(CalendarBookingPolicy.version.desc())
+    ):
+        policy.setdefault(item.calendar_id, item)
     return PublicCategoryPage(
         operator_name=operator.name,
         operator_slug=operator.slug,
         time_zone=_operator_time_zone(operator),
         category_name=category.name,
         category_slug=category.slug,
-        calendars=[_public_calendar(calendar, category, location) for calendar, location in rows],
+        calendars=[_public_calendar(calendar, category, location, policy.get(calendar.id)) for calendar, location in rows],
     )
 
 

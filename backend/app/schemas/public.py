@@ -8,6 +8,16 @@ class PublicLocation(BaseModel):
     address: str
 
 
+class PublicBookingPolicy(BaseModel):
+    cancellation_cutoff_minutes: int = 0
+    cancellation_fee_bps: int = 0
+    weather_refund_mode: str = "manual_review"
+    reschedule_cutoff_minutes: int = 0
+    reschedule_fee_minor: int = 0
+    no_show_mode: str = "forfeit"
+    requires_waiver: bool = False
+
+
 class PublicCalendar(BaseModel):
     id: uuid.UUID
     name: str
@@ -21,6 +31,10 @@ class PublicCalendar(BaseModel):
     category_slug: str | None
     category_color: str | None
     location: PublicLocation | None
+    public_booking_mode: str = "online"
+    booking_cutoff_minutes: int | None = None
+    call_to_book_phone: str | None = None
+    booking_policy: PublicBookingPolicy | None = None
 
 
 class PublicRateResource(BaseModel):

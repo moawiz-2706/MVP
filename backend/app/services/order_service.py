@@ -440,6 +440,7 @@ class OrderService:
             customer_last_name=request.customer.last_name,
             customer_email=str(request.customer.email),
             customer_phone=request.customer.phone or None,
+            marketing_opt_in=request.customer.marketing_opt_in,
             currency=quote.currency,
             subtotal_minor=money.subtotal_minor,
             platform_fee_and_taxes_minor=money.platform_fee_and_taxes_minor,

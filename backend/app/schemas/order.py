@@ -32,6 +32,7 @@ class OrderCustomer(BaseModel):
     last_name: str = Field(min_length=1, max_length=120)
     email: EmailStr
     phone: str | None = Field(default=None, max_length=40)
+    marketing_opt_in: bool = False
 
 
 class OrderQuoteRequest(BaseModel):

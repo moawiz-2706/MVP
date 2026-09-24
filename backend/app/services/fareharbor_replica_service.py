@@ -36,6 +36,7 @@ from app.schemas.fareharbor_replica import (
     WeatherClosureRequest,
 )
 from app.services.booking_admin_service import BookingAdminService
+from app.services.configuration_service import ConfigurationService
 
 
 class FareHarborReplicaService:
@@ -118,6 +119,9 @@ class FareHarborReplicaService:
         )
         self.db.add(policy)
         self.db.commit()
+        ConfigurationService(self.db, self.operator_id)._queue_ghl_calendar_sync(
+            self._calendar(calendar_id)
+        )
         return self._policy_dict(policy)
 
     def list_custom_fields(self, calendar_id: uuid.UUID | None = None) -> list[dict[str, Any]]:

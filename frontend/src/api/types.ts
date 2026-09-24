@@ -84,6 +84,7 @@ export interface DashboardSlot { start_at: string; calendars: SlotCalendar[] }
 
 export interface BookingDetail extends Booking {
   customer_phone: string | null;
+  marketing_opt_in: boolean;
   location_name: string | null;
   location_address: string | null;
   payment_status: string;
@@ -164,12 +165,17 @@ export interface PublicCalendar {
   category_slug: string | null;
   category_color: string | null;
   location: { name: string; address: string } | null;
+  public_booking_mode: string;
+  booking_cutoff_minutes: number | null;
+  call_to_book_phone: string | null;
+  booking_policy: PublicBookingPolicy | null;
 }
 
 export interface PublicCatalog { name: string; slug: string; time_zone: string; calendars: PublicCalendar[] }
 export interface PublicCategoryPage { operator_name: string; operator_slug: string; time_zone: string; category_name: string; category_slug: string; calendars: PublicCalendar[] }
 export interface PublicRateResource { resource_id: Id; name: string; quantity_per_unit: number; total_quantity: number }
 export interface PublicRate { id: Id; customer_type_name: string; customer_type_plural_name: string; note: string | null; seat_count: number; price_minor: number; booking_fee_bps: number; tax_bps: number; resources: PublicRateResource[] }
+export interface PublicBookingPolicy { cancellation_cutoff_minutes: number; cancellation_fee_bps: number; weather_refund_mode: string; reschedule_cutoff_minutes: number; reschedule_fee_minor: number; no_show_mode: string; requires_waiver: boolean }
 export interface PublicCustomField { id: Id; key: string; label: string; field_type: string; required: boolean; options: unknown[] | null }
 export interface AvailabilitySlot { start_at: string; end_at: string; max_bookable_units: number; available: boolean; status?: string; rates?: { rate_id: Id; customer_type_name: string; seat_count: number; available_quantity: number; available_seats: number }[] }
 export interface AvailabilityResponse { date: string; time_zone: string; calendar: unknown; slots: AvailabilitySlot[] }

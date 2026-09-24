@@ -244,6 +244,7 @@ class BookingAdminService:
         return {
             **self._list_dict(booking, order, category),
             "customer_phone": order.customer_phone,
+            "marketing_opt_in": order.marketing_opt_in,
             "location_name": booking.departure_location_name_snapshot,
             "location_address": booking.departure_location_address_snapshot,
             "payment_status": payment.status,

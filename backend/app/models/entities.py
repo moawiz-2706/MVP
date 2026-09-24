@@ -484,6 +484,7 @@ class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     customer_last_name: Mapped[str] = mapped_column(Text, nullable=False)
     customer_email: Mapped[str] = mapped_column(Text, nullable=False)
     customer_phone: Mapped[str | None] = mapped_column(Text)
+    marketing_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ghl_contact_id: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="usd")
     subtotal_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
