@@ -169,7 +169,13 @@ class Calendar(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
+    headline: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
+    booking_instructions: Mapped[str | None] = mapped_column(Text)
+    hero_image_url: Mapped[str | None] = mapped_column(Text)
+    gallery_image_urls: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     public_booking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)

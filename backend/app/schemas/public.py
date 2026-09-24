@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PublicLocation(BaseModel):
@@ -22,7 +22,11 @@ class PublicCalendar(BaseModel):
     id: uuid.UUID
     name: str
     slug: str
+    headline: str | None = None
     description: str | None
+    booking_instructions: str | None = None
+    hero_image_url: str | None = None
+    gallery_image_urls: list[str] = Field(default_factory=list)
     duration_minutes: int
     base_price_minor: int
     currency: str

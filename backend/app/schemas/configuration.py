@@ -94,7 +94,11 @@ def _normalize_staff_roles(value: list[StaffPoolRole]) -> list[StaffPoolRole]:
 class CalendarCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=160)
+    headline: str | None = Field(default=None, max_length=240)
     description: str | None = Field(default=None, max_length=10_000)
+    booking_instructions: str | None = Field(default=None, max_length=10_000)
+    hero_image_url: str | None = Field(default=None, max_length=2_000)
+    gallery_image_urls: list[str] = Field(default_factory=list, max_length=12)
     calendar_category_id: uuid.UUID | None = None
     departure_location_id: uuid.UUID | None = None
     is_active: bool = True
@@ -135,7 +139,11 @@ class CalendarCreate(BaseModel):
 class CalendarUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     slug: str | None = Field(default=None, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=160)
+    headline: str | None = Field(default=None, max_length=240)
     description: str | None = Field(default=None, max_length=10_000)
+    booking_instructions: str | None = Field(default=None, max_length=10_000)
+    hero_image_url: str | None = Field(default=None, max_length=2_000)
+    gallery_image_urls: list[str] | None = Field(default=None, max_length=12)
     calendar_category_id: uuid.UUID | None = None
     departure_location_id: uuid.UUID | None = None
     is_active: bool | None = None
@@ -171,7 +179,11 @@ class CalendarRead(EntityModel):
     departure_location_id: uuid.UUID | None
     name: str
     slug: str
+    headline: str | None
     description: str | None
+    booking_instructions: str | None
+    hero_image_url: str | None
+    gallery_image_urls: list[str]
     is_active: bool
     public_booking_enabled: bool
     duration_minutes: int

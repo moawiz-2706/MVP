@@ -403,8 +403,15 @@ class AvailabilityService:
             range_end = max(candidates) + timedelta(minutes=calendar.duration_minutes)
             mappings = self._mappings(calendar.id)
             rate_mappings = self._rate_mappings(calendar.id)
+            rate_resources = {
+                resource.id
+                for _rate, _customer_type, mapped_resources in rate_mappings
+                for resource, _quantity in mapped_resources
+            }
             reservations = self._reservations(
-                [resource.id for resource, _ in mappings], range_start, range_end
+                list({resource.id for resource, _ in mappings} | rate_resources),
+                range_start,
+                range_end,
             )
             blocks = list(
                 self.db.execute(

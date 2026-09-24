@@ -27,7 +27,11 @@ export interface Calendar extends Entity {
   departure_location_id: Id | null;
   name: string;
   slug: string;
+  headline: string | null;
   description: string | null;
+  booking_instructions: string | null;
+  hero_image_url: string | null;
+  gallery_image_urls: string[];
   is_active: boolean;
   public_booking_enabled: boolean;
   duration_minutes: number;
@@ -156,7 +160,11 @@ export interface PublicCalendar {
   id: Id;
   name: string;
   slug: string;
+  headline: string | null;
   description: string | null;
+  booking_instructions: string | null;
+  hero_image_url: string | null;
+  gallery_image_urls: string[];
   duration_minutes: number;
   base_price_minor: number;
   currency: string;

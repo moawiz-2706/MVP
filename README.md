@@ -108,6 +108,14 @@ calendar party/fee/tax columns, customer types, calendar rates, rate-resource
 mappings, booking line items, booking financial snapshot columns, and the
 booking-order marketing flag. Apply it before opening the Booking page.
 
+Migration `supabase/migrations/026_calendar_public_content.sql` adds the
+FareHarbor-style public listing fields: headline, booking instructions, hero
+image URL, and gallery image URLs. Apply it before adding images or copy to a
+calendar. Public booking times are displayed in the operator's timezone; the
+customer no longer selects a timezone. The public availability query refreshes
+while the page is open so calendar and inventory changes appear without a
+manual reload.
+
 If the frontend and backend are deployed as separate Vercel projects, set the
 frontend production variable `VITE_API_BASE_URL` to the backend URL ending in
 `/api/v1`. Leaving it unset makes the production frontend call its own Vercel

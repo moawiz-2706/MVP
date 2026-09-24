@@ -46,9 +46,10 @@ function groupByCategory(calendars: PublicCalendar[]): Group[] {
 
 export function ServiceCard({ operatorSlug, calendar, embed }: { operatorSlug: string; calendar: PublicCalendar; embed: boolean }) {
   return <Link className="service-card" to={withEmbed(`/book/${operatorSlug}/${calendar.slug}`, embed)}>
+    <div className="service-card-image">{calendar.hero_image_url ? <img src={calendar.hero_image_url} alt="" loading="lazy" /> : <div className="service-card-image-fallback">{calendar.name.slice(0, 1)}</div>}</div>
     <div className="service-category"><i className="filter-dot" style={{ background: calendar.category_color || "#527a73" }} />{calendar.category_name || "Booking"}</div>
     <h2>{calendar.name}</h2>
-    <p>{calendar.description || "Select a date to view live times and available quantity."}</p>
+    <p>{calendar.headline || calendar.description || "Select a date to view live times and available quantity."}</p>
     <div className="service-meta">
       <span><Clock3 size={14} />{calendar.duration_minutes} minutes · from {money(calendar.base_price_minor, calendar.currency)}</span>
       {calendar.location && <span><MapPin size={14} />{calendar.location.name}</span>}
@@ -65,7 +66,7 @@ export function OperatorBookingPage() {
   const data = query.data;
   const groups = groupByCategory(data.calendars);
   return <PublicFrame name={data.name} embed={embed}>
-    <div className="public-hero"><span className="eyebrow">Online booking</span><h1>Book with {data.name}</h1><p>Browse live availability and reserve your time. Inventory is updated across every service as bookings are made.</p></div>
+    <div className="public-hero"><span className="eyebrow">Book online</span><h1>Choose your experience</h1><p>Browse activities, choose a date and time, and secure your reservation online.</p></div>
     {groups.length === 0 && <div className="empty-state"><strong>No services available</strong><span>Please check back soon.</span></div>}
     {groups.map(group => <section key={group.id ?? "other"} style={{ marginBottom: 30 }}>
       <div className="category-heading" style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 13 }}>
