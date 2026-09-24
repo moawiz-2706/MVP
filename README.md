@@ -102,6 +102,17 @@ databases whose `resources` table still lacks `resource_type`, `capacity_limit`,
 or `notes`. It is idempotent and should be applied before opening the Resources
 page.
 
+Migration `supabase/migrations/025_booking_page_schema_repair.sql` repairs
+databases that skipped the customer-rate and checkout migrations. It adds the
+calendar party/fee/tax columns, customer types, calendar rates, rate-resource
+mappings, booking line items, booking financial snapshot columns, and the
+booking-order marketing flag. Apply it before opening the Booking page.
+
+If the frontend and backend are deployed as separate Vercel projects, set the
+frontend production variable `VITE_API_BASE_URL` to the backend URL ending in
+`/api/v1`. Leaving it unset makes the production frontend call its own Vercel
+site for `/api/v1`, which produces the same generic Booking-page request error.
+
 The detailed API contract and GHL integration boundary are documented in
 `docs/FAREHARBOR_REPLICA_IMPLEMENTATION_SPEC.md`.
 

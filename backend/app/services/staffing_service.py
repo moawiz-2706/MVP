@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, time
+from datetime import datetime, time
 from typing import Any
 
 from sqlalchemy import func, select
