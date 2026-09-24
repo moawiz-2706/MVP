@@ -17,8 +17,8 @@ from app.schemas.fareharbor_replica import (
     BookingPolicyWrite,
     BookingRescheduleRequest,
     BookingStatusRequest,
-    BookingCustomFieldDefinitionRead,
-    BookingCustomFieldDefinitionWrite,
+    CustomFieldDefinitionRead,
+    CustomFieldDefinitionWrite,
     CustomerDetail,
     CustomerListItem,
     CustomerNoteCreate,
@@ -61,14 +61,14 @@ def put_policy(calendar_id: uuid.UUID, data: BookingPolicyWrite, principal: Curr
     return service(db, principal).replace_policy(calendar_id, data)
 
 
-@router.get("/booking-custom-fields", response_model=list[BookingCustomFieldDefinitionRead])
+@router.get("/booking-custom-fields", response_model=list[CustomFieldDefinitionRead])
 def list_custom_fields(principal: CurrentPrincipal, db: DB, calendar_id: uuid.UUID | None = None):
     operate(principal)
     return service(db, principal).list_custom_fields(calendar_id)
 
 
-@router.post("/booking-custom-fields", response_model=BookingCustomFieldDefinitionRead, status_code=status.HTTP_201_CREATED)
-def create_custom_field(data: BookingCustomFieldDefinitionWrite, principal: CurrentPrincipal, db: DB):
+@router.post("/booking-custom-fields", response_model=CustomFieldDefinitionRead, status_code=status.HTTP_201_CREATED)
+def create_custom_field(data: CustomFieldDefinitionWrite, principal: CurrentPrincipal, db: DB):
     manage(principal)
     return service(db, principal).create_custom_field(data)
 
@@ -80,10 +80,10 @@ def delete_custom_field(field_id: uuid.UUID, principal: CurrentPrincipal, db: DB
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.patch("/booking-custom-fields/{field_id}", response_model=BookingCustomFieldDefinitionRead)
+@router.patch("/booking-custom-fields/{field_id}", response_model=CustomFieldDefinitionRead)
 def update_custom_field(
     field_id: uuid.UUID,
-    data: BookingCustomFieldDefinitionWrite,
+    data: CustomFieldDefinitionWrite,
     principal: CurrentPrincipal,
     db: DB,
 ):
