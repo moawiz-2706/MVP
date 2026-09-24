@@ -16,6 +16,7 @@ from app.core.exceptions import ConflictError, DomainError, NotFoundError
 from app.models.entities import (
     AppUser,
     Booking,
+    BookingEvent,
     BookingFinancialAllocation,
     BookingNote,
     BookingOrder,
@@ -244,6 +245,7 @@ class BookingAdminService:
         return {
             **self._list_dict(booking, order, category),
             "customer_phone": order.customer_phone,
+            "marketing_opt_in": order.marketing_opt_in,
             "location_name": booking.departure_location_name_snapshot,
             "location_address": booking.departure_location_address_snapshot,
             "payment_status": payment.status,
@@ -508,7 +510,13 @@ class BookingAdminService:
             allocated_customer += max(0, customer)
             allocated_operator += max(0, operator)
 
-    def update(self, booking_id: uuid.UUID, data: BookingUpdate) -> dict:
+    def update(
+        self,
+        booking_id: uuid.UUID,
+        data: BookingUpdate,
+        *,
+        allow_paid_reschedule: bool = False,
+    ) -> dict:
         booking = self.db.scalar(
             select(Booking)
             .where(Booking.id == booking_id, Booking.operator_id == self.operator_id)
@@ -521,12 +529,17 @@ class BookingAdminService:
         )
         if booking.status not in {"pending_payment", "confirmed"}:
             raise ConflictError("Only pending or confirmed bookings can be edited")
-        if payment and payment.customer_total_minor > 0 and payment.status in {
+        if (
+            not allow_paid_reschedule
+            and payment
+            and payment.customer_total_minor > 0
+            and payment.status in {
             "requires_payment",
             "processing",
             "provider_unknown",
             "succeeded",
-        }:
+            }
+        ):
             raise ConflictError(
                 "Paid booking time or quantity changes require an adjustment workflow"
             )
@@ -604,6 +617,25 @@ class BookingAdminService:
         except Exception:
             logger.exception("Inline outbox processing failed after booking update")
         return self.detail(booking.id)
+
+    def reschedule(self, booking_id: uuid.UUID, data: BookingUpdate, reason: str) -> dict:
+        result = self.update(booking_id, data, allow_paid_reschedule=True)
+        booking = self._booking(booking_id)
+        self.db.add(
+            BookingEvent(
+                operator_id=self.operator_id,
+                booking_id=booking.id,
+                order_id=booking.booking_order_id,
+                event_type="rescheduled",
+                from_status=booking.status,
+                to_status=booking.status,
+                actor_type="customer_or_operator",
+                reason=reason,
+                payload={"start_at": booking.start_at.isoformat(), "units": booking.units},
+            )
+        )
+        self.db.commit()
+        return result
 
     def _booking(self, booking_id: uuid.UUID) -> Booking:
         booking = self.db.scalar(

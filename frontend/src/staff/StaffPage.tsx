@@ -56,12 +56,18 @@ export function StaffPage() {
     mutationFn: () => api<{ synced: number; created: number; updated: number; deactivated: number; availability_synced: number; availability_failed: number; error: string | null }>("/staff-ghl/directory/sync", json("POST", {})),
     onSuccess: () => client.invalidateQueries({ queryKey: ["staff"] }),
   });
+  const conflicts = useQuery({
+    queryKey: ["staff-assignment-conflicts"],
+    queryFn: () => api<{ count: number; conflicts: { staff_name: string; first_calendar_name: string; second_calendar_name: string }[] }>("/staff-assignments/conflicts"),
+    refetchInterval: 30000,
+  });
   useEffect(() => { if (!syncStarted.current) { syncStarted.current = true; directorySync.mutate(); } }, []);
 
   const syncedStaff = data.filter((member) => member.ghl_user_id);
   const unassignedCount = syncedStaff.filter((member) => !member.custom_role).length;
   return <div className="page">
     <PageHeader title="Staff roles" description="GHL manages staff identity and availability. Passport manages only the fixed custom role used for booking eligibility." action={<button className="button secondary" disabled={directorySync.isPending} onClick={() => directorySync.mutate()}><RefreshCw size={16} />{directorySync.isPending ? "Syncing GHL…" : "Sync GHL staff"}</button>} />
+    {conflicts.data?.count ? <div className="warning-banner"><strong>{conflicts.data.count} overlapping staff assignment{conflicts.data.count === 1 ? "" : "s"}.</strong> {conflicts.data.conflicts.slice(0, 3).map((conflict, index) => <span key={`${conflict.staff_name}-${index}`}>{conflict.staff_name}: {conflict.first_calendar_name} overlaps {conflict.second_calendar_name}. </span>)}</div> : null}
     {error && <div className="error-banner">{error.message}</div>}
     {directorySync.error && <div className="error-banner">GHL staff synchronization failed: {directorySync.error.message}</div>}
     {directorySync.isSuccess && <div className="success-banner">GHL staff and weekly availability synchronized into Passport.{directorySync.data.deactivated ? ` ${directorySync.data.deactivated} removed GHL staff member${directorySync.data.deactivated === 1 ? " was" : "s were"} marked inactive.` : ""}</div>}

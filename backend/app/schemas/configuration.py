@@ -29,19 +29,28 @@ class LocationRead(EntityModel):
 
 class ResourceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
+    resource_type: str = Field(default="equipment", min_length=1, max_length=80)
     quantity: int = Field(ge=0, le=1_000_000)
+    capacity_limit: int | None = Field(default=None, ge=0, le=1_000_000)
+    notes: str | None = Field(default=None, max_length=2_000)
     is_active: bool = True
 
 
 class ResourceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
+    resource_type: str | None = Field(default=None, min_length=1, max_length=80)
     quantity: int | None = Field(default=None, ge=0, le=1_000_000)
+    capacity_limit: int | None = Field(default=None, ge=0, le=1_000_000)
+    notes: str | None = Field(default=None, max_length=2_000)
     is_active: bool | None = None
 
 
 class ResourceRead(EntityModel):
     name: str
+    resource_type: str
     quantity: int
+    capacity_limit: int | None
+    notes: str | None
     is_active: bool
     calendars_count: int = 0
 

@@ -1,15 +1,17 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.app_session import CurrentPrincipal, SessionPrincipal
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.permissions import Permission, require_permission
+from app.models.entities import Calendar, Staff, StaffAssignment
 from app.schemas.staff import (
     StaffAssignmentCreate,
     StaffAssignmentRead,
@@ -108,6 +110,56 @@ def list_assignments(
     return service(db, principal).list_assignments(
         range_start, range_end, calendar_id=calendar_id, staff_id=staff_id
     )
+
+
+@router.get("/staff-assignments/conflicts")
+def assignment_conflicts(
+    principal: CurrentPrincipal,
+    db: DB,
+    range_start: datetime | None = None,
+    range_end: datetime | None = None,
+):
+    require_permission(principal, Permission.VIEW_BOOKINGS)
+    start = range_start or datetime.now(UTC)
+    end = range_end or (start + timedelta(days=30))
+    rows = list(
+        db.execute(
+            select(StaffAssignment, Staff, Calendar)
+            .join(Staff, Staff.id == StaffAssignment.staff_id)
+            .join(Calendar, Calendar.id == StaffAssignment.calendar_id)
+            .where(
+                StaffAssignment.operator_id == principal.operator_id,
+                StaffAssignment.start_at < end,
+                StaffAssignment.end_at > start,
+            )
+            .order_by(StaffAssignment.staff_id, StaffAssignment.start_at)
+        )
+    )
+    conflicts = []
+    previous_by_staff: dict[uuid.UUID, tuple[StaffAssignment, Staff, Calendar]] = {}
+    for assignment, staff, calendar in rows:
+        previous = previous_by_staff.get(assignment.staff_id)
+        if previous and previous[0].end_at > assignment.start_at:
+            conflicts.append(
+                {
+                    "staff_id": staff.id,
+                    "staff_name": staff.name,
+                    "first_assignment_id": previous[0].id,
+                    "first_calendar_id": previous[2].id,
+                    "first_calendar_name": previous[2].name,
+                    "first_start_at": previous[0].start_at,
+                    "first_end_at": previous[0].end_at,
+                    "second_assignment_id": assignment.id,
+                    "second_calendar_id": calendar.id,
+                    "second_calendar_name": calendar.name,
+                    "second_start_at": assignment.start_at,
+                    "second_end_at": assignment.end_at,
+                    "severity": "error",
+                }
+            )
+        if previous is None or assignment.end_at > previous[0].end_at:
+            previous_by_staff[assignment.staff_id] = (assignment, staff, calendar)
+    return {"range_start": start, "range_end": end, "conflicts": conflicts, "count": len(conflicts)}
 
 
 @router.get("/staff-assignments/candidates", response_model=list[StaffCandidate])

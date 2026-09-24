@@ -224,6 +224,23 @@ a { color: inherit; text-decoration: none; }
 .booking-panel { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 18px; align-items: start; }
 .public-card { background: white; border: 1px solid #e0e5e4; border-radius: 12px; padding: 21px; }
 .public-card h2 { margin: 0 0 15px; font-size: 16px; }
+.report-filter { display: flex; gap: 12px; margin-bottom: 16px; max-width: 430px; }
+.report-filter .field { flex: 1; }
+.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.metric-card { display: flex; gap: 12px; align-items: flex-start; padding: 16px; }
+.metric-card > div:last-child { display: grid; gap: 4px; min-width: 0; }
+.metric-card span, .metric-card small { color: var(--muted); font-size: 11px; }
+.metric-card strong { font-size: 21px; color: #1d2939; letter-spacing: -.02em; }
+.metric-icon { width: 33px; height: 33px; display: grid; place-items: center; border-radius: 8px; color: var(--accent); background: var(--accent-soft); flex: 0 0 auto; }
+.report-table { max-width: 620px; }
+.report-table h2 { margin-bottom: 8px; }
+.booking-callout { max-width: 560px; }
+.booking-callout p { color: #667085; font-size: 13px; line-height: 1.55; margin: 0 0 18px; }
+.checkbox-row { display: flex; align-items: flex-start; gap: 9px; color: #596571; font-size: 11.5px; line-height: 1.45; margin-top: 13px; }
+.checkbox-row input { margin-top: 2px; accent-color: var(--accent); }
+.policy-box { margin-top: 18px; padding: 14px; border: 1px solid #e1e7e5; border-radius: 9px; background: #fbfcfc; }
+.policy-box h3 { margin: 0 0 8px; font-size: 13px; color: #33413f; }
+.policy-box p { margin: 5px 0; color: #667085; font-size: 11.5px; line-height: 1.5; }
 .slot-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 .slot { min-height: 55px; border: 1px solid #dce2e1; border-radius: 8px; background: white; display: grid; place-items: center; align-content: center; gap: 2px; color: #33413f; }
 .slot span { font-size: 10px; color: #78827f; }
@@ -235,6 +252,7 @@ a { color: inherit; text-decoration: none; }
 .summary-row.total { border-top: 1px solid var(--line); margin-top: 5px; padding-top: 13px; color: #1d2939; font-size: 14px; font-weight: 700; }
 .confirmation { max-width: 680px; margin: 0 auto; }
 .success-icon { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: #146c53; background: #e8f6ef; margin-bottom: 16px; }
+.reschedule-box { display: grid; gap: 12px; margin-top: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 9px; background: #fbfcfc; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fade-in { from { opacity: 0; } }
@@ -253,6 +271,7 @@ a { color: inherit; text-decoration: none; }
   .setup-grid { grid-template-columns: 1fr; }
   .settings-nav { display: flex; overflow-x: auto; }
   .service-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 620px) {
@@ -266,6 +285,8 @@ a { color: inherit; text-decoration: none; }
   .booking-panel { grid-template-columns: 1fr; }
   .slot-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .stripe-card { align-items: flex-start; flex-direction: column; }
+  .report-filter { max-width: none; }
+  .metric-grid { grid-template-columns: 1fr; }
 }
 
 /* Waivers */

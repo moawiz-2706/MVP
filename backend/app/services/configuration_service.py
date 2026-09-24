@@ -398,6 +398,7 @@ class ConfigurationService:
                 rate.deleted_at = datetime.now(UTC)
                 rate.is_active = False
         self.db.commit()
+        self._queue_ghl_calendar_sync(calendar)
         return self.list_calendar_rates(calendar_id)
 
     def list_categories(self) -> list[dict[str, Any]]:
@@ -835,6 +836,7 @@ class ConfigurationService:
         self.db.add(entity)
         self.db.commit()
         self.db.refresh(entity)
+        self._queue_ghl_calendar_sync(self.get_calendar(calendar_id))
         return self._block_payload(entity, self._operator_zone())
 
     def update_block(
@@ -908,5 +910,5 @@ class ConfigurationService:
             ]
         )
         self.db.commit()
-        self._queue_ghl_appointment_sync(calendar_id)
+        self._queue_ghl_calendar_sync(self.get_calendar(calendar_id))
         return self.list_calendar_resources(calendar_id)

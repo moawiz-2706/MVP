@@ -1,4 +1,6 @@
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
+import uuid
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy import select
@@ -6,10 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
     BookingOrder,
+    CalendarBookingPolicy,
+    Calendar,
     Operator,
     Payment,
 )
@@ -20,8 +24,12 @@ from app.schemas.order import (
     OrderQuoteResponse,
     PublicOrderItem,
     PublicOrderStatus,
+    PublicRescheduleRequest,
+    PublicRescheduleResponse,
 )
+from app.schemas.booking import BookingUpdate
 from app.services.order_service import OrderService
+from app.services.booking_admin_service import BookingAdminService
 from app.services.public_rate_limit_service import enforce_public_rate_limit
 from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.services.waiver_service import SIGNABLE_STATUSES, WaiverService, waiver_url
@@ -105,13 +113,16 @@ def order_status(
             # Status polling must remain available even when Stripe is temporarily
             # unreachable. The scheduled reconciliation job remains the fallback.
             db.rollback()
-    bookings = list(
-        db.scalars(
-            select(Booking)
+    booking_rows = list(
+        db.execute(
+            select(Booking, Calendar.slug)
+            .join(Calendar, Calendar.id == Booking.calendar_id)
             .where(Booking.booking_order_id == order.id)
             .order_by(Booking.start_at)
         )
     )
+    bookings = [booking for booking, _slug in booking_rows]
+    calendar_slugs = {booking.id: slug for booking, slug in booking_rows}
     confirmed = order.status == "confirmed" and all(
         booking.status == "confirmed" for booking in bookings
     )
@@ -125,6 +136,7 @@ def order_status(
                 links[booking.id] = (waiver_url(waiver.token), waiver.status == "signed")
     return PublicOrderStatus(
         public_reference=order.public_reference,
+        operator_slug=operator.slug,
         access_token=None,
         status=order.status,
         time_zone=(operator.time_zone or "UTC").strip() or "UTC",
@@ -137,6 +149,8 @@ def order_status(
         customer_total_minor=order.customer_total_minor,
         items=[
             PublicOrderItem(
+                booking_id=booking.id,
+                calendar_slug=calendar_slugs[booking.id],
                 calendar_id=booking.calendar_id,
                 calendar_name=booking.calendar_name_snapshot,
                 start_at=booking.start_at,
@@ -158,4 +172,116 @@ def order_status(
             )
             for booking in bookings
         ],
+    )
+
+
+@router.post("/public/orders/{public_reference}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_public_order(
+    public_reference: str,
+    db: DB,
+    request: Request,
+    access_token: Annotated[str | None, Query(min_length=20, max_length=512)] = None,
+) -> Response:
+    """Cancel every active booking in an order after token and policy validation."""
+    settings = get_settings()
+    enforce_public_rate_limit(request, db, settings, scope=f"cancel:{public_reference}")
+    row = db.execute(
+        select(BookingOrder, Operator)
+        .join(Operator, Operator.id == BookingOrder.operator_id)
+        .where(BookingOrder.public_reference == public_reference)
+    ).one_or_none()
+    if row is None:
+        raise NotFoundError("Order not found")
+    order, operator = row
+    if not access_token:
+        raise NotFoundError("Order access link is required")
+    from app.services.public_access_service import PublicAccessService
+
+    PublicAccessService(db).verify(access_token, purpose="order_status", order_id=order.id)
+    bookings = list(
+        db.scalars(
+            select(Booking)
+            .where(Booking.booking_order_id == order.id, Booking.status.not_in(("cancelled", "failed")))
+            .order_by(Booking.start_at)
+        )
+    )
+    if not bookings:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    now = datetime.now(UTC)
+    for booking in bookings:
+        policy = db.scalar(
+            select(CalendarBookingPolicy)
+            .where(
+                CalendarBookingPolicy.calendar_id == booking.calendar_id,
+                CalendarBookingPolicy.operator_id == operator.id,
+                CalendarBookingPolicy.active.is_(True),
+            )
+            .order_by(CalendarBookingPolicy.version.desc())
+        )
+        cutoff = policy.cancellation_cutoff_minutes if policy else 0
+        if now > booking.start_at - timedelta(minutes=cutoff):
+            raise ConflictError("This booking is inside the cancellation window and cannot be cancelled online")
+    service = BookingAdminService(db, operator.id)
+    for booking in bookings:
+        service.cancel(booking.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/public/orders/{public_reference}/bookings/{booking_id}/reschedule",
+    response_model=PublicRescheduleResponse,
+)
+def reschedule_public_booking(
+    public_reference: str,
+    booking_id: uuid.UUID,
+    data: PublicRescheduleRequest,
+    db: DB,
+    request: Request,
+    access_token: Annotated[str | None, Query(min_length=20, max_length=512)] = None,
+) -> PublicRescheduleResponse:
+    settings = get_settings()
+    enforce_public_rate_limit(request, db, settings, scope=f"reschedule:{public_reference}")
+    row = db.execute(
+        select(BookingOrder, Operator, Booking)
+        .join(Operator, Operator.id == BookingOrder.operator_id)
+        .join(Booking, Booking.booking_order_id == BookingOrder.id)
+        .where(BookingOrder.public_reference == public_reference, Booking.id == booking_id)
+    ).one_or_none()
+    if row is None:
+        raise NotFoundError("Booking not found")
+    order, operator, booking = row
+    if not access_token:
+        raise NotFoundError("Order access link is required")
+    from app.services.public_access_service import PublicAccessService
+
+    PublicAccessService(db).verify(access_token, purpose="order_status", order_id=order.id)
+    if booking.status not in {"confirmed", "pending_payment"}:
+        raise ConflictError("Only active bookings can be rescheduled")
+    if data.start_at <= datetime.now(UTC):
+        raise ConflictError("The new booking time must be in the future")
+    policy = db.scalar(
+        select(CalendarBookingPolicy)
+        .where(
+            CalendarBookingPolicy.calendar_id == booking.calendar_id,
+            CalendarBookingPolicy.operator_id == operator.id,
+            CalendarBookingPolicy.active.is_(True),
+        )
+        .order_by(CalendarBookingPolicy.version.desc())
+    )
+    cutoff = policy.reschedule_cutoff_minutes if policy else 0
+    if datetime.now(UTC) >= booking.start_at.astimezone(UTC) - timedelta(minutes=cutoff):
+        raise ConflictError("This booking is inside the rescheduling window")
+    if policy and policy.reschedule_fee_minor > 0:
+        raise ConflictError("This booking requires an operator-assisted reschedule because a fee applies")
+    result = BookingAdminService(db, operator.id).reschedule(
+        booking.id,
+        BookingUpdate(start_at=data.start_at, units=data.units),
+        "Customer self-service reschedule",
+    )
+    return PublicRescheduleResponse(
+        booking_id=booking.id,
+        start_at=result["start_at"],
+        end_at=result["end_at"],
+        status="rescheduled",
+        payment_outcome="unchanged",
     )

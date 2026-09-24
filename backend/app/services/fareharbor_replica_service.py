@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
+    BookingEvent,
     BookingAdjustment,
     BookingCustomFieldDefinition,
     BookingCustomFieldValue,
@@ -24,6 +25,7 @@ from app.models.entities import (
     Payment,
     ReconciliationRun,
     WeatherClosureEvent,
+    OutboxJob,
 )
 from app.schemas.fareharbor_replica import (
     BookingCustomFieldsWrite,
@@ -36,6 +38,7 @@ from app.schemas.fareharbor_replica import (
     WeatherClosureRequest,
 )
 from app.services.booking_admin_service import BookingAdminService
+from app.services.configuration_service import ConfigurationService
 
 
 class FareHarborReplicaService:
@@ -118,6 +121,9 @@ class FareHarborReplicaService:
         )
         self.db.add(policy)
         self.db.commit()
+        ConfigurationService(self.db, self.operator_id)._queue_ghl_calendar_sync(
+            self._calendar(calendar_id)
+        )
         return self._policy_dict(policy)
 
     def list_custom_fields(self, calendar_id: uuid.UUID | None = None) -> list[dict[str, Any]]:
@@ -348,14 +354,83 @@ class FareHarborReplicaService:
 
     def weather_closure(self, data: WeatherClosureRequest, user_id: uuid.UUID) -> dict[str, Any]:
         self._calendar(data.calendar_id)
-        closure = WeatherClosureEvent(operator_id=self.operator_id, created_by_user_id=user_id, **data.model_dump())
+        existing = self.db.scalar(
+            select(WeatherClosureEvent).where(
+                WeatherClosureEvent.operator_id == self.operator_id,
+                WeatherClosureEvent.calendar_id == data.calendar_id,
+                WeatherClosureEvent.start_at == data.start_at,
+                WeatherClosureEvent.end_at == data.end_at,
+            )
+        )
+        if existing is not None:
+            return {"closure_id": existing.id, "affected_bookings": 0, "refund_mode": existing.refund_mode, "idempotent": True}
+        closure = WeatherClosureEvent(
+            operator_id=self.operator_id,
+            created_by_user_id=user_id,
+            **data.model_dump(),
+        )
         self.db.add(closure)
-        bookings = list(self.db.scalars(select(Booking).where(Booking.operator_id == self.operator_id, Booking.calendar_id == data.calendar_id, Booking.start_at < data.end_at, Booking.end_at > data.start_at, Booking.status.in_(["pending_payment", "confirmed"]))))
+        self.db.flush()
+        bookings = list(
+            self.db.scalars(
+                select(Booking)
+                .where(
+                    Booking.operator_id == self.operator_id,
+                    Booking.calendar_id == data.calendar_id,
+                    Booking.start_at < data.end_at,
+                    Booking.end_at > data.start_at,
+                    Booking.status.in_(("pending_payment", "confirmed")),
+                )
+                .with_for_update()
+            )
+        )
+        cancelled = 0
         for booking in bookings:
-            booking.status = "cancelled"
-            self.db.add(BookingAdjustment(operator_id=self.operator_id, booking_id=booking.id, action="refund" if data.refund_mode == "full_refund" else "manual_review", amount_minor=0, currency="usd", reason=data.reason, idempotency_key=f"weather:{closure.id}:{booking.id}", status="pending"))
+            if data.refund_mode == "full_refund":
+                BookingAdminService(self.db, self.operator_id).cancel(booking.id)
+            else:
+                previous = booking.status
+                booking.status = "cancelled"
+                booking.hold_expires_at = None
+                self.db.add(
+                    BookingAdjustment(
+                        operator_id=self.operator_id,
+                        booking_id=booking.id,
+                        action="credit" if data.refund_mode == "credit" else "manual_review",
+                        amount_minor=0,
+                        currency="usd",
+                        reason=data.reason,
+                        idempotency_key=f"weather:{closure.id}:{booking.id}",
+                        status="pending",
+                    )
+                )
+                self.db.add(
+                    BookingEvent(
+                        operator_id=self.operator_id,
+                        booking_id=booking.id,
+                        order_id=booking.booking_order_id,
+                        event_type="weather_cancelled",
+                        from_status=previous,
+                        to_status="cancelled",
+                        actor_type="operator",
+                        actor_id=user_id,
+                        reason=data.reason,
+                        payload={"refund_mode": data.refund_mode, "closure_id": str(closure.id)},
+                    )
+                )
+                self.db.add(
+                    OutboxJob(
+                        operator_id=self.operator_id,
+                        booking_order_id=booking.booking_order_id,
+                        job_type="ghl_cancel_appointment",
+                        idempotency_key=f"booking:{booking.id}:weather:{closure.id}:ghl_cancel",
+                        payload={"booking_id": str(booking.id), "booking_order_id": str(booking.booking_order_id)},
+                        status="pending",
+                    )
+                )
+            cancelled += 1
         self.db.commit()
-        return {"closure_id": closure.id, "affected_bookings": len(bookings), "refund_mode": data.refund_mode}
+        return {"closure_id": closure.id, "affected_bookings": cancelled, "refund_mode": data.refund_mode, "idempotent": False}
 
     def stage_import(self, data: MigrationImportCreate) -> dict[str, Any]:
         errors = 0
@@ -411,7 +486,43 @@ class FareHarborReplicaService:
         return {"id": item.id, "provider": item.provider, "status": item.status, "source_filename": item.source_filename, "summary": item.summary, "blocking_errors": item.blocking_errors, "committed_at": item.committed_at}
 
     def reconciliation(self, data: ReconciliationRunCreate) -> dict[str, Any]:
-        run = ReconciliationRun(operator_id=self.operator_id, scope=data.scope, status="completed", summary={"matched": 0, "repaired": 0, "manual_review": 0, "message": "Run queued for the worker reconciliation pass"}, started_at=datetime.now(UTC), finished_at=datetime.now(UTC))
+        started = datetime.now(UTC)
+        repaired = 0
+        manual_review = 0
+        if data.scope == "ghl_projection":
+            jobs = list(
+                self.db.scalars(
+                    select(OutboxJob)
+                    .where(
+                        OutboxJob.operator_id == self.operator_id,
+                        OutboxJob.job_type.like("ghl_%"),
+                        OutboxJob.status == "failed",
+                    )
+                    .with_for_update()
+                )
+            )
+            for job in jobs:
+                if job.attempt_count < 10:
+                    job.status = "pending"
+                    job.next_attempt_at = started
+                    job.lease_owner = None
+                    job.lease_expires_at = None
+                    repaired += 1
+                else:
+                    manual_review += 1
+        run = ReconciliationRun(
+            operator_id=self.operator_id,
+            scope=data.scope,
+            status="completed",
+            summary={
+                "matched": 0,
+                "repaired": repaired,
+                "manual_review": manual_review,
+                "message": "Failed GHL projection jobs were returned to the idempotent outbox worker",
+            },
+            started_at=started,
+            finished_at=datetime.now(UTC),
+        )
         self.db.add(run)
         self.db.commit()
         return {"id": run.id, "scope": run.scope, "status": run.status, "summary": run.summary, "started_at": run.started_at, "finished_at": run.finished_at}

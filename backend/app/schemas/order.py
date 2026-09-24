@@ -32,6 +32,7 @@ class OrderCustomer(BaseModel):
     last_name: str = Field(min_length=1, max_length=120)
     email: EmailStr
     phone: str | None = Field(default=None, max_length=40)
+    marketing_opt_in: bool = False
 
 
 class OrderQuoteRequest(BaseModel):
@@ -84,6 +85,8 @@ class OrderCreateResponse(BaseModel):
 
 
 class PublicOrderItem(QuotedItem):
+    booking_id: uuid.UUID
+    calendar_slug: str
     # Signing link for the booking's waiver; None when the operator has no waiver.
     waiver_url: str | None = None
     waiver_signed: bool = False
@@ -91,6 +94,7 @@ class PublicOrderItem(QuotedItem):
 
 class PublicOrderStatus(BaseModel):
     public_reference: str
+    operator_slug: str
     access_token: str | None = None
     status: str
     # Operator IANA zone: customer-facing times are always rendered in it.
@@ -103,3 +107,22 @@ class PublicOrderStatus(BaseModel):
     platform_fee_and_taxes_minor: int
     customer_total_minor: int
     items: list[PublicOrderItem]
+
+
+class PublicRescheduleRequest(BaseModel):
+    start_at: datetime
+    units: int | None = Field(default=None, gt=0, le=100_000)
+
+    @model_validator(mode="after")
+    def aware_start(self) -> "PublicRescheduleRequest":
+        if self.start_at.tzinfo is None:
+            raise ValueError("start_at must include an offset")
+        return self
+
+
+class PublicRescheduleResponse(BaseModel):
+    booking_id: uuid.UUID
+    start_at: datetime
+    end_at: datetime
+    status: str
+    payment_outcome: str

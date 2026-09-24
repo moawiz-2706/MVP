@@ -69,3 +69,17 @@ export async function api<T>(
 export function json(method: string, body: unknown): RequestInit {
   return { method, body: JSON.stringify(body) };
 }
+
+export async function download(path: string, filename: string): Promise<void> {
+  const headers = new Headers();
+  if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
+  const response = await fetch(`${API_BASE}${path}`, { headers });
+  if (!response.ok) throw new ApiError(response.status, "Report download failed");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}

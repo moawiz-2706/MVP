@@ -19,8 +19,7 @@ import { StripeReturnPage } from "./settings/StripeReturnPage";
 import { WaiverPage } from "./waivers/WaiverPage";
 import { IntegrationResultPage } from "./IntegrationResultPage";
 import { CustomersPage } from "./customers/CustomersPage";
-import { MigrationPage } from "./operations/MigrationPage";
-import { BookingSetupPage } from "./booking-setup/BookingSetupPage";
+import { ReportsPage } from "./reports/ReportsPage";
 import "./styles.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: true } } });
@@ -35,8 +34,7 @@ const router = createBrowserRouter([
     { path: "calendars", element: <CalendarsPage /> },
     { path: "staff", element: <StaffPage /> },
     { path: "customers", element: <CustomersPage /> },
-    { path: "migration", element: <MigrationPage /> },
-    { path: "booking-setup", element: <BookingSetupPage /> },
+    { path: "reports", element: <ReportsPage /> },
     { path: "settings", element: <SettingsPage /> },
   ] },
   { path: "/book/:operatorSlug", element: <OperatorBookingPage /> },

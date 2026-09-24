@@ -324,7 +324,10 @@ class Resource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    resource_type: Mapped[str] = mapped_column(Text, nullable=False, default="equipment")
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    capacity_limit: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -484,6 +487,7 @@ class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     customer_last_name: Mapped[str] = mapped_column(Text, nullable=False)
     customer_email: Mapped[str] = mapped_column(Text, nullable=False)
     customer_phone: Mapped[str | None] = mapped_column(Text)
+    marketing_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ghl_contact_id: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="usd")
     subtotal_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)

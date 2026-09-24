@@ -20,7 +20,7 @@ export interface UserContext {
 
 export interface Entity { id: Id; created_at: string; updated_at: string }
 export interface Location extends Entity { name: string; address: string; is_active: boolean; calendars_count: number }
-export interface Resource extends Entity { name: string; quantity: number; is_active: boolean; calendars_count: number }
+export interface Resource extends Entity { name: string; resource_type: string; quantity: number; capacity_limit: number | null; notes: string | null; is_active: boolean; calendars_count: number }
 export interface Category extends Entity { name: string; slug: string; display_color: string | null; sort_order: number; is_active: boolean; calendars_count: number }
 export interface Calendar extends Entity {
   calendar_category_id: Id | null;
@@ -84,6 +84,7 @@ export interface DashboardSlot { start_at: string; calendars: SlotCalendar[] }
 
 export interface BookingDetail extends Booking {
   customer_phone: string | null;
+  marketing_opt_in: boolean;
   location_name: string | null;
   location_address: string | null;
   payment_status: string;
@@ -164,12 +165,17 @@ export interface PublicCalendar {
   category_slug: string | null;
   category_color: string | null;
   location: { name: string; address: string } | null;
+  public_booking_mode: string;
+  booking_cutoff_minutes: number | null;
+  call_to_book_phone: string | null;
+  booking_policy: PublicBookingPolicy | null;
 }
 
 export interface PublicCatalog { name: string; slug: string; time_zone: string; calendars: PublicCalendar[] }
 export interface PublicCategoryPage { operator_name: string; operator_slug: string; time_zone: string; category_name: string; category_slug: string; calendars: PublicCalendar[] }
 export interface PublicRateResource { resource_id: Id; name: string; quantity_per_unit: number; total_quantity: number }
 export interface PublicRate { id: Id; customer_type_name: string; customer_type_plural_name: string; note: string | null; seat_count: number; price_minor: number; booking_fee_bps: number; tax_bps: number; resources: PublicRateResource[] }
+export interface PublicBookingPolicy { cancellation_cutoff_minutes: number; cancellation_fee_bps: number; weather_refund_mode: string; reschedule_cutoff_minutes: number; reschedule_fee_minor: number; no_show_mode: string; requires_waiver: boolean }
 export interface PublicCustomField { id: Id; key: string; label: string; field_type: string; required: boolean; options: unknown[] | null }
 export interface AvailabilitySlot { start_at: string; end_at: string; max_bookable_units: number; available: boolean; status?: string; rates?: { rate_id: Id; customer_type_name: string; seat_count: number; available_quantity: number; available_seats: number }[] }
 export interface AvailabilityResponse { date: string; time_zone: string; calendar: unknown; slots: AvailabilitySlot[] }
@@ -177,6 +183,7 @@ export interface AvailabilityResponse { date: string; time_zone: string; calenda
 export interface WaiverSummary { status: "signed" | "pending" | "not_set_up" | "not_applicable"; signed_at: string | null; url: string | null }
 export interface BookingNote { id: Id; author_user_id: Id | null; author_name: string | null; body: string; created_at: string }
 export interface BookingParticipant { id: Id; sequence: number; first_name: string; last_name: string; email: string | null; phone: string | null; date_of_birth: string | null; is_minor: boolean; guardian_name: string | null; emergency_contact: Record<string, unknown> | null; operational_notes: string | null; status: string; source: string }
+export interface ReportSummary { start_date: string; end_date: string; total_bookings: number; confirmed_bookings: number; pending_payment_bookings: number; cancelled_bookings: number; completed_bookings: number; units_booked: number; gross_sales_minor: number; booking_fees_minor: number; taxes_minor: number; upcoming_bookings: number; failed_sync_jobs: number }
 
 export interface WaiverPerson { first_name: string; last_name: string; date_of_birth: string }
 export interface WaiverSigner extends WaiverPerson { email: string; phone: string }
