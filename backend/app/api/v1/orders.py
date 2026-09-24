@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
@@ -6,10 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
     BookingOrder,
+    CalendarBookingPolicy,
     Operator,
     Payment,
 )
@@ -22,6 +24,7 @@ from app.schemas.order import (
     PublicOrderStatus,
 )
 from app.services.order_service import OrderService
+from app.services.booking_admin_service import BookingAdminService
 from app.services.public_rate_limit_service import enforce_public_rate_limit
 from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.services.waiver_service import SIGNABLE_STATUSES, WaiverService, waiver_url
@@ -159,3 +162,55 @@ def order_status(
             for booking in bookings
         ],
     )
+
+
+@router.post("/public/orders/{public_reference}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_public_order(
+    public_reference: str,
+    db: DB,
+    request: Request,
+    access_token: Annotated[str | None, Query(min_length=20, max_length=512)] = None,
+) -> Response:
+    """Cancel every active booking in an order after token and policy validation."""
+    settings = get_settings()
+    enforce_public_rate_limit(request, db, settings, scope=f"cancel:{public_reference}")
+    row = db.execute(
+        select(BookingOrder, Operator)
+        .join(Operator, Operator.id == BookingOrder.operator_id)
+        .where(BookingOrder.public_reference == public_reference)
+    ).one_or_none()
+    if row is None:
+        raise NotFoundError("Order not found")
+    order, operator = row
+    if not access_token:
+        raise NotFoundError("Order access link is required")
+    from app.services.public_access_service import PublicAccessService
+
+    PublicAccessService(db).verify(access_token, purpose="order_status", order_id=order.id)
+    bookings = list(
+        db.scalars(
+            select(Booking)
+            .where(Booking.booking_order_id == order.id, Booking.status.not_in(("cancelled", "failed")))
+            .order_by(Booking.start_at)
+        )
+    )
+    if not bookings:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    now = datetime.now(UTC)
+    for booking in bookings:
+        policy = db.scalar(
+            select(CalendarBookingPolicy)
+            .where(
+                CalendarBookingPolicy.calendar_id == booking.calendar_id,
+                CalendarBookingPolicy.operator_id == operator.id,
+                CalendarBookingPolicy.active.is_(True),
+            )
+            .order_by(CalendarBookingPolicy.version.desc())
+        )
+        cutoff = policy.cancellation_cutoff_minutes if policy else 0
+        if now > booking.start_at - timedelta(minutes=cutoff):
+            raise ConflictError("This booking is inside the cancellation window and cannot be cancelled online")
+    service = BookingAdminService(db, operator.id)
+    for booking in bookings:
+        service.cancel(booking.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

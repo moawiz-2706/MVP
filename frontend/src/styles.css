@@ -224,6 +224,16 @@ a { color: inherit; text-decoration: none; }
 .booking-panel { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 18px; align-items: start; }
 .public-card { background: white; border: 1px solid #e0e5e4; border-radius: 12px; padding: 21px; }
 .public-card h2 { margin: 0 0 15px; font-size: 16px; }
+.report-filter { display: flex; gap: 12px; margin-bottom: 16px; max-width: 430px; }
+.report-filter .field { flex: 1; }
+.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.metric-card { display: flex; gap: 12px; align-items: flex-start; padding: 16px; }
+.metric-card > div:last-child { display: grid; gap: 4px; min-width: 0; }
+.metric-card span, .metric-card small { color: var(--muted); font-size: 11px; }
+.metric-card strong { font-size: 21px; color: #1d2939; letter-spacing: -.02em; }
+.metric-icon { width: 33px; height: 33px; display: grid; place-items: center; border-radius: 8px; color: var(--accent); background: var(--accent-soft); flex: 0 0 auto; }
+.report-table { max-width: 620px; }
+.report-table h2 { margin-bottom: 8px; }
 .booking-callout { max-width: 560px; }
 .booking-callout p { color: #667085; font-size: 13px; line-height: 1.55; margin: 0 0 18px; }
 .checkbox-row { display: flex; align-items: flex-start; gap: 9px; color: #596571; font-size: 11.5px; line-height: 1.45; margin-top: 13px; }
@@ -260,6 +270,7 @@ a { color: inherit; text-decoration: none; }
   .setup-grid { grid-template-columns: 1fr; }
   .settings-nav { display: flex; overflow-x: auto; }
   .service-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 620px) {
@@ -273,6 +284,8 @@ a { color: inherit; text-decoration: none; }
   .booking-panel { grid-template-columns: 1fr; }
   .slot-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .stripe-card { align-items: flex-start; flex-direction: column; }
+  .report-filter { max-width: none; }
+  .metric-grid { grid-template-columns: 1fr; }
 }
 
 /* Waivers */

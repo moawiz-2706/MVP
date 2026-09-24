@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Clock3 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, Clock3, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
@@ -39,6 +39,7 @@ export function ConfirmationPage() {
   const [params] = useSearchParams();
   const accessToken = params.get("access_token");
   const [reconcile, setReconcile] = useState(params.get("reconcile") === "true");
+  const queryClient = useQueryClient();
   const statusParams = new URLSearchParams();
   if (accessToken) statusParams.set("access_token", accessToken);
   if (reconcile) statusParams.set("reconcile", "true");
@@ -48,6 +49,12 @@ export function ConfirmationPage() {
     queryFn: () => api<Status>(statusPath),
     refetchInterval: (result) =>
       result.state.data?.confirmed || result.state.data?.status === "exception" ? false : 2000,
+  });
+  const cancel = useMutation({
+    mutationFn: () => api<void>(`/public/orders/${publicReference}/cancel?access_token=${encodeURIComponent(accessToken || "")}`, { method: "POST" }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["order-status", publicReference] });
+    },
   });
   useEffect(() => {
     if (reconcile && query.data) setReconcile(false);
@@ -66,7 +73,7 @@ export function ConfirmationPage() {
   }
 
   const order = query.data;
-  if (!order.confirmed) {
+  if (!order.confirmed && order.status !== "cancelled") {
     return (
       <div className="center-state">
         <div className="state-card">
@@ -83,17 +90,18 @@ export function ConfirmationPage() {
     );
   }
 
+  const cancelled = order.status === "cancelled";
   return (
     <div className="public-shell">
       <main className="public-main">
         <section className="public-card confirmation">
-          <div className="success-icon"><CheckCircle2 /></div>
+          <div className={`success-icon ${cancelled ? "result-error-icon" : ""}`}>{cancelled ? <XCircle /> : <CheckCircle2 />}</div>
           <div className="public-hero" style={{ marginBottom: 25 }}>
             <span className="eyebrow">{order.public_reference}</span>
-            <h1 style={{ fontSize: 34 }}>Booking confirmed</h1>
-            <p>Thanks, {order.customer_name}. Your reservation is complete.</p>
+            <h1 style={{ fontSize: 34 }}>{cancelled ? "Booking cancelled" : "Booking confirmed"}</h1>
+            <p>{cancelled ? "This reservation has been cancelled. Any eligible refund is processed separately." : `Thanks, ${order.customer_name}. Your reservation is complete.`}</p>
           </div>
-          {order.items.some((item) => item.waiver_url && !item.waiver_signed) && (
+          {!cancelled && order.items.some((item) => item.waiver_url && !item.waiver_signed) && (
             <div className="warning-box" style={{ marginBottom: 6 }}>
               <p>Everyone taking part must be on a signed waiver before the activity. It takes about a minute.</p>
             </div>
@@ -106,13 +114,9 @@ export function ConfirmationPage() {
                 <span>Quantity: {item.units}</span>
                 {item.departure_location_name && <span>{item.departure_location_name} · {item.departure_location_address}</span>}
               </div>
-              {item.waiver_url && (
+              {!cancelled && item.waiver_url && (
                 <div style={{ marginTop: 10 }}>
-                  {item.waiver_signed ? (
-                    <span className="badge success">Waiver signed</span>
-                  ) : (
-                    <a className="button small" href={item.waiver_url}>Sign waiver for {item.units} {item.units === 1 ? "person" : "people"}</a>
-                  )}
+                  {item.waiver_signed ? <span className="badge success">Waiver signed</span> : <a className="button small" href={item.waiver_url}>Sign waiver for {item.units} {item.units === 1 ? "person" : "people"}</a>}
                 </div>
               )}
             </div>
@@ -120,8 +124,9 @@ export function ConfirmationPage() {
           <div style={{ paddingTop: 12, borderTop: "1px solid #e6e9e8" }}>
             <div className="summary-row"><span>Subtotal</span><span>{money(order.subtotal_minor, order.currency)}</span></div>
             <div className="summary-row"><span>Platform Fee &amp; Taxes</span><span>{money(order.platform_fee_and_taxes_minor, order.currency)}</span></div>
-            <div className="summary-row total"><span>Total paid</span><span>{money(order.customer_total_minor, order.currency)}</span></div>
+            <div className="summary-row total"><span>{cancelled ? "Original total" : "Total paid"}</span><span>{money(order.customer_total_minor, order.currency)}</span></div>
           </div>
+          {!cancelled && accessToken && <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #e6e9e8" }}><button className="button secondary" disabled={cancel.isPending} onClick={() => { if (window.confirm("Cancel this reservation? The configured cancellation policy will be applied.")) cancel.mutate(); }}>{cancel.isPending ? "Cancelling…" : "Cancel reservation"}</button>{cancel.error && <div className="error-banner" style={{ marginTop: 10 }}>{cancel.error.message}</div>}</div>}
         </section>
       </main>
     </div>

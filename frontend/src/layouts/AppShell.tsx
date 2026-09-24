@@ -1,4 +1,4 @@
-import { CalendarDays, MapPin, Menu, Settings, Shapes, Users, UserRound, Warehouse, X, Bell } from "lucide-react";
+import { BarChart3, CalendarDays, MapPin, Menu, Settings, Shapes, Users, UserRound, Warehouse, X, Bell } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ const links = [
   { to: "/app/calendars", label: "Calendars", icon: Shapes },
   { to: "/app/staff", label: "Staff", icon: Users },
   { to: "/app/customers", label: "Customers", icon: UserRound },
+  { to: "/app/reports", label: "Reports", icon: BarChart3 },
 ];
 
 function StaffRoleBadge() {
