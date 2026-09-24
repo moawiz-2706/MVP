@@ -292,6 +292,8 @@ a { color: inherit; text-decoration: none; }
 .slot-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 .slot { min-height: 55px; border: 1px solid #dce2e1; border-radius: 8px; background: white; display: grid; place-items: center; align-content: center; gap: 2px; color: #33413f; }
 .slot span { font-size: 10px; color: #78827f; }
+.slot-rate-summary { display: grid; gap: 1px; width: 100%; padding: 0 5px; text-align: center; }
+.slot-rate-summary span { font-size: 10px; white-space: nowrap; }
 .slot.selected { border-color: var(--accent); background: var(--accent-soft); color: #11594d; }
 .slot:disabled { background: #f4f5f5; color: #a0a8a6; }
 .quantity { display: flex; align-items: center; gap: 14px; }
