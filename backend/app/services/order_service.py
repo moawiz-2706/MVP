@@ -15,9 +15,12 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
     BookingLineItem,
+    BookingCustomFieldDefinition,
+    BookingCustomFieldValue,
     BookingOrder,
     BookingResource,
     Calendar,
+    CalendarBookingPolicy,
     CalendarRate,
     CalendarRateResource,
     CalendarResource,
@@ -420,8 +423,17 @@ class OrderService:
         now = datetime.now(UTC)
         hold_expires = now + timedelta(minutes=self.settings.booking_hold_minutes) if paid else None
         reference = public_reference()
+        from app.services.fareharbor_replica_service import FareHarborReplicaService
+
+        customer = FareHarborReplicaService(self.db, operator.id).upsert_customer(
+            request.customer.first_name,
+            request.customer.last_name,
+            str(request.customer.email),
+            request.customer.phone or None,
+        )
         order = BookingOrder(
             operator_id=operator.id,
+            customer_id=customer.id,
             public_reference=reference,
             customer_first_name=request.customer.first_name,
             customer_last_name=request.customer.last_name,
@@ -443,6 +455,15 @@ class OrderService:
         self.db.add(order)
         self.db.flush()
         for item in prepared:
+            policy = self.db.scalar(
+                select(CalendarBookingPolicy)
+                .where(
+                    CalendarBookingPolicy.calendar_id == item.calendar.id,
+                    CalendarBookingPolicy.operator_id == operator.id,
+                    CalendarBookingPolicy.active.is_(True),
+                )
+                .order_by(CalendarBookingPolicy.version.desc())
+            )
             booking = Booking(
                 operator_id=operator.id,
                 booking_order_id=order.id,
@@ -453,6 +474,7 @@ class OrderService:
                 units=item.units,
                 base_price_minor=item.unit_price_minor,
                 rate_id=item.rate_id,
+                booking_policy_version=policy.version if policy else None,
                 customer_type_name_snapshot=item.customer_type_name,
                 seat_count=item.seat_count,
                 line_subtotal_minor=item.line_subtotal_minor,
@@ -467,6 +489,35 @@ class OrderService:
             )
             self.db.add(booking)
             self.db.flush()
+            definitions = {
+                field.key: field
+                for field in self.db.scalars(
+                    select(BookingCustomFieldDefinition).where(
+                        BookingCustomFieldDefinition.operator_id == operator.id,
+                        BookingCustomFieldDefinition.active.is_(True),
+                        (BookingCustomFieldDefinition.calendar_id == item.calendar.id)
+                        | (BookingCustomFieldDefinition.calendar_id.is_(None)),
+                    )
+                )
+            }
+            missing_fields = [
+                field.key
+                for field in definitions.values()
+                if field.required and field.key not in request.custom_fields
+            ]
+            if missing_fields:
+                raise ConflictError("Required custom fields missing: " + ", ".join(missing_fields))
+            for key, value in request.custom_fields.items():
+                definition = definitions.get(key)
+                if definition is None:
+                    raise ConflictError(f"Unknown custom field: {key}")
+                self.db.add(
+                    BookingCustomFieldValue(
+                        booking_id=booking.id,
+                        definition_id=definition.id,
+                        value=value,
+                    )
+                )
             self.db.add(
                 BookingLineItem(
                     booking_id=booking.id,

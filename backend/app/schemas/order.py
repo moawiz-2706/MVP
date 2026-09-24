@@ -40,6 +40,7 @@ class OrderQuoteRequest(BaseModel):
 
 class OrderCreateRequest(OrderQuoteRequest):
     customer: OrderCustomer
+    custom_fields: dict[str, object] = Field(default_factory=dict)
 
 
 class QuotedItem(BaseModel):

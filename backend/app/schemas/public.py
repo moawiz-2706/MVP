@@ -42,6 +42,15 @@ class PublicRate(BaseModel):
     resources: list[PublicRateResource]
 
 
+class PublicCustomField(BaseModel):
+    id: uuid.UUID
+    key: str
+    label: str
+    field_type: str
+    required: bool
+    options: list | None
+
+
 class PublicOperatorCatalog(BaseModel):
     name: str
     slug: str

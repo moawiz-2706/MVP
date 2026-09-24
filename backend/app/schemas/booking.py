@@ -3,7 +3,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
-from app.schemas.availability import ResourceAvailability
 from app.schemas.waiver import WaiverSummary
 
 
@@ -81,6 +80,13 @@ class BookingDetail(BookingListItem):
     subtotal_minor: int
     platform_fee_and_taxes_minor: int
     customer_total_minor: int
+    rate_id: uuid.UUID | None
+    customer_type_name: str | None
+    seat_count: int
+    booking_fee_minor: int
+    tax_minor: int
+    line_total_minor: int
+    booking_policy_version: int | None
     ghl_contact_sync_status: str
     ghl_confirmation_email_status: str
     ghl_appointment_sync_status: str

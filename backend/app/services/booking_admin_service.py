@@ -249,6 +249,13 @@ class BookingAdminService:
             "subtotal_minor": order.subtotal_minor,
             "platform_fee_and_taxes_minor": order.platform_fee_and_taxes_minor,
             "customer_total_minor": order.customer_total_minor,
+            "rate_id": booking.rate_id,
+            "customer_type_name": booking.customer_type_name_snapshot,
+            "seat_count": booking.seat_count,
+            "booking_fee_minor": booking.booking_fee_minor,
+            "tax_minor": booking.tax_minor,
+            "line_total_minor": booking.line_total_minor,
+            "booking_policy_version": booking.booking_policy_version,
             "ghl_contact_sync_status": order.ghl_contact_sync_status,
             "ghl_confirmation_email_status": order.ghl_confirmation_email_status,
             "ghl_appointment_sync_status": (

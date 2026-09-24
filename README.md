@@ -83,6 +83,16 @@ Passport-owned `online`, `call_to_book`, and `closed` calendar modes plus an
 optional booking cutoff. Apply it after migration 018. GHL calendar hours and
 staff schedules do not replace these Passport booking rules.
 
+Migration `supabase/migrations/020_fareharbor_replica_core.sql` adds Passport
+customer records, immutable booking-policy versions, booking adjustments,
+custom booking fields, weather closure records, staged migration imports, and
+reconciliation runs. The operator workspace exposes Customers and Migration &
+reconciliation sections. Validate an export before committing it; no live
+FareHarbor cutover should happen while blocking errors remain.
+
+The detailed API contract and GHL integration boundary are documented in
+`docs/FAREHARBOR_REPLICA_IMPLEMENTATION_SPEC.md`.
+
 Calendar editors can configure one or more independent staff pools for
 assignment and GHL ownership. Existing calendars default to `Captain`; these
 pools no longer make a booking slot unavailable when a staff member or role is

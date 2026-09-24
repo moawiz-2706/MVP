@@ -90,6 +90,13 @@ export interface BookingDetail extends Booking {
   subtotal_minor: number;
   platform_fee_and_taxes_minor: number;
   customer_total_minor: number;
+  rate_id: Id | null;
+  customer_type_name: string | null;
+  seat_count: number;
+  booking_fee_minor: number;
+  tax_minor: number;
+  line_total_minor: number;
+  booking_policy_version: number | null;
   ghl_contact_sync_status: string;
   ghl_confirmation_email_status: string;
   ghl_appointment_sync_status: string;
@@ -162,6 +169,7 @@ export interface PublicCatalog { name: string; slug: string; time_zone: string; 
 export interface PublicCategoryPage { operator_name: string; operator_slug: string; time_zone: string; category_name: string; category_slug: string; calendars: PublicCalendar[] }
 export interface PublicRateResource { resource_id: Id; name: string; quantity_per_unit: number; total_quantity: number }
 export interface PublicRate { id: Id; customer_type_name: string; customer_type_plural_name: string; note: string | null; seat_count: number; price_minor: number; booking_fee_bps: number; tax_bps: number; resources: PublicRateResource[] }
+export interface PublicCustomField { id: Id; key: string; label: string; field_type: string; required: boolean; options: unknown[] | null }
 export interface AvailabilitySlot { start_at: string; end_at: string; max_bookable_units: number; available: boolean; status?: string; rates?: { rate_id: Id; customer_type_name: string; seat_count: number; available_quantity: number; available_seats: number }[] }
 export interface AvailabilityResponse { date: string; time_zone: string; calendar: unknown; slots: AvailabilitySlot[] }
 

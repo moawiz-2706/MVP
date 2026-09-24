@@ -476,6 +476,9 @@ class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     operator_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
     )
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("customers.id"), index=True
+    )
     public_reference: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
     customer_first_name: Mapped[str] = mapped_column(Text, nullable=False)
     customer_last_name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -533,6 +536,7 @@ class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     base_price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("calendar_rates.id"))
+    booking_policy_version: Mapped[int | None] = mapped_column(Integer)
     customer_type_name_snapshot: Mapped[str | None] = mapped_column(Text)
     seat_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     line_subtotal_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
@@ -1007,3 +1011,139 @@ event.listen(
         "FOR EACH ROW EXECUTE FUNCTION prevent_signed_waiver_change()"
     ).execute_if(dialect="postgresql"),
 )
+
+
+class Customer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "customers"
+    __table_args__ = (
+        Index("uq_customers_operator_email", "operator_id", "normalized_email", unique=True),
+        Index("ix_customers_operator_phone", "operator_id", "normalized_phone"),
+    )
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    first_name: Mapped[str] = mapped_column(Text, nullable=False)
+    last_name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_email: Mapped[str] = mapped_column(Text, nullable=False)
+    phone: Mapped[str | None] = mapped_column(Text)
+    normalized_phone: Mapped[str | None] = mapped_column(Text)
+    ghl_contact_id: Mapped[str | None] = mapped_column(Text)
+    external_provider: Mapped[str | None] = mapped_column(Text)
+    external_id: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class CustomerNote(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "customer_notes"
+    customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("app_users.id"))
+    author_name: Mapped[str | None] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CalendarBookingPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "calendar_booking_policies"
+    __table_args__ = (
+        UniqueConstraint("calendar_id", "version"),
+        CheckConstraint("cancellation_cutoff_minutes >= 0", name="cancel_cutoff_nonnegative"),
+        CheckConstraint("reschedule_cutoff_minutes >= 0", name="reschedule_cutoff_nonnegative"),
+        CheckConstraint("cancellation_fee_bps BETWEEN 0 AND 10000", name="cancel_fee_bps_valid"),
+        CheckConstraint("deposit_bps BETWEEN 0 AND 10000", name="deposit_bps_valid"),
+        CheckConstraint("weather_refund_mode IN ('full_refund','credit','manual_review','no_refund')", name="weather_refund_mode_valid"),
+        CheckConstraint("no_show_mode IN ('forfeit','partial_refund','manual_review')", name="no_show_mode_valid"),
+    )
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    calendar_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("calendars.id", ondelete="CASCADE"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    cancellation_cutoff_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cancellation_fee_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    weather_refund_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="full_refund")
+    reschedule_cutoff_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reschedule_fee_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    no_show_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="forfeit")
+    deposit_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    requires_waiver: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class BookingAdjustment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "booking_adjustments"
+    __table_args__ = (
+        CheckConstraint("action IN ('refund','charge','credit','manual_review','none')", name="adjustment_action_valid"),
+        CheckConstraint("amount_minor >= 0", name="adjustment_amount_nonnegative"),
+        UniqueConstraint("idempotency_key"),
+    )
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    booking_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True)
+    payment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("payments.id"))
+    action: Mapped[str] = mapped_column(String(30), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="usd")
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    adjustment_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB)
+
+
+class BookingCustomFieldDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "booking_custom_field_definitions"
+    __table_args__ = (UniqueConstraint("operator_id", "calendar_id", "key"),)
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    calendar_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("calendars.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    field_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    options: Mapped[list | None] = mapped_column(JSONB)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class BookingCustomFieldValue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "booking_custom_field_values"
+    __table_args__ = (UniqueConstraint("booking_id", "definition_id"),)
+    booking_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True)
+    definition_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("booking_custom_field_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    value: Mapped[dict | list | str | int | bool | None] = mapped_column(JSONB)
+
+
+class WeatherClosureEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "weather_closure_events"
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    calendar_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("calendars.id", ondelete="CASCADE"), nullable=False, index=True)
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    refund_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="full_refund")
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("app_users.id"))
+
+
+class MigrationImport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "migration_imports"
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, default="fareharbor")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="staged")
+    source_filename: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[dict | None] = mapped_column(JSONB)
+    blocking_errors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReconciliationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "reconciliation_runs"
+    operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
+    summary: Mapped[dict | None] = mapped_column(JSONB)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+class MigrationImportRow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "migration_import_rows"
+    __table_args__ = (UniqueConstraint("import_id", "row_number"),)
+    import_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("migration_imports.id", ondelete="CASCADE"), nullable=False, index=True)
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="staged")
+    errors: Mapped[list | None] = mapped_column(JSONB)

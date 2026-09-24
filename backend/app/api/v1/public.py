@@ -11,6 +11,7 @@ from app.models.entities import (
     CalendarCategory,
     CalendarRate,
     CalendarRateResource,
+    BookingCustomFieldDefinition,
     CustomerType,
     DepartureLocation,
     Operator,
@@ -19,6 +20,7 @@ from app.models.entities import (
 from app.schemas.public import (
     PublicCalendar,
     PublicCategoryPage,
+    PublicCustomField,
     PublicLocation,
     PublicOperatorCatalog,
     PublicRate,
@@ -211,3 +213,50 @@ def public_rates(
             )
         )
     return result
+
+
+@router.get(
+    "/{operator_slug}/calendars/{calendar_slug}/custom-fields",
+    response_model=list[PublicCustomField],
+)
+def public_custom_fields(
+    operator_slug: str,
+    calendar_slug: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> list[PublicCustomField]:
+    row = db.execute(
+        select(Calendar, Operator)
+        .join(Operator, Operator.id == Calendar.operator_id)
+        .where(
+            Operator.slug == operator_slug,
+            Operator.is_active.is_(True),
+            Operator.public_booking_enabled.is_(True),
+            Calendar.slug == calendar_slug,
+            Calendar.is_active.is_(True),
+            Calendar.public_booking_enabled.is_(True),
+            Calendar.deleted_at.is_(None),
+        )
+    ).one_or_none()
+    if row is None:
+        raise NotFoundError("Booking page not found")
+    calendar, _operator = row
+    return [
+        PublicCustomField(
+            id=field.id,
+            key=field.key,
+            label=field.label,
+            field_type=field.field_type,
+            required=field.required,
+            options=field.options,
+        )
+        for field in db.scalars(
+            select(BookingCustomFieldDefinition)
+            .where(
+                BookingCustomFieldDefinition.operator_id == calendar.operator_id,
+                BookingCustomFieldDefinition.active.is_(True),
+                (BookingCustomFieldDefinition.calendar_id == calendar.id)
+                | (BookingCustomFieldDefinition.calendar_id.is_(None)),
+            )
+            .order_by(BookingCustomFieldDefinition.created_at)
+        )
+    ]
