@@ -66,7 +66,7 @@ export function StaffPage() {
   const syncedStaff = data.filter((member) => member.ghl_user_id);
   const unassignedCount = syncedStaff.filter((member) => !member.custom_role).length;
   return <div className="page">
-    <PageHeader title="Staff roles" description="GHL manages staff identity and availability. Passport manages only the fixed custom role used for booking eligibility." action={<button className="button secondary" disabled={directorySync.isPending} onClick={() => directorySync.mutate()}><RefreshCw size={16} />{directorySync.isPending ? "Syncing GHL…" : "Sync GHL staff"}</button>} />
+    <PageHeader title="Staff roles" description="GHL manages staff identity and availability. Passport stores an operational role label for assignment and reporting; staff availability does not control whether a booking slot is bookable." action={<button className="button secondary" disabled={directorySync.isPending} onClick={() => directorySync.mutate()}><RefreshCw size={16} />{directorySync.isPending ? "Syncing GHL…" : "Sync GHL staff"}</button>} />
     {conflicts.data?.count ? <div className="warning-banner"><strong>{conflicts.data.count} overlapping staff assignment{conflicts.data.count === 1 ? "" : "s"}.</strong> {conflicts.data.conflicts.slice(0, 3).map((conflict, index) => <span key={`${conflict.staff_name}-${index}`}>{conflict.staff_name}: {conflict.first_calendar_name} overlaps {conflict.second_calendar_name}. </span>)}</div> : null}
     {error && <div className="error-banner">{error.message}</div>}
     {directorySync.error && <div className="error-banner">GHL staff synchronization failed: {directorySync.error.message}</div>}

@@ -86,8 +86,6 @@ StaffPoolRole = Literal["Captain", "First Mate", "Guide", "Deckhand", "Instructo
 
 
 def _normalize_staff_roles(value: list[StaffPoolRole]) -> list[StaffPoolRole]:
-    if not value:
-        raise ValueError("At least one required staff role must be selected")
     return list(dict.fromkeys(value))
 
 
@@ -109,7 +107,7 @@ class CalendarCreate(BaseModel):
     base_price_minor: int = Field(default=0, ge=0)
     currency: str = Field(default="usd", pattern=r"^[a-zA-Z]{3}$")
     availability_mode: AvailabilityMode = "day_wise"
-    required_staff_roles: list[StaffPoolRole] = Field(default_factory=lambda: ["Captain"], max_length=5)
+    required_staff_roles: list[StaffPoolRole] = Field(default_factory=list, max_length=5)
     minimum_party_size: int | None = Field(default=None, gt=0, le=100_000)
     maximum_party_size: int | None = Field(default=None, gt=0, le=100_000)
     booking_fee_bps: int = Field(default=0, ge=0, le=10_000)

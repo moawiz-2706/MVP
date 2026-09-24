@@ -1,6 +1,6 @@
 # Kayak Swamp Tour: First Calendar Setup
 
-Kayak Swamp Tour is the first configured activity, not a hardcoded activity in the application. The same Passport calendar, rate, resource, staff-role, availability, booking, and GHL synchronization model can be reused for every later activity.
+Kayak Swamp Tour is the first configured activity, not a hardcoded activity in the application. The same Passport calendar, rate, resource, optional staff-label, availability, booking, and GHL synchronization model can be reused for every later activity.
 
 ## 1. Complete the connection prerequisites
 
@@ -10,9 +10,9 @@ Set the production environment values for the database URL, public frontend orig
 
 ## 2. Synchronize the GHL staff directory
 
-Open **Staff roles** and run **Sync GHL staff**. Passport will copy the GHL staff identity and availability cache. Passport does not edit the staff member's name, email, employment status, or schedule. Assign only a Passport custom role to each person who can satisfy a booking requirement. For Kayak Swamp Tour, the usual starting role is `Captain`, with `First Mate` or `Guide` added only if the operation actually requires them.
+Open **Staff roles** and run **Sync GHL staff**. Passport will copy the GHL staff identity and availability cache. Passport does not edit the staff member's name, email, employment status, or schedule. Assign a Passport custom role only as an operational label for assignment and reporting; staff roles and schedules do not control whether a booking slot is available.
 
-Resolve every warning about missing roles or overlapping assignments before opening the public link. A role without a current GHL availability window cannot satisfy a required role during slot generation.
+Review any staff synchronization or overlapping-assignment warnings as operational follow-up. They do not prevent customers from booking an otherwise valid calendar slot.
 
 ## 3. Create reusable resources
 
@@ -43,7 +43,7 @@ Open **Calendars** and create a category such as `Kayak Eco Tours`. Then create 
 | Maximum party size | Safe maximum for one booking |
 | Currency | The business currency |
 | Booking mode | `online` unless the activity is call-to-book |
-| Required staff roles | `Captain`, plus `First Mate`/`Guide` only when operationally required |
+| Staff roles | None required for booking; optional Passport labels for operational assignment |
 | Booking cutoff | The number of minutes before departure when online checkout closes |
 
 Saving or updating the calendar queues the GHL calendar synchronization. Confirm the synchronization status before continuing. If GHL has a matching calendar, Passport recovers and updates it instead of creating a duplicate.
@@ -75,7 +75,7 @@ Configure the booking policy before enabling public bookings:
 - Waiver requirement.
 - No-show outcome.
 
-The public calendar displays closed, cutoff, blocked, sold-out, and crew-unavailable states separately. Customers cannot book a slot that fails inventory, operating-hour, blackout, cutoff, or required-staff checks.
+The public calendar displays closed, cutoff, blocked, and sold-out states separately. Customers cannot book a slot that fails inventory, operating-hour, blackout, or cutoff checks. Staff assignment is an operational step after or alongside booking and is not an availability gate.
 
 ## 7. Test an operator booking
 
@@ -97,7 +97,7 @@ If a sync fails, use the booking's retry action or run the protected GHL project
 
 ## 10. Add future calendars
 
-To add another activity, repeat the same workflow with a new category/calendar, new or shared resources, rates, hours, staff-role requirements, policy, and booking link. No code change is required. The application must not contain Kayak-specific conditionals for the calendar name or slug.
+To add another activity, repeat the same workflow with a new category/calendar, new or shared resources, rates, hours, optional staff labels, policy, and booking link. No code change is required. The application must not contain Kayak-specific conditionals for the calendar name or slug.
 
 ## Production go-live checklist
 

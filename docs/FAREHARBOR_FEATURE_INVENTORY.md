@@ -14,7 +14,7 @@ This inventory defines the production scope for turning Passport into a FareHarb
 | Customer types and rates | Customer types, prices, taxes, fees, seat counts, resource rules | None | Include snapshots in contacts/appointments | Complete for core path |
 | Resource inventory | Quantity pools, resource type, capacity/use limit, notes, archive state, and per-rate consumption | None | Include capacity summary in appointment metadata | Complete for core path |
 | Weekly/date availability | Hours, date hours, pushed times, blackout blocks, cutoff rules | Calendar projection only | Requeue calendar and future-appointment sync | Complete for core path |
-| Staff-role eligibility | Required roles, GHL staff availability windows, role assignment, and slot eligibility | Staff directory source | Sync staff then apply Passport role rules | Partial; slot eligibility complete, assignment conflict reporting remains |
+| Staff operational labels | GHL staff directory sync, optional Passport role labels, and assignment visibility | Staff directory source | Sync staff identity and availability; no booking gate | Complete for the requested booking model |
 | Public booking page | Catalog, category, calendar page, timezone, slots, rates, custom fields, policy, payment | None | Optional GHL embed/link distribution | Complete for core path |
 | Multiple booking items | Cart and quote model | None | One appointment per booked activity where configured | Partial; needs stronger cross-item conflict tests |
 | Participants/manifest | Primary customer, participant CRUD, minor/guardian/emergency fields | Contact remains the primary CRM identity | Appointment metadata and contact association | Complete for operator core |
