@@ -19,9 +19,6 @@ from app.models.entities import (
     DepartureLocation,
     Operator,
     Resource,
-    Staff,
-    StaffAvailabilityWindow,
-    StaffHour,
 )
 from app.schemas.availability import (
     AvailabilityCheckResponse,
@@ -31,7 +28,6 @@ from app.schemas.availability import (
     ResourceAvailability,
 )
 from app.services.capacity import CapacityInterval, reserved_for_interval
-from app.services.staffing_service import fits_weekly_hours, pool_readiness_for_interval
 from app.utils.timezone import local_datetime, require_timezone
 
 
@@ -257,9 +253,6 @@ class AvailabilityService:
             inventory_max = min(inventory_max, calendar.max_units_per_booking)
         resource_sufficient = all(detail.sufficient for detail in details)
         reason = None
-        staffing = pool_readiness_for_interval(
-            self.db, calendar.operator_id, calendar.id, start_at, end_at
-        )
         if not calendar.is_active:
             reason = "Calendar is inactive"
         elif not within_hours:
@@ -268,8 +261,6 @@ class AvailabilityService:
             reason = "Requested time is blocked"
         elif not resource_sufficient or units > inventory_max:
             reason = "Insufficient resource inventory"
-        elif not staffing.ready:
-            reason = staffing.reason or "Every required staff pool must have an available member"
         return AvailabilityCheckResponse(
             available=reason is None,
             start_at=start_at,
@@ -368,69 +359,6 @@ class AvailabilityService:
                     )
                 )
             )
-            roles = [
-                str(role).strip()
-                for role in (calendar.required_staff_roles or ["Captain"])
-                if str(role).strip()
-            ]
-            staff = list(
-                self.db.scalars(
-                    select(Staff).where(
-                        Staff.operator_id == operator.id,
-                        Staff.deleted_at.is_(None),
-                        Staff.is_active.is_(True),
-                        Staff.custom_role.is_not(None),
-                    )
-                )
-            )
-            staff = [
-                member
-                for member in staff
-                if (member.custom_role or "").casefold()
-                in {role.casefold() for role in roles}
-            ]
-            staff_ids = [member.id for member in staff]
-            windows_by_staff: dict[uuid.UUID, list[tuple[datetime, datetime]]] = defaultdict(list)
-            weekly_by_staff: dict[uuid.UUID, list[tuple[int, time, time]]] = defaultdict(list)
-            if staff_ids:
-                for staff_id, start_at, end_at in self.db.execute(
-                    select(
-                        StaffAvailabilityWindow.staff_id,
-                        StaffAvailabilityWindow.start_at,
-                        StaffAvailabilityWindow.end_at,
-                    ).where(
-                        StaffAvailabilityWindow.staff_id.in_(staff_ids),
-                        StaffAvailabilityWindow.start_at < range_end,
-                        StaffAvailabilityWindow.end_at > range_start,
-                    )
-                ):
-                    windows_by_staff[staff_id].append((start_at, end_at))
-                for staff_id, day_of_week, start_time, end_time in self.db.execute(
-                    select(
-                        StaffHour.staff_id,
-                        StaffHour.day_of_week,
-                        StaffHour.start_time,
-                        StaffHour.end_time,
-                    ).where(StaffHour.staff_id.in_(staff_ids))
-                ):
-                    weekly_by_staff[staff_id].append((day_of_week, start_time, end_time))
-
-            def staff_available(member: Staff, start_at: datetime, end_at: datetime) -> bool:
-                windows = windows_by_staff.get(member.id, [])
-                if windows:
-                    return any(
-                        window_start <= start_at and window_end >= end_at
-                        for window_start, window_end in windows
-                    )
-                if member.availability_sync_status == "synced":
-                    return False
-                zone = require_timezone(member.availability_time_zone or "UTC")
-                return fits_weekly_hours(
-                    weekly_by_staff.get(member.id, []),
-                    start_at.astimezone(zone),
-                    end_at.astimezone(zone),
-                )
-
             for candidate in candidates:
                 end_at = candidate + timedelta(minutes=calendar.duration_minutes)
                 blocked = any(
@@ -457,15 +385,11 @@ class AvailabilityService:
                     inventory_max = calendar.max_units_per_booking or 1
                 elif calendar.max_units_per_booking is not None:
                     inventory_max = min(inventory_max, calendar.max_units_per_booking)
-                staff_ready = all(
-                    any(
-                        (member.custom_role or "").casefold() == role.casefold()
-                        and staff_available(member, candidate, end_at)
-                        for member in staff
-                    )
-                    for role in roles
-                )
-                available = not blocked and inventory_max > 0 and staff_ready
+                # Staff assignment is an operational concern, not a booking
+                # capacity rule. A slot remains bookable when no staff member
+                # or required role is currently available. Calendar hours,
+                # blocks, and resource inventory remain authoritative here.
+                available = not blocked and inventory_max > 0
                 slots.append(
                     AvailabilitySlot(
                         start_at=candidate,

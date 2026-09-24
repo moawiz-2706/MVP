@@ -65,12 +65,15 @@ after 013 and before deploying this version. The Staff page requests the
 `calendars.readonly` schedule APIs on every directory refresh, stores the weekly
 schedule for display, and expands each linked GHL user's schedule into the next
 14 days of UTC intervals. The protected daily cron refreshes those windows
-automatically; the booking engine uses them as the availability source of truth.
+automatically; the Staff page and assignment tools use them for operational
+staffing information, but they do not block public booking slots.
 Passport cannot edit GHL-managed staff details or availability.
 
-Calendar editors can require one or more independent staff pools. Existing
-calendars default to `Captain`; selecting `First Mate` adds a separate pool, so
-both pools must have at least one available member for a slot to be bookable.
+Calendar editors can configure one or more independent staff pools for
+assignment and GHL ownership. Existing calendars default to `Captain`; these
+pools no longer make a booking slot unavailable when a staff member or role is
+unavailable. Calendar hours, blocks, duration, and resource inventory remain
+the booking availability rules.
 The fixed custom-role dropdown contains only Captain, First Mate, Guide, Deckhand,
 and Instructor.
 

@@ -180,6 +180,23 @@ def test_spec153_7_cancelled_booking_frees_inventory(db) -> None:
     assert result.available  # cancelled holds nothing
 
 
+def test_staff_or_role_availability_does_not_block_calendar_slot(db) -> None:
+    op = _operator(db)
+    cal = _calendar(db, op)
+    res = _resource(db, op, quantity=2)
+    _map(db, cal, res)
+    staff = db.scalar(select(Staff).where(Staff.operator_id == op.id))
+    assert staff is not None
+    staff.is_active = False
+    staff.custom_role = "Unavailable Role"
+    db.commit()
+
+    result = AvailabilityService(db).check(cal.id, _start(10), 1, operator_id=op.id)
+
+    assert result.available
+    assert result.max_bookable_units == 2
+
+
 def test_spec153_8_unexpired_hold_consumes_inventory(db) -> None:
     op = _operator(db)
     cal = _calendar(db, op)
@@ -307,7 +324,7 @@ def test_all_attached_resources_are_required(db) -> None:
     assert result.reason == "Insufficient resource inventory"
 
 
-def test_each_required_staff_role_needs_an_available_member(db) -> None:
+def test_required_staff_role_availability_does_not_block_booking(db) -> None:
     op = _operator(db)
     cal = _calendar(db, op)
     cal.required_staff_roles = ["Captain", "First Mate"]
@@ -340,8 +357,7 @@ def test_each_required_staff_role_needs_an_available_member(db) -> None:
     first_mate.is_active = False
     db.commit()
     result = engine.check(cal.id, _start(10), 1, operator_id=op.id)
-    assert not result.available
-    assert "First Mate" in (result.reason or "")
+    assert result.available
 
 
 def test_spec154_18_row_lock_serializes_last_unit(engine) -> None:

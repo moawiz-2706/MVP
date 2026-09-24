@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -80,6 +81,48 @@ class GHLAppointmentService:
         ]
         return "\n".join(lines)
 
+    def _find_remote_appointment(
+        self,
+        booking: Booking,
+        operator: Operator,
+        remote_calendar_id: str,
+        contact_id: str,
+    ) -> str | None:
+        """Recover a successful create whose response was lost.
+
+        HighLevel's create-appointment endpoint has no idempotency-key field.
+        The Passport booking marker in the description is the durable
+        correlation key used to reconcile a timed-out create before issuing a
+        second POST.
+        """
+        result = self.client.request(
+            "GET",
+            "/calendars/events",
+            version="v3",
+            params={
+                "locationId": operator.ghl_location_id,
+                "calendarId": remote_calendar_id,
+                "startTime": int(
+                    (booking.start_at - timedelta(minutes=1)).timestamp() * 1000
+                ),
+                "endTime": int((booking.end_at + timedelta(minutes=1)).timestamp() * 1000),
+            },
+        )
+        events = result.get("events", []) if isinstance(result, dict) else []
+        marker = f"Passport booking: {booking.id}"
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            if marker not in str(event.get("description") or ""):
+                continue
+            event_contact_id = event.get("contactId")
+            if event_contact_id and str(event_contact_id) != contact_id:
+                continue
+            remote_id = event.get("id") or event.get("appointmentId") or event.get("eventId")
+            if remote_id:
+                return str(remote_id)
+        return None
+
     @staticmethod
     def _appointment_status(booking: Booking) -> str:
         return {
@@ -127,10 +170,6 @@ class GHLAppointmentService:
             # A cancellation may race the initial appointment job. There is no
             # remote appointment to cancel, and creating a cancelled event is wrong.
             return None
-        if mapping is not None and mapping.ghl_event_id is None and mapping.status == "manual_review":
-            raise RuntimeError(
-                "HighLevel appointment create outcome is unknown; reconcile the remote event before retrying"
-            )
         if mapping is None:
             mapping = GHLAppointmentMapping(
                 operator_id=self.operator_id,
@@ -193,6 +232,7 @@ class GHLAppointmentService:
         payload_hash = hashlib.sha256(
             json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+        remote_id: str | None = None
         try:
             if mapping.ghl_event_id:
                 try:
@@ -209,15 +249,23 @@ class GHLAppointmentService:
                     # stale ID and recreate it once, preserving idempotent mapping.
                     mapping.ghl_event_id = None
                     self.db.flush()
+            if not mapping.ghl_event_id:
+                recovered_id = self._find_remote_appointment(
+                    booking,
+                    operator,
+                    calendar_mapping.ghl_calendar_id,
+                    order.ghl_contact_id,
+                )
+                if recovered_id:
+                    remote_id = recovered_id
+                    result = {}
+                else:
                     result = self.client.request(
                         "POST", "/calendars/events/appointments", version="v3", json=body
                     )
-            else:
-                result = self.client.request(
-                    "POST", "/calendars/events/appointments", version="v3", json=body
-                )
-            remote = result.get("appointment", result)
-            remote_id = remote.get("id") if isinstance(remote, dict) else None
+            if remote_id is None:
+                remote = result.get("appointment", result)
+                remote_id = remote.get("id") if isinstance(remote, dict) else None
             if not remote_id and mapping.ghl_event_id:
                 remote_id = mapping.ghl_event_id
             if not remote_id:

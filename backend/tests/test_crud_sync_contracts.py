@@ -1,3 +1,5 @@
+import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +18,55 @@ def test_highlevel_calendar_and_appointment_scopes_are_required() -> None:
         "calendars/events.readonly",
         "calendars/events.write",
     }.issubset(REQUIRED_SCOPES)
+
+
+def test_calendar_recovery_uses_stable_passport_marker() -> None:
+    calendar_id = uuid.uuid4()
+    service = GHLCalendarService.__new__(GHLCalendarService)
+    service.client = SimpleNamespace(
+        request=lambda *args, **kwargs: {
+            "calendars": [
+                {
+                    "id": "ghl-calendar-1",
+                    "name": "Renamed remotely",
+                    "description": f"old description\nPassport calendar: {calendar_id}",
+                }
+            ]
+        }
+    )
+
+    remote_id = service._find_remote_calendar(
+        SimpleNamespace(ghl_location_id="location-1"),
+        SimpleNamespace(id=calendar_id, name="Current name"),
+    )
+
+    assert remote_id == "ghl-calendar-1"
+
+
+def test_appointment_recovery_uses_booking_marker() -> None:
+    booking_id = uuid.uuid4()
+    service = GHLAppointmentService.__new__(GHLAppointmentService)
+    service.client = SimpleNamespace(
+        request=lambda *args, **kwargs: {
+            "events": [
+                {
+                    "id": "ghl-event-1",
+                    "contactId": "contact-1",
+                    "description": f"Passport booking: {booking_id}",
+                }
+            ]
+        }
+    )
+    start_at = datetime(2027, 6, 15, 14, 0, tzinfo=UTC)
+
+    remote_id = service._find_remote_appointment(
+        SimpleNamespace(id=booking_id, start_at=start_at, end_at=start_at),
+        SimpleNamespace(ghl_location_id="location-1"),
+        "ghl-calendar-1",
+        "contact-1",
+    )
+
+    assert remote_id == "ghl-event-1"
 
 
 def test_highlevel_calendar_schedule_is_complete_week() -> None:

@@ -73,12 +73,14 @@ class GHLCalendarService:
             )
         )
         description = calendar.description or ""
+        marker = f"Passport calendar: {calendar.id}"
         if not staff_names:
-            return description
+            return f"{description}\n\n{marker}" if description else marker
         staff_section = "Assigned staff:\n" + "\n".join(
             f"- {name}" for name in staff_names
         )
-        return f"{description}\n\n{staff_section}" if description else staff_section
+        sections = [section for section in (description, marker, staff_section) if section]
+        return "\n\n".join(sections)
 
     def _find_remote_calendar(
         self,
@@ -92,11 +94,11 @@ class GHLCalendarService:
             params={"locationId": operator.ghl_location_id},
         )
         calendars = result.get("calendars", []) if isinstance(result, dict) else []
+        marker = f"Passport calendar: {calendar.id}"
         for remote in calendars:
             if (
                 isinstance(remote, dict)
-                and remote.get("name") == calendar.name
-                and (remote.get("description") or "") == self._calendar_description(calendar)
+                and marker in str(remote.get("description") or "")
                 and remote.get("id")
             ):
                 return str(remote["id"])
