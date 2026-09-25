@@ -44,7 +44,11 @@ def calculate_payment(
     )
     operator_bonus = apply_basis_points(subtotal_minor, OPERATOR_TRANSFER_MARKUP_BPS)
     customer_total = subtotal_minor + platform_fee
-    operator_transfer = subtotal_minor + operator_bonus
+    # Explicit rate-level fees/taxes can be zero or smaller than the legacy
+    # operator transfer markup. Never persist a transfer larger than the
+    # amount charged to the customer, because that would make the retained
+    # platform amount negative and violate the booking-order constraint.
+    operator_transfer = min(subtotal_minor + operator_bonus, customer_total)
     return PaymentBreakdown(
         subtotal_minor=subtotal_minor,
         platform_fee_and_taxes_minor=platform_fee,

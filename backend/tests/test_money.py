@@ -48,6 +48,13 @@ def test_spec156_31_platform_gross_is_six_percent() -> None:
     assert result.platform_gross_retained_minor == apply_basis_points(20_000, 600)
 
 
+def test_explicit_zero_rate_fees_never_create_negative_retention() -> None:
+    result = calculate_payment(8_000, booking_fee_minor=0, tax_minor=0)
+    assert result.customer_total_minor == 8_000
+    assert result.operator_transfer_minor == 8_000
+    assert result.platform_gross_retained_minor == 0
+
+
 def test_spec156_32_round_half_up_on_odd_minor_units() -> None:
     # 12,350 * 13% = 1605.5 -> 1606 (half rounds up); * 7% = 864.5 -> 865.
     result = calculate_payment(12_350)
@@ -61,4 +68,3 @@ def test_spec156_32_round_half_up_on_odd_minor_units() -> None:
 
 def test_payment_math_is_deterministic() -> None:
     assert calculate_payment(9_999) == calculate_payment(9_999)
-
