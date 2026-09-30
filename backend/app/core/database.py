@@ -16,8 +16,9 @@ REQUIRED_PRODUCTION_TABLES = (
     "booking_adjustments",
     "calendar_booking_policies",
     "message_templates",
+    "public_access_credentials",
 )
-REQUIRED_SCHEMA_VERSION = "031_team_invoice_bookings"
+REQUIRED_SCHEMA_VERSION = "032_private_staff_booking_links"
 
 
 @lru_cache

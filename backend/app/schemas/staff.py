@@ -97,6 +97,13 @@ class StaffRead(EntityModel):
     availability_last_synced_at: datetime | None = None
 
 
+class StaffBookingLinkResponse(BaseModel):
+    staff_id: uuid.UUID
+    token: str
+    path: str
+    expires_at: datetime
+
+
 class GHLStaffDirectoryResponse(BaseModel):
     synced: int
     created: int

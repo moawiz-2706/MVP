@@ -43,6 +43,16 @@ These routes are separate from the authenticated HighLevel app navigation:
 
 On the authenticated **Bookings** page, select **Booking link** to open the public operator booking URL, copy it, open it, or copy its embed code. The URL uses the current HighLevel subaccount's operator slug. Operator slugs are generated uniquely and protected by a database-wide unique constraint, so two subaccounts cannot receive the same operator booking path.
 
+## Private staff mobile booking links
+
+Private staff links are generated from a staff member's details dialog. They are not public customer links and should not be added as public HighLevel navigation items:
+
+```text
+https://YOUR-PASSPORT-FRONTEND-DOMAIN/staff-book/{privateToken}
+```
+
+The private staff page shows live available slots, collects the client's details, and lets the staff member either send a secure hosted invoice or create a free appointment. Regenerating a link immediately revokes the previous link, and inactive staff links stop working. Treat each link as a private bearer credential.
+
 ## HighLevel setup notes
 
 - Add the authenticated `/app/...` links as menu items in the HighLevel app/navigation configuration.

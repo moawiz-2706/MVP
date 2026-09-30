@@ -2,14 +2,14 @@
 
 **Repository:** `moawiz-2706/MVP`  
 **Implementation workspace:** `/home/ubuntu/audit_MVP`  
-**Scope:** release safety, OAuth CSRF protection, database readiness, booking lifecycle centralization, financial adjustment auditability, account-level message customization, authenticated team booking with hosted invoices/free appointments, frontend contract alignment, and verification.
+**Scope:** release safety, OAuth CSRF protection, database readiness, booking lifecycle centralization, financial adjustment auditability, account-level message customization, authenticated team booking with hosted invoices/free appointments, private staff mobile booking links, frontend contract alignment, and verification.
 
 ## Executive result
 
 The hardening work is implemented and verified against a real local PostgreSQL 16 instance.
 
-- The complete migration chain applies cleanly through `031_team_invoice_bookings`.
-- The production readiness probe targets `031_team_invoice_bookings` on a freshly migrated database.
+- The complete migration chain applies cleanly through `032_private_staff_booking_links`.
+- The production readiness probe targets `032_private_staff_booking_links` on a freshly migrated database.
 - The complete backend PostgreSQL-backed test suite passes.
 - New lifecycle and release-gate tests pass.
 - Frontend typecheck, booking-notification tests, and production build pass.
@@ -72,6 +72,14 @@ Financial audit fields added to `booking_adjustments`:
 - Invoice identifiers/status and the hosted invoice URL are persisted for idempotent retries and are visible in the booking drawer.
 - `invoice.voided` and `invoice.marked_uncollectible` release the booking hold and enqueue the existing GHL appointment synchronization path.
 
+### Private staff mobile booking links
+
+- Active staff members can receive a private, staff-specific bearer link from their Staff details dialog; the public customer booking URL is not used.
+- Only a SHA-256 token digest is stored. Generating a new link revokes the prior link, and inactive/deleted staff links are rejected.
+- The mobile page uses the same live availability engine and shows only bookable slots. It supports configured rates, quantities, custom fields, and client contact details.
+- Staff can choose **Send invoice to client** or **Book appointment for free**. Invoice bookings use the existing hosted Stripe invoice/outbox/webhook pipeline; free bookings confirm immediately.
+- The private API is scoped to the token's staff member and operator and can include active calendars that are not exposed on the public customer page.
+
 ### Compatibility fixes discovered by the real DB gate
 
 - Preserved direct-call compatibility for public catalog/status handlers while retaining HTTP cache/security headers.
@@ -105,8 +113,8 @@ npm run build
 
 ## Deployment notes
 
-1. Apply migrations `028_release_readiness.sql`, `029_booking_adjustment_audit_fields.sql`, `030_message_templates.sql`, and `031_team_invoice_bookings.sql` before deploying this backend. Do not deploy the new booking UI before migration `031` is ready.
+1. Apply migrations `028_release_readiness.sql`, `029_booking_adjustment_audit_fields.sql`, `030_message_templates.sql`, `031_team_invoice_bookings.sql`, and `032_private_staff_booking_links.sql` before deploying this backend. Do not deploy the private staff UI before migration `032` is ready.
 2. Set `API_URL` to the externally reachable API origin and keep `FRONTEND_URL` on the externally reachable frontend origin.
 3. Do not deploy production with localhost/loopback database or application URLs.
-4. Configure the worker/outbox process so Stripe invoice, refund, transfer, and transfer-reversal jobs are continuously drained. Register `invoice.paid`, `invoice.payment_failed`, `invoice.voided`, and `invoice.marked_uncollectible` in the Stripe webhook endpoint.
+4. Configure the worker/outbox process so Stripe invoice, refund, transfer, and transfer-reversal jobs are continuously drained. Register `invoice.paid`, `invoice.payment_failed`, `invoice.voided`, and `invoice.marked_uncollectible` in the Stripe webhook endpoint. Treat private staff links as bearer credentials and regenerate them if shared outside the intended staff member.
 5. Treat the readiness probe as the deployment health gate; `/api/health` only proves process liveness.

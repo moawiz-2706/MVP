@@ -307,6 +307,9 @@ a { color: inherit; text-decoration: none; }
 .slot-rate-summary span { font-size: 10px; white-space: nowrap; }
 .slot.selected { border-color: var(--accent); background: var(--accent-soft); color: #11594d; }
 .slot:disabled { background: #f4f5f5; color: #a0a8a6; }
+.staff-booking-mobile-card { max-width: 680px; margin: 24px auto; }
+.staff-booking-summary { display: flex; justify-content: space-between; gap: 12px; margin: 18px 0 12px; padding: 12px 14px; border: 1px solid #d9e5e1; border-radius: 10px; background: #f5faf8; }
+.staff-booking-summary span { color: #697386; font-size: 12px; }
 .quantity { display: flex; align-items: center; gap: 14px; }
 .quantity button { width: 32px; height: 32px; border: 1px solid #d8dedc; border-radius: 7px; background: white; }
 .summary-row { display: flex; justify-content: space-between; gap: 20px; padding: 8px 0; color: #5d6872; font-size: 12px; }
@@ -357,6 +360,8 @@ a { color: inherit; text-decoration: none; }
   .rate-create-row { grid-template-columns: 1fr; }
   .rate-resource-row { grid-template-columns: 1fr 100px 32px; }
   .rate-section-heading { align-items: flex-start; flex-direction: column; }
+  .staff-booking-mobile-card { margin: 12px; padding: 18px; }
+  .staff-booking-summary { flex-direction: column; gap: 4px; }
 }
 
 /* Waivers */

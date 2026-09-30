@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.app_session import CurrentPrincipal, SessionPrincipal
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
+from app.core.exceptions import NotFoundError
 from app.core.permissions import Permission, require_permission
 from app.models.entities import Calendar, Staff, StaffAssignment
 from app.schemas.staff import (
@@ -20,8 +21,10 @@ from app.schemas.staff import (
     StaffCreate,
     StaffRead,
     StaffRoleUpdate,
+    StaffBookingLinkResponse,
     StaffUpdate,
 )
+from app.services.public_access_service import PublicAccessService
 from app.services.outbox_service import OutboxService
 from app.services.staff_service import StaffService
 
@@ -53,6 +56,37 @@ def _send_now(db: Session, settings: Settings) -> None:
 @router.get("/staff", response_model=list[StaffRead])
 def list_staff(principal: CurrentPrincipal, db: DB):
     return service(db, principal).list_staff()
+
+
+@router.post("/staff/{staff_id}/booking-link", response_model=StaffBookingLinkResponse)
+def issue_staff_booking_link(staff_id: uuid.UUID, principal: CurrentPrincipal, db: DB):
+    require_permission(principal, Permission.MANAGE_CONFIGURATION)
+    member = db.scalar(
+        select(Staff).where(
+            Staff.id == staff_id,
+            Staff.operator_id == principal.operator_id,
+            Staff.deleted_at.is_(None),
+            Staff.is_active.is_(True),
+        )
+    )
+    if member is None:
+        raise NotFoundError("Only active staff members can receive a booking link")
+    access = PublicAccessService(db)
+    access.revoke(staff_id=member.id, purpose="staff_booking")
+    expires_at = datetime.now(UTC) + timedelta(days=365)
+    token = access.issue(
+        operator_id=member.operator_id,
+        staff_id=member.id,
+        purpose="staff_booking",
+        lifetime=timedelta(days=365),
+    )
+    db.commit()
+    return StaffBookingLinkResponse(
+        staff_id=member.id,
+        token=token,
+        path=f"/staff-book/{token}",
+        expires_at=expires_at,
+    )
 
 
 @router.post("/staff", response_model=StaffRead, status_code=status.HTTP_201_CREATED)

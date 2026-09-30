@@ -19,6 +19,7 @@ from app.api.v1 import (
     public,
     reports,
     staff,
+    staff_booking,
     staff_ghl,
     stripe_connect,
     stripe_webhooks,
@@ -51,6 +52,7 @@ app.add_middleware(
         "X-Cron-Secret",
         "X-GHL-Signature",
         "X-Checkout-Key",
+        "X-Staff-Booking-Key",
     ],
 )
 app.add_exception_handler(DomainError, domain_error_handler)
@@ -117,6 +119,7 @@ for router in (
     public.router,
     reports.router,
     staff.router,
+    staff_booking.router,
     staff_ghl.router,
     stripe_connect.router,
     stripe_webhooks.router,

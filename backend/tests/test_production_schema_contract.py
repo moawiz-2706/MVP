@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.models.entities import MessageTemplate, Staff, OutboxJob
+from app.models.entities import MessageTemplate, PublicAccessCredential, Staff, OutboxJob
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -9,6 +9,7 @@ CUSTOM_ROLE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "013_staff
 AVAILABILITY_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "014_staff_ghl_availability.sql"
 TIMEZONE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "016_normalize_operator_time_zones.sql"
 MESSAGE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "030_message_templates.sql"
+STAFF_LINK_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "032_private_staff_booking_links.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -58,3 +59,12 @@ def test_message_template_migration_and_model_are_aligned() -> None:
     assert "'ghl_booking_reschedule_email'" in sql
     assert MessageTemplate.__tablename__ == "message_templates"
     assert "event_type" in MessageTemplate.__table__.columns
+
+
+def test_private_staff_booking_link_migration_and_model_are_aligned() -> None:
+    sql = STAFF_LINK_MIGRATION.read_text()
+    assert "staff_id uuid REFERENCES staff(id)" in sql
+    assert "'staff_booking'" in sql
+    assert "032_private_staff_booking_links" in sql
+    assert "staff_id" in PublicAccessCredential.__table__.columns
+    assert "staff_booking" in str(PublicAccessCredential.__table_args__[1].sqltext)

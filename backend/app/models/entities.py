@@ -903,7 +903,7 @@ class PublicAccessCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("token_digest", name="uq_public_access_credentials_digest"),
         CheckConstraint(
-            "purpose IN ('order_status','waiver_sign','waiver_view','waiver_view_sensitive')",
+            "purpose IN ('order_status','waiver_sign','waiver_view','waiver_view_sensitive','staff_booking')",
             name="public_access_purpose_valid",
         ),
     )
@@ -916,6 +916,9 @@ class PublicAccessCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     booking_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("bookings.id")
+    )
+    staff_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("staff.id", ondelete="CASCADE"), index=True
     )
     token_digest: Mapped[str] = mapped_column(String(128), nullable=False)
     purpose: Mapped[str] = mapped_column(String(30), nullable=False)

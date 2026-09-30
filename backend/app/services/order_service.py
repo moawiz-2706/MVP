@@ -106,13 +106,12 @@ class OrderService:
         self.db = db
         self.settings = settings
 
-    def _operator(self, slug: str) -> Operator:
+    def _operator(self, slug: str, *, require_public: bool = True) -> Operator:
+        conditions = [Operator.slug == slug, Operator.is_active.is_(True)]
+        if require_public:
+            conditions.append(Operator.public_booking_enabled.is_(True))
         operator = self.db.scalar(
-            select(Operator).where(
-                Operator.slug == slug,
-                Operator.is_active.is_(True),
-                Operator.public_booking_enabled.is_(True),
-            )
+            select(Operator).where(*conditions)
         )
         if operator is None:
             raise NotFoundError("Booking page not found")
@@ -140,23 +139,27 @@ class OrderService:
         method = "invoice" if invoice_mode else "card" if card_mode else "none"
         return requires_payment, invoice_mode, card_mode, method
 
-    def _prepare(self, operator: Operator, items: Iterable) -> list[PreparedItem]:
+    def _prepare(
+        self, operator: Operator, items: Iterable, *, require_public: bool = True
+    ) -> list[PreparedItem]:
         prepared: list[PreparedItem] = []
         availability = AvailabilityService(self.db)
         seats_by_calendar: dict[uuid.UUID, int] = defaultdict(int)
         calendars_by_id: dict[uuid.UUID, Calendar] = {}
         for item in items:
             quantity = item.requested_quantity
+            calendar_conditions = [
+                Calendar.id == item.calendar_id,
+                Calendar.operator_id == operator.id,
+                Calendar.is_active.is_(True),
+                Calendar.deleted_at.is_(None),
+            ]
+            if require_public:
+                calendar_conditions.append(Calendar.public_booking_enabled.is_(True))
             row = self.db.execute(
                 select(Calendar, DepartureLocation)
                 .outerjoin(DepartureLocation, DepartureLocation.id == Calendar.departure_location_id)
-                .where(
-                    Calendar.id == item.calendar_id,
-                    Calendar.operator_id == operator.id,
-                    Calendar.is_active.is_(True),
-                    Calendar.public_booking_enabled.is_(True),
-                    Calendar.deleted_at.is_(None),
-                )
+                .where(*calendar_conditions)
             ).one_or_none()
             if row is None:
                 raise NotFoundError("Calendar not found")
@@ -409,8 +412,9 @@ class OrderService:
         *,
         checkout_key: str | None = None,
         allow_payment_override: bool = False,
+        allow_private_operator: bool = False,
     ) -> OrderCreateResponse:
-        operator = self._operator(operator_slug)
+        operator = self._operator(operator_slug, require_public=not allow_private_operator)
         checkout_key = checkout_key or f"legacy:{uuid.uuid4()}"
         if len(checkout_key) > 160:
             raise ConflictError("Checkout key is too long")
@@ -428,11 +432,15 @@ class OrderService:
             return self._existing_response(existing, payment, request_hash)
         # Serialize booking writes with Captain assignment writes on calendar rows.
         lock_calendars(self.db, operator.id, [item.calendar_id for item in request.items])
-        prepared = self._prepare(operator, request.items)
+        prepared = self._prepare(
+            operator, request.items, require_public=not allow_private_operator
+        )
         self._lock_resources(prepared)
         # Recalculate only after locks are held. Other reservations cannot lock/commit
         # these resource rows until this transaction completes.
-        prepared = self._prepare(operator, request.items)
+        prepared = self._prepare(
+            operator, request.items, require_public=not allow_private_operator
+        )
         quote, money = self._quote(prepared)
         paid, invoice_mode, card_mode, payment_method = self.payment_mode(
             money.customer_total_minor,

@@ -35,6 +35,7 @@ class PublicAccessService:
         purpose: str,
         order_id: uuid.UUID | None = None,
         booking_id: uuid.UUID | None = None,
+        staff_id: uuid.UUID | None = None,
         lifetime: timedelta,
     ) -> str:
         token = secrets.token_urlsafe(32)
@@ -44,6 +45,7 @@ class PublicAccessService:
                 operator_id=operator_id,
                 order_id=order_id,
                 booking_id=booking_id,
+                staff_id=staff_id,
                 token_digest=self.digest(token),
                 purpose=purpose,
                 issued_at=now,
@@ -59,6 +61,7 @@ class PublicAccessService:
         purpose: str,
         order_id: uuid.UUID | None = None,
         booking_id: uuid.UUID | None = None,
+        staff_id: uuid.UUID | None = None,
         touch: bool = True,
     ) -> PublicAccessCredential:
         credential = self.db.scalar(
@@ -80,13 +83,21 @@ class PublicAccessService:
             or credential.expires_at <= now
             or (order_id is not None and credential.order_id != order_id)
             or (booking_id is not None and credential.booking_id != booking_id)
+            or (staff_id is not None and credential.staff_id != staff_id)
         ):
             raise NotFoundError("Access link not found")
         if touch:
             credential.last_used_at = now
         return credential
 
-    def revoke(self, *, order_id: uuid.UUID | None = None, booking_id: uuid.UUID | None = None) -> int:
+    def revoke(
+        self,
+        *,
+        order_id: uuid.UUID | None = None,
+        booking_id: uuid.UUID | None = None,
+        staff_id: uuid.UUID | None = None,
+        purpose: str | None = None,
+    ) -> int:
         statement = select(PublicAccessCredential).where(
             PublicAccessCredential.revoked_at.is_(None)
         )
@@ -94,6 +105,10 @@ class PublicAccessService:
             statement = statement.where(PublicAccessCredential.order_id == order_id)
         if booking_id is not None:
             statement = statement.where(PublicAccessCredential.booking_id == booking_id)
+        if staff_id is not None:
+            statement = statement.where(PublicAccessCredential.staff_id == staff_id)
+        if purpose is not None:
+            statement = statement.where(PublicAccessCredential.purpose == purpose)
         now = datetime.now(UTC)
         rows = list(self.db.scalars(statement))
         for row in rows:
