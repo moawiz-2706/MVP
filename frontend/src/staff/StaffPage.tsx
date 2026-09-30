@@ -2,7 +2,9 @@ import { RefreshCw, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, json } from "../api/client";
+import { useSession } from "../auth/GHLSessionProvider";
 import type { Staff } from "../api/types";
+import { BookingLinkPanel } from "../components/BookingLinkPanel";
 import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
@@ -16,9 +18,11 @@ function clock(value: string) {
 }
 
 function StaffDetailsDialog({ staff, onClose }: { staff: Staff | null; onClose: () => void }) {
+  const { me } = useSession();
   return <Modal open={Boolean(staff)} onOpenChange={(open) => !open && onClose()} title={staff ? `${staff.name} — weekly availability` : "Weekly staff availability"} description="Weekly availability synchronized from GHL and stored in Passport.">
     {staff && <div className="staff-details-dialog">
       <section className="detail-section"><h3>Weekly availability</h3><dl className="detail-list"><dt>Time zone</dt><dd>{staff.availability_time_zone || "UTC"}</dd><dt>Sync status</dt><dd>{staff.availability_sync_status}</dd><dt>Last synchronized</dt><dd>{staff.availability_last_synced_at ? formatLongDate(staff.availability_last_synced_at, staff.availability_time_zone || "UTC") : "Not synchronized"}</dd></dl>{staff.hours.length ? <div className="staff-schedule-list">{staff.hours.map((hour) => <div className="staff-schedule-row" key={`${hour.day_of_week}-${hour.start_time}-${hour.end_time}`}><strong>{DAY_NAMES[hour.day_of_week] || `Day ${hour.day_of_week}`}</strong><span>{clock(hour.start_time)} – {clock(hour.end_time)}</span></div>)}</div> : <p className="muted-note">No weekly availability is currently stored for this staff member. Use “Sync GHL staff” to refresh it.</p>}</section>
+      <section className="detail-section"><h3>Mobile booking link</h3><p className="muted-note">Share this link with {staff.name}. It opens the account’s mobile-friendly booking page, where they can choose only live available slots and book for a client.</p><BookingLinkPanel entityType="operator" operatorSlug={me.operator.slug} /></section>
       <p className="muted-note">This schedule is read from Passport’s database cache. GHL remains the source of truth; Passport does not edit staff availability.</p>
     </div>}
   </Modal>;
