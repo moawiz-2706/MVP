@@ -4,7 +4,7 @@ Replace `https://YOUR-PASSPORT-FRONTEND-DOMAIN` with the deployed Passport front
 
 ## Authenticated Passport app pages
 
-Use these URLs for HighLevel navigation links. Each page is now directly routable without the global Passport sidebar.
+Use these URLs for HighLevel navigation links. Each page is directly routable and retains the restored global Passport sidebar.
 
 | Page | Direct URL |
 |---|---|
@@ -22,7 +22,7 @@ Use these URLs for HighLevel navigation links. Each page is now directly routabl
 
 ## Settings sections
 
-Settings remains the only page with an internal side navigation. Its sections are currently tabs rather than separate browser URLs:
+Settings includes the global Passport sidebar plus an internal settings side navigation. Its sections are currently tabs rather than separate browser URLs:
 
 - General
 - Payments
