@@ -8,8 +8,8 @@
 
 The hardening work is implemented and verified against a real local PostgreSQL 16 instance.
 
-- The complete migration chain applies cleanly through `033_fix_staff_booking_purpose_constraint`.
-- The production readiness probe targets `033_fix_staff_booking_purpose_constraint` on a freshly migrated database.
+- The complete migration chain applies cleanly through `034_fix_staff_booking_target_constraint`.
+- The production readiness probe targets `034_fix_staff_booking_target_constraint` on a freshly migrated database.
 - The complete backend PostgreSQL-backed test suite passes.
 - New lifecycle and release-gate tests pass.
 - Frontend typecheck, booking-notification tests, and production build pass.
@@ -113,7 +113,7 @@ npm run build
 
 ## Deployment notes
 
-1. Apply migrations `028_release_readiness.sql`, `029_booking_adjustment_audit_fields.sql`, `030_message_templates.sql`, `031_team_invoice_bookings.sql`, `032_private_staff_booking_links.sql`, and `033_fix_staff_booking_purpose_constraint.sql` before deploying this backend. Do not deploy the private staff UI before migration `033` is ready.
+1. Apply migrations `028_release_readiness.sql`, `029_booking_adjustment_audit_fields.sql`, `030_message_templates.sql`, `031_team_invoice_bookings.sql`, `032_private_staff_booking_links.sql`, `033_fix_staff_booking_purpose_constraint.sql`, and `034_fix_staff_booking_target_constraint.sql` before deploying this backend. Do not deploy the private staff UI before migration `034` is ready.
 2. Set `API_URL` to the externally reachable API origin and keep `FRONTEND_URL` on the externally reachable frontend origin.
 3. Do not deploy production with localhost/loopback database or application URLs.
 4. Configure the worker/outbox process so Stripe invoice, refund, transfer, and transfer-reversal jobs are continuously drained. Register `invoice.paid`, `invoice.payment_failed`, `invoice.voided`, and `invoice.marked_uncollectible` in the Stripe webhook endpoint. Treat private staff links as bearer credentials and regenerate them if shared outside the intended staff member.

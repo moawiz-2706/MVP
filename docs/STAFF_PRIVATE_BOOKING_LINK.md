@@ -35,4 +35,4 @@ The staff booking order delegates to the same `OrderService` and payment/outbox/
 
 ## Deployment requirement
 
-Apply migrations `032_private_staff_booking_links.sql` and `033_fix_staff_booking_purpose_constraint.sql` before generating links. Migration 033 is required for existing databases because the original public-access table used an unnamed PostgreSQL purpose constraint that otherwise rejects the new `staff_booking` purpose.
+Apply migrations `032_private_staff_booking_links.sql`, `033_fix_staff_booking_purpose_constraint.sql`, and `034_fix_staff_booking_target_constraint.sql` before generating links. Migration 033 removes the legacy purpose constraint, while migration 034 updates the older exactly-one-target rule so a credential may target an order, booking, or staff member.

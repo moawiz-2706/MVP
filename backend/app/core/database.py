@@ -18,7 +18,7 @@ REQUIRED_PRODUCTION_TABLES = (
     "message_templates",
     "public_access_credentials",
 )
-REQUIRED_SCHEMA_VERSION = "033_fix_staff_booking_purpose_constraint"
+REQUIRED_SCHEMA_VERSION = "034_fix_staff_booking_target_constraint"
 
 
 @lru_cache

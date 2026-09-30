@@ -11,6 +11,7 @@ TIMEZONE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "016_normaliz
 MESSAGE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "030_message_templates.sql"
 STAFF_LINK_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "032_private_staff_booking_links.sql"
 STAFF_LINK_FIX_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "033_fix_staff_booking_purpose_constraint.sql"
+STAFF_TARGET_FIX_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "034_fix_staff_booking_target_constraint.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -76,3 +77,10 @@ def test_private_staff_booking_constraint_fix_covers_legacy_migration() -> None:
     assert "public_access_credentials_purpose_check" in sql
     assert "public_access_purpose_valid" in sql
     assert "033_fix_staff_booking_purpose_constraint" in sql
+
+
+def test_private_staff_booking_target_constraint_fix_covers_staff_scope() -> None:
+    sql = STAFF_TARGET_FIX_MIGRATION.read_text()
+    assert "public_credentials_one_target" in sql
+    assert "num_nonnulls(order_id, booking_id, staff_id) = 1" in sql
+    assert "034_fix_staff_booking_target_constraint" in sql

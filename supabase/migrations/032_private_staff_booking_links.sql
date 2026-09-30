@@ -19,6 +19,13 @@ ALTER TABLE public_access_credentials
     order_id IS NOT NULL OR booking_id IS NOT NULL OR staff_id IS NOT NULL
   );
 
+ALTER TABLE public_access_credentials
+  DROP CONSTRAINT IF EXISTS public_credentials_one_target;
+ALTER TABLE public_access_credentials
+  ADD CONSTRAINT public_credentials_one_target CHECK (
+    num_nonnulls(order_id, booking_id, staff_id) = 1
+  ) NOT VALID;
+
 CREATE INDEX IF NOT EXISTS ix_public_access_credentials_staff
   ON public_access_credentials(staff_id, purpose, revoked_at, expires_at)
   WHERE staff_id IS NOT NULL;
