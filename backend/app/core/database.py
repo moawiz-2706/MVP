@@ -15,8 +15,9 @@ REQUIRED_PRODUCTION_TABLES = (
     "ghl_oauth_states",
     "booking_adjustments",
     "calendar_booking_policies",
+    "message_templates",
 )
-REQUIRED_SCHEMA_VERSION = "029_booking_adjustment_audit_fields"
+REQUIRED_SCHEMA_VERSION = "030_message_templates"
 
 
 @lru_cache

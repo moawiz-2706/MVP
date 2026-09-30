@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.models.entities import Staff, OutboxJob
+from app.models.entities import MessageTemplate, Staff, OutboxJob
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -8,6 +8,7 @@ MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "012_staff_ghl_users.s
 CUSTOM_ROLE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "013_staff_custom_roles.sql"
 AVAILABILITY_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "014_staff_ghl_availability.sql"
 TIMEZONE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "016_normalize_operator_time_zones.sql"
+MESSAGE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "030_message_templates.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -46,3 +47,14 @@ def test_timezone_migration_repairs_blank_operator_values() -> None:
     sql = TIMEZONE_MIGRATION.read_text()
     assert "SET time_zone = 'UTC'" in sql
     assert "btrim(time_zone) <> ''" in sql
+
+
+def test_message_template_migration_and_model_are_aligned() -> None:
+    sql = MESSAGE_MIGRATION.read_text()
+    assert "CREATE TABLE IF NOT EXISTS message_templates" in sql
+    assert "030_message_templates" in sql
+    assert "'ghl_booking_cancellation_email'" in sql
+    assert "'ghl_booking_weather_email'" in sql
+    assert "'ghl_booking_reschedule_email'" in sql
+    assert MessageTemplate.__tablename__ == "message_templates"
+    assert "event_type" in MessageTemplate.__table__.columns

@@ -216,3 +216,15 @@ export interface PublicWaiver {
   signature_png: string | null;
 }
 export interface WaiverSettingsData { waiver_title: string | null; waiver_website: string | null; waiver_text: string | null; waiver_opt_in_label: string | null }
+
+export interface MessageTemplate {
+  event_type: string;
+  label: string;
+  enabled: boolean;
+  subject_template: string;
+  body_template: string;
+  is_custom: boolean;
+  available_variables: string[];
+  preview_subject: string;
+  preview_body: string;
+}

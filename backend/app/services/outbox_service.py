@@ -124,6 +124,9 @@ class OutboxService:
             "ghl_staff_assigned_email",
             "ghl_staff_reminder",
             "ghl_staff_unassigned_email",
+            "ghl_booking_cancellation_email",
+            "ghl_booking_weather_email",
+            "ghl_booking_reschedule_email",
             "ghl_send_confirmation_email",
         } and not self.settings.ghl_notifications_enabled:
             return
@@ -150,6 +153,28 @@ class OutboxService:
             return
         if job.job_type == "ghl_staff_unassigned_email":
             GHLEmailService(self.db, job.operator_id).send_staff_unassigned(payload)
+            return
+        if job.job_type == "ghl_booking_cancellation_email":
+            GHLEmailService(self.db, job.operator_id).send_booking_cancellation(
+                uuid.UUID(payload["booking_id"]),
+                reason=payload.get("reason", "Booking cancelled"),
+                adjustment_outcome=payload.get("adjustment_outcome", ""),
+            )
+            return
+        if job.job_type == "ghl_booking_weather_email":
+            GHLEmailService(self.db, job.operator_id).send_booking_weather_cancellation(
+                uuid.UUID(payload["booking_id"]),
+                reason=payload.get("reason", "Weather or operating conditions"),
+                adjustment_outcome=payload.get("adjustment_outcome", ""),
+            )
+            return
+        if job.job_type == "ghl_booking_reschedule_email":
+            GHLEmailService(self.db, job.operator_id).send_booking_reschedule(
+                uuid.UUID(payload["booking_id"]),
+                reason=payload.get("reason", "Booking rescheduled"),
+                previous_start=payload.get("previous_start", ""),
+                payment_outcome=payload.get("payment_outcome", ""),
+            )
             return
         if job.job_type == "ghl_sync_calendar":
             GHLCalendarService(self.db, job.operator_id).sync(uuid.UUID(payload["calendar_id"]))

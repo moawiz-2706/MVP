@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 import uuid
 
@@ -89,6 +90,19 @@ class BookingLifecycleService:
             )
         )
 
+    @staticmethod
+    def _adjustment_outcome(adjustment: Any, payment: Payment) -> str:
+        amount = f"{payment.currency.upper()} {Decimal(adjustment.amount_minor) / Decimal(100):,.2f}"
+        if adjustment.action == "refund":
+            return f"A refund of {amount} has been initiated."
+        if adjustment.action == "credit":
+            return f"A credit of {amount} has been recorded for your account."
+        if adjustment.action == "manual_review":
+            return "Our team will review the payment outcome and contact you if any action is needed."
+        if adjustment.action == "charge":
+            return f"An additional charge of {amount} is due."
+        return "No refund or credit was issued."
+
     def cancel(
         self,
         booking_id: uuid.UUID,
@@ -175,6 +189,25 @@ class BookingLifecycleService:
                 job_type="ghl_cancel_appointment",
                 idempotency_key=f"booking:{booking.id}:ghl_cancel",
                 payload={"booking_id": str(booking.id), "booking_order_id": str(order.id)},
+                status="pending",
+            )
+            .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
+        )
+        weather = event_type == "weather_cancelled"
+        message_job_type = "ghl_booking_weather_email" if weather else "ghl_booking_cancellation_email"
+        message_key = f"booking:{booking.id}:ghl_{'weather' if weather else 'cancellation'}_email"
+        self.db.execute(
+            insert(OutboxJob)
+            .values(
+                operator_id=self.operator_id,
+                booking_order_id=order.id,
+                job_type=message_job_type,
+                idempotency_key=message_key,
+                payload={
+                    "booking_id": str(booking.id),
+                    "reason": reason,
+                    "adjustment_outcome": self._adjustment_outcome(adjustment, payment),
+                },
                 status="pending",
             )
             .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
@@ -279,6 +312,7 @@ class BookingLifecycleService:
             raise ConflictError("Rescheduling is outside the booking policy cutoff")
         if policy.reschedule_fee_minor:
             raise ConflictError("This policy requires an explicit reschedule fee collection")
+        previous_start = booking.start_at
         old_total = booking.line_total_minor or booking.base_price_minor * booking.units
         new_units = data.units or booking.units
         new_total = (old_total * new_units) // max(1, booking.units)
@@ -312,6 +346,30 @@ class BookingLifecycleService:
             actor_id=actor_id,
             reason=reason,
             payload={"old_total_minor": old_total, "new_total_minor": new_total, "delta_minor": delta},
+        )
+        payment_outcome = (
+            self._adjustment_outcome(adjustment, payment)
+            if adjustment is not None
+            else "No payment adjustment was required."
+        )
+        self.db.execute(
+            insert(OutboxJob)
+            .values(
+                operator_id=self.operator_id,
+                booking_order_id=order.id,
+                job_type="ghl_booking_reschedule_email",
+                idempotency_key=(
+                    f"booking:{booking_id}:ghl_reschedule_email:{refreshed.start_at.isoformat()}"
+                ),
+                payload={
+                    "booking_id": str(booking_id),
+                    "reason": reason,
+                    "previous_start": previous_start.isoformat(),
+                    "payment_outcome": payment_outcome,
+                },
+                status="pending",
+            )
+            .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
         )
         self.db.commit()
         result["payment_outcome"] = "refund" if delta < 0 else "unchanged"

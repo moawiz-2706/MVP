@@ -100,6 +100,33 @@ class OperatorSettings(TimestampMixin, Base):
     waiver_opt_in_label: Mapped[str | None] = mapped_column(Text)
 
 
+class MessageTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "message_templates"
+    __table_args__ = (
+        UniqueConstraint("operator_id", "event_type", name="uq_message_templates_operator_event"),
+        CheckConstraint(
+            "event_type IN ('booking_confirmation','booking_cancellation','weather_cancellation',"
+            "'booking_reschedule','booking_reminder_day_before','booking_reminder_same_day',"
+            "'staff_assignment','staff_unassignment','staff_reminder_day_before','staff_reminder_same_day')",
+            name="message_template_event_type_valid",
+        ),
+        CheckConstraint("char_length(subject_template) BETWEEN 1 AND 240", name="message_template_subject_length"),
+        CheckConstraint("char_length(body_template) BETWEEN 1 AND 20000", name="message_template_body_length"),
+        Index("ix_message_templates_operator", "operator_id"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    subject_template: Mapped[str] = mapped_column(Text, nullable=False)
+    body_template: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_users.id", ondelete="SET NULL")
+    )
+
+
 class DepartureLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "departure_locations"
 
@@ -974,6 +1001,7 @@ class OutboxJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "job_type IN ('stripe_create_transfer','ghl_upsert_contact',"
             "'ghl_send_confirmation_email','ghl_booking_reminder','ghl_upsert_staff_contact',"
             "'ghl_staff_assigned_email','ghl_staff_reminder','ghl_staff_unassigned_email',"
+            "'ghl_booking_cancellation_email','ghl_booking_weather_email','ghl_booking_reschedule_email',"
             "'ghl_sync_staff_user',"
             "'stripe_create_refund','stripe_create_transfer_reversal','stripe_reconcile_payment_intent',"
             "'ghl_sync_calendar','ghl_delete_calendar','ghl_sync_appointment','ghl_cancel_appointment')",

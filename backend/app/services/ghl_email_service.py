@@ -19,6 +19,7 @@ from app.models.entities import (
 )
 from app.services.ghl_client import GHLClient
 from app.services.ghl_contact_service import GHLContactService
+from app.services.message_template_service import MessageTemplateService, default_render
 from app.services.reminder_service import reminder_still_due
 from app.services.waiver_service import WaiverService
 from app.utils.timezone import require_timezone
@@ -87,17 +88,28 @@ def booking_reminder_content(
     if booking.departure_location_address_snapshot:
         lines.append(f"Address: {booking.departure_location_address_snapshot}")
     lines.append(f"Order: {order.public_reference}")
-    subject = f"Reminder: your booking is {WHEN[kind]} - {operator.name}"
-    plain, markup = _render(
-        f"Hi {order.customer_first_name},",
-        f"This is a reminder that your booking is {WHEN[kind]}.",
-        booking.calendar_name_snapshot,
-        lines,
-        "See you soon,",
-        operator.name,
-        link=(WAIVER_LINK_LABEL, waiver_url) if waiver_url else None,
+    if waiver_url:
+        lines.append(f"{WAIVER_LINK_LABEL}: {waiver_url}")
+    event_type = f"booking_reminder_{kind}"
+    rendered = default_render(
+        event_type,
+        {
+            "operator_name": operator.name,
+            "customer_first_name": order.customer_first_name,
+            "public_reference": order.public_reference,
+            "calendar_name": booking.calendar_name_snapshot,
+            "booking_details": "\n".join(lines),
+            "start_date": booking.start_at.astimezone(zone).strftime("%B %d, %Y"),
+            "start_time": _clock(booking.start_at.astimezone(zone)),
+            "end_time": _clock(booking.end_at.astimezone(zone)),
+            "time_zone": booking.start_at.astimezone(zone).strftime("%Z"),
+            "location_name": booking.departure_location_name_snapshot or "",
+            "location_address": booking.departure_location_address_snapshot or "",
+            "units": booking.units,
+            "waiver_url": waiver_url or "",
+        },
     )
-    return subject, plain, markup
+    return rendered.subject, rendered.body, rendered.html
 
 
 def staff_content(
@@ -121,21 +133,30 @@ def staff_content(
         lines.append(f"Role: {role}")
     if location:
         lines.extend([f"Location: {location.name}", f"Address: {location.address}"])
-    if guests is not None:
-        lines.append(f"Guests booked so far: {guests}")
-    first_name = staff_name.split()[0] if staff_name.split() else staff_name
-    as_role = f" as {role}" if role else ""
-    if kind == "assigned":
-        subject = f"You're scheduled: {calendar_name} on {start:%b %d} - {operator_name}"
-        intro = f"You've been assigned to {calendar_name}{as_role}."
-    elif kind == "unassigned":
-        subject = f"Schedule change: {calendar_name} on {start:%b %d} - {operator_name}"
-        intro = f"You're no longer scheduled for {calendar_name}{as_role}. No action is needed."
-    else:
-        subject = f"Reminder: {calendar_name} {WHEN[kind]} at {_clock(start)} - {operator_name}"
-        intro = f"A reminder that you're working {calendar_name}{as_role} {WHEN[kind]}."
-    plain, markup = _render(f"Hi {first_name},", intro, calendar_name, lines, "Thanks,", operator_name)
-    return subject, plain, markup
+    event_type = {
+        "assigned": "staff_assignment",
+        "unassigned": "staff_unassignment",
+        "day_before": "staff_reminder_day_before",
+        "same_day": "staff_reminder_same_day",
+    }[kind]
+    rendered = default_render(
+        event_type,
+        {
+            "operator_name": operator_name,
+            "staff_name": staff_name.split()[0] if staff_name.split() else staff_name,
+            "staff_role": f" as {role}" if role else "",
+            "calendar_name": calendar_name,
+            "start_date": start.strftime("%b %d"),
+            "start_time": _clock(start),
+            "end_time": _clock(end),
+            "booking_details": "\n".join(lines),
+            "guests_booked": guests if guests is not None else "",
+            "when": WHEN[kind] if kind in WHEN else "",
+            "location_name": location.name if location else "",
+            "location_address": location.address if location else "",
+        },
+    )
+    return rendered.subject, rendered.body, rendered.html
 
 
 class GHLEmailService:
@@ -143,6 +164,98 @@ class GHLEmailService:
         self.db = db
         self.operator_id = operator_id
         self.client = GHLClient(operator_id, db)
+
+    @staticmethod
+    def _booking_detail_lines(
+        booking: Booking,
+        operator: Operator,
+        *,
+        waiver_url: str | None = None,
+        include_order: str | None = None,
+    ) -> list[str]:
+        zone = require_timezone(operator.time_zone)
+        start = booking.start_at.astimezone(zone)
+        end = booking.end_at.astimezone(zone)
+        lines = [
+            booking.calendar_name_snapshot,
+            f"Date: {start:%B %d, %Y}",
+            f"Time: {_clock(start)} - {_clock(end)} {start.strftime('%Z')}",
+            f"Quantity: {booking.units}",
+        ]
+        if booking.departure_location_name_snapshot:
+            lines.append(f"Location: {booking.departure_location_name_snapshot}")
+        if booking.departure_location_address_snapshot:
+            lines.append(f"Address: {booking.departure_location_address_snapshot}")
+        if include_order:
+            lines.append(f"Order: {include_order}")
+        if waiver_url:
+            lines.append(f"{WAIVER_LINK_LABEL}: {waiver_url}")
+        return lines
+
+    @classmethod
+    def _order_context(
+        cls,
+        order: BookingOrder,
+        operator: Operator,
+        bookings: list[Booking],
+        waiver_links: dict[uuid.UUID, str] | None = None,
+    ) -> dict[str, Any]:
+        waiver_links = waiver_links or {}
+        zone = require_timezone(operator.time_zone)
+        detail_blocks = [
+            "\n".join(
+                cls._booking_detail_lines(
+                    booking,
+                    operator,
+                    waiver_url=waiver_links.get(booking.id),
+                )
+            )
+            for booking in bookings
+        ]
+        first = bookings[0] if bookings else None
+        start = first.start_at.astimezone(zone) if first else None
+        end = first.end_at.astimezone(zone) if first else None
+        return {
+            "operator_name": operator.name,
+            "operator_slug": operator.slug,
+            "customer_first_name": order.customer_first_name,
+            "customer_last_name": order.customer_last_name,
+            "customer_email": order.customer_email,
+            "public_reference": order.public_reference,
+            "calendar_name": first.calendar_name_snapshot if first else "Your booking",
+            "booking_details": "\n\n".join(detail_blocks),
+            "payment_summary": "\n".join(
+                [
+                    f"Subtotal: {_money(order.subtotal_minor, order.currency)}",
+                    f"Platform Fee & Taxes: {_money(order.platform_fee_and_taxes_minor, order.currency)}",
+                    f"Total Paid: {_money(order.customer_total_minor, order.currency)}",
+                ]
+            ),
+            "start_date": start.strftime("%B %d, %Y") if start else "",
+            "start_time": _clock(start) if start else "",
+            "end_time": _clock(end) if end else "",
+            "time_zone": start.strftime("%Z") if start else operator.time_zone,
+            "location_name": first.departure_location_name_snapshot if first else "",
+            "location_address": first.departure_location_address_snapshot if first else "",
+            "units": first.units if first else "",
+            "currency": order.currency.upper(),
+            "booking_total": _money(order.customer_total_minor, order.currency),
+        }
+
+    @classmethod
+    def _booking_context(
+        cls,
+        order: BookingOrder,
+        operator: Operator,
+        booking: Booking,
+        *,
+        waiver_url: str | None = None,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        context = cls._order_context(order, operator, [booking], {booking.id: waiver_url} if waiver_url else {})
+        context["waiver_url"] = waiver_url or ""
+        context.update(extra)
+        return context
 
     def _deliver(
         self,
@@ -192,10 +305,25 @@ class GHLEmailService:
             )
         )
         waiver_links = WaiverService(self.db).links_for_bookings(bookings)
-        subject_base = settings.confirmation_email_subject if settings else "Booking Confirmation"
-        subject = f"{subject_base} - {operator.name}"
-        plain, markup = self._content(order, operator, bookings, waiver_links)
-        response = self._deliver(order.ghl_contact_id, subject, plain, markup, settings)
+        template_service = MessageTemplateService(self.db, self.operator_id)
+        rendered = template_service.render(
+            "booking_confirmation", self._order_context(order, operator, bookings, waiver_links)
+        )
+        if not rendered.enabled:
+            order.ghl_confirmation_email_status = "disabled"
+            self.db.commit()
+            return
+        _definition, _enabled, is_custom = template_service.definition("booking_confirmation")
+        subject = rendered.subject
+        if not is_custom and settings and settings.confirmation_email_subject != "Booking Confirmation":
+            subject = f"{settings.confirmation_email_subject} - {operator.name}"
+        response = self._deliver(
+            order.ghl_contact_id,
+            subject,
+            rendered.body,
+            rendered.html,
+            settings,
+        )
         order.ghl_conversation_id = response.get("conversationId")
         order.ghl_message_id = response.get("messageId")
         order.ghl_email_message_id = response.get("emailMessageId")
@@ -222,8 +350,12 @@ class GHLEmailService:
             return
         contact_id = order.ghl_contact_id or GHLContactService(self.db, self.operator_id).sync(order.id)
         waiver_link = WaiverService(self.db).links_for_bookings([booking]).get(booking.id)
-        subject, plain, markup = booking_reminder_content(order, operator, booking, kind, waiver_link)
-        self._deliver(contact_id, subject, plain, markup, settings)
+        rendered = MessageTemplateService(self.db, self.operator_id).render(
+            f"booking_reminder_{kind}",
+            self._booking_context(order, operator, booking, waiver_url=waiver_link, when=WHEN[kind]),
+        )
+        if rendered.enabled:
+            self._deliver(contact_id, rendered.subject, rendered.body, rendered.html, settings)
 
     def send_staff_assigned(self, assignment_id: uuid.UUID) -> None:
         self._send_staff(assignment_id, "assigned")
@@ -268,18 +400,34 @@ class GHLEmailService:
             )
         )
         zone = require_timezone(operator.time_zone)
-        subject, plain, markup = staff_content(
-            kind,
-            staff_name=staff.name,
-            role=assignment.role,
-            calendar_name=calendar.name,
-            start=assignment.start_at.astimezone(zone),
-            end=assignment.end_at.astimezone(zone),
-            location=location,
-            guests=int(guests or 0),
-            operator_name=operator.name,
+        start = assignment.start_at.astimezone(zone)
+        end = assignment.end_at.astimezone(zone)
+        detail_lines = _when_lines(start, end)
+        if assignment.role:
+            detail_lines.append(f"Role: {assignment.role}")
+        if location:
+            detail_lines.extend([f"Location: {location.name}", f"Address: {location.address}"])
+        event_type = "staff_assignment" if kind == "assigned" else f"staff_reminder_{kind}"
+        rendered = MessageTemplateService(self.db, self.operator_id).render(
+            event_type,
+            {
+                "operator_name": operator.name,
+                "staff_name": staff.name.split()[0] if staff.name.split() else staff.name,
+                "staff_role": f" as {assignment.role}" if assignment.role else "",
+                "calendar_name": calendar.name,
+                "start_date": start.strftime("%b %d"),
+                "start_time": _clock(start),
+                "end_time": _clock(end),
+                "time_zone": start.strftime("%Z"),
+                "booking_details": "\n".join(detail_lines),
+                "guests_booked": int(guests or 0),
+                "when": WHEN.get(kind, ""),
+                "location_name": location.name if location else "",
+                "location_address": location.address if location else "",
+            },
         )
-        self._deliver(contact_id, subject, plain, markup, settings)
+        if rendered.enabled:
+            self._deliver(contact_id, rendered.subject, rendered.body, rendered.html, settings)
 
     def send_staff_unassigned(self, payload: dict[str, Any]) -> None:
         """Tell staff they were taken off a slot.
@@ -316,18 +464,106 @@ class GHLEmailService:
             else None
         )
         zone = require_timezone(operator.time_zone)
-        subject, plain, markup = staff_content(
-            "unassigned",
-            staff_name=staff.name,
-            role=payload.get("role"),
-            calendar_name=payload["calendar_name"],
-            start=start.astimezone(zone),
-            end=end.astimezone(zone),
-            location=location,
-            guests=None,
-            operator_name=operator.name,
+        local_start = start.astimezone(zone)
+        local_end = end.astimezone(zone)
+        detail_lines = _when_lines(local_start, local_end)
+        if payload.get("role"):
+            detail_lines.append(f"Role: {payload['role']}")
+        if location:
+            detail_lines.extend([f"Location: {location.name}", f"Address: {location.address}"])
+        rendered = MessageTemplateService(self.db, self.operator_id).render(
+            "staff_unassignment",
+            {
+                "operator_name": operator.name,
+                "staff_name": staff.name.split()[0] if staff.name.split() else staff.name,
+                "staff_role": f" as {payload.get('role')}" if payload.get("role") else "",
+                "calendar_name": payload["calendar_name"],
+                "start_date": local_start.strftime("%b %d"),
+                "start_time": _clock(local_start),
+                "end_time": _clock(local_end),
+                "time_zone": local_start.strftime("%Z"),
+                "booking_details": "\n".join(detail_lines),
+                "guests_booked": "",
+                "location_name": location.name if location else "",
+                "location_address": location.address if location else "",
+            },
         )
-        self._deliver(contact_id, subject, plain, markup, settings)
+        if rendered.enabled:
+            self._deliver(contact_id, rendered.subject, rendered.body, rendered.html, settings)
+
+    def _send_booking_event(
+        self,
+        booking_id: uuid.UUID,
+        event_type: str,
+        *,
+        reason: str = "",
+        adjustment_outcome: str = "",
+        previous_start: str = "",
+        payment_outcome: str = "",
+    ) -> None:
+        row = self.db.execute(
+            select(Booking, BookingOrder, Operator, OperatorSettings)
+            .join(BookingOrder, BookingOrder.id == Booking.booking_order_id)
+            .join(Operator, Operator.id == Booking.operator_id)
+            .outerjoin(OperatorSettings, OperatorSettings.operator_id == Operator.id)
+            .where(Booking.id == booking_id, Booking.operator_id == self.operator_id)
+        ).one_or_none()
+        if row is None:
+            return
+        booking, order, operator, settings = row
+        if settings and not settings.confirmation_email_enabled:
+            return
+        contact_id = order.ghl_contact_id or GHLContactService(self.db, self.operator_id).sync(order.id)
+        if not contact_id:
+            return
+        context = self._booking_context(
+            order,
+            operator,
+            booking,
+            cancel_reason=reason,
+            adjustment_outcome=adjustment_outcome,
+            previous_start=previous_start,
+            payment_outcome=payment_outcome,
+        )
+        rendered = MessageTemplateService(self.db, self.operator_id).render(event_type, context)
+        if rendered.enabled:
+            self._deliver(contact_id, rendered.subject, rendered.body, rendered.html, settings)
+
+    def send_booking_cancellation(
+        self, booking_id: uuid.UUID, *, reason: str, adjustment_outcome: str = ""
+    ) -> None:
+        self._send_booking_event(
+            booking_id,
+            "booking_cancellation",
+            reason=reason,
+            adjustment_outcome=adjustment_outcome,
+        )
+
+    def send_booking_weather_cancellation(
+        self, booking_id: uuid.UUID, *, reason: str, adjustment_outcome: str = ""
+    ) -> None:
+        self._send_booking_event(
+            booking_id,
+            "weather_cancellation",
+            reason=reason,
+            adjustment_outcome=adjustment_outcome,
+        )
+
+    def send_booking_reschedule(
+        self,
+        booking_id: uuid.UUID,
+        *,
+        reason: str,
+        previous_start: str,
+        payment_outcome: str = "",
+    ) -> None:
+        self._send_booking_event(
+            booking_id,
+            "booking_reschedule",
+            reason=reason,
+            previous_start=previous_start,
+            payment_outcome=payment_outcome,
+        )
 
     @staticmethod
     def _content(
