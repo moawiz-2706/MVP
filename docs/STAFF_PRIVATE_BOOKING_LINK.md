@@ -32,3 +32,7 @@ A staff member using the link can:
 - `POST /api/v1/staff-booking/{token}/orders` — token-authenticated team booking; `payment_required=true` creates/sends a hosted invoice and leaves the booking pending until payment, while `false` confirms a free appointment immediately.
 
 The staff booking order delegates to the same `OrderService` and payment/outbox/webhook pipeline as authenticated operator bookings. Public customer checkout behavior is unchanged.
+
+## Deployment requirement
+
+Apply migrations `032_private_staff_booking_links.sql` and `033_fix_staff_booking_purpose_constraint.sql` before generating links. Migration 033 is required for existing databases because the original public-access table used an unnamed PostgreSQL purpose constraint that otherwise rejects the new `staff_booking` purpose.

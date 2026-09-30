@@ -6,6 +6,8 @@ ALTER TABLE public_access_credentials
 ALTER TABLE public_access_credentials
   DROP CONSTRAINT IF EXISTS public_access_purpose_valid;
 ALTER TABLE public_access_credentials
+  DROP CONSTRAINT IF EXISTS public_access_credentials_purpose_check;
+ALTER TABLE public_access_credentials
   ADD CONSTRAINT public_access_purpose_valid CHECK (
     purpose IN ('order_status','waiver_sign','waiver_view','waiver_view_sensitive','staff_booking')
   );

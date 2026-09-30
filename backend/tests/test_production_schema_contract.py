@@ -10,6 +10,7 @@ AVAILABILITY_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "014_staf
 TIMEZONE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "016_normalize_operator_time_zones.sql"
 MESSAGE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "030_message_templates.sql"
 STAFF_LINK_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "032_private_staff_booking_links.sql"
+STAFF_LINK_FIX_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "033_fix_staff_booking_purpose_constraint.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -68,3 +69,10 @@ def test_private_staff_booking_link_migration_and_model_are_aligned() -> None:
     assert "032_private_staff_booking_links" in sql
     assert "staff_id" in PublicAccessCredential.__table__.columns
     assert "staff_booking" in str(PublicAccessCredential.__table_args__[1].sqltext)
+
+
+def test_private_staff_booking_constraint_fix_covers_legacy_migration() -> None:
+    sql = STAFF_LINK_FIX_MIGRATION.read_text()
+    assert "public_access_credentials_purpose_check" in sql
+    assert "public_access_purpose_valid" in sql
+    assert "033_fix_staff_booking_purpose_constraint" in sql
