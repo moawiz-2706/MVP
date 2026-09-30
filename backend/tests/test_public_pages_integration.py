@@ -11,6 +11,7 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import Calendar, CalendarCategory, Operator
 from app.schemas.configuration import CategoryCreate
 from app.services.configuration_service import ConfigurationService
+from app.services.ghl_auth_service import _unique_slug
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("TEST_DATABASE_URL"),
@@ -76,6 +77,17 @@ def test_operator_catalog_includes_category_slug(db) -> None:
     result = public_catalog(op.slug, db)
     assert len(result.calendars) == 1
     assert result.calendars[0].category_slug == "kayak-rentals"
+
+
+def test_operator_booking_slugs_are_unique_across_subaccounts(db) -> None:
+    first = _operator(db)
+    first.slug = "punta-gorda-adventures"
+    db.flush()
+
+    second_slug = _unique_slug(db, "Punta Gorda Adventures")
+
+    assert second_slug != first.slug
+    assert second_slug.startswith("punta-gorda-adventures-")
 
 
 def test_category_page_lists_active_public_calendars(db) -> None:

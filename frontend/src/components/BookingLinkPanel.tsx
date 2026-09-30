@@ -23,11 +23,26 @@ export function BookingLinkPanel({ entityType, operatorSlug, entitySlug, height 
   const embedUrl = `${publicUrl}?embed=1`;
   const embedCode = `<iframe\n  src="${embedUrl}"\n  width="100%"\n  height="${height}"\n  style="border:0;"\n  loading="lazy"\n></iframe>`;
 
-  const copy = (text: string, key: "link" | "embed") => {
-    void navigator.clipboard?.writeText(text).then(
-      () => { setCopied(key); window.setTimeout(() => setCopied(null), 1500); },
-      () => setCopied(null),
-    );
+  const copy = async (text: string, key: "link" | "embed") => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+    } catch {
+      const field = document.createElement("textarea");
+      field.value = text;
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.appendChild(field);
+      field.select();
+      const copied = document.execCommand("copy");
+      field.remove();
+      if (!copied) return;
+    }
+    setCopied(key);
+    window.setTimeout(() => setCopied(null), 1500);
   };
 
   return <div className="booking-link-panel" style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid #e6e9e8" }}>

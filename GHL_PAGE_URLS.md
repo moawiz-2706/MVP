@@ -41,6 +41,8 @@ These routes are separate from the authenticated HighLevel app navigation:
 | Booking confirmation | `https://YOUR-PASSPORT-FRONTEND-DOMAIN/booking/{publicReference}/confirmation` |
 | Waiver signing | `https://YOUR-PASSPORT-FRONTEND-DOMAIN/waiver/{token}` |
 
+On the authenticated **Bookings** page, select **Booking link** to open the public operator booking URL, copy it, open it, or copy its embed code. The URL uses the current HighLevel subaccount's operator slug. Operator slugs are generated uniquely and protected by a database-wide unique constraint, so two subaccounts cannot receive the same operator booking path.
+
 ## HighLevel setup notes
 
 - Add the authenticated `/app/...` links as menu items in the HighLevel app/navigation configuration.
