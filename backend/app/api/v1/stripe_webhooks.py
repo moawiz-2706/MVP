@@ -31,7 +31,7 @@ async def stripe_webhook(
         )
     except (ValueError, stripe.SignatureVerificationError) as exc:
         raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature") from exc
-    StripeWebhookService(db).process(event.to_dict_recursive())
+    StripeWebhookService(db, settings).process(event.to_dict_recursive())
     # Best effort: run the jobs this event just enqueued (operator transfer, GHL
     # contact sync, confirmation email) so they land in seconds instead of waiting
     # for the periodic sweep. This must never fail the webhook — the payment and

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.models.entities import (
     Booking,
     BookingOrder,
@@ -22,11 +22,13 @@ from app.models.entities import (
 )
 from app.services.availability_service import AvailabilityService
 from app.services.capacity import CapacityInterval, batch_fits
+from app.services.stripe_payment_service import StripePaymentService
 
 
 class StripeWebhookService:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, settings: Settings | None = None) -> None:
         self.db = db
+        self.settings = settings or get_settings()
 
     def process(self, event: dict[str, Any]) -> bool:
         event_id, event_type = str(event["id"]), str(event["type"])
@@ -58,6 +60,12 @@ class StripeWebhookService:
                 self._payment_succeeded(data, event)
             elif event_type == "payment_intent.payment_failed":
                 self._payment_failed(data)
+            elif event_type == "invoice.paid":
+                self._invoice_paid(data, event)
+            elif event_type == "invoice.payment_failed":
+                self._invoice_payment_failed(data)
+            elif event_type in {"invoice.voided", "invoice.marked_uncollectible"}:
+                self._invoice_terminated(data)
             elif event_type == "account.updated":
                 self._account_updated(data)
             elif event_type == "charge.refunded":
@@ -82,6 +90,82 @@ class StripeWebhookService:
             failed.error_message = str(exc)[:2000]
             self.db.commit()
             raise
+
+    def _invoice_paid(self, invoice: dict[str, Any], event: dict[str, Any]) -> None:
+        invoice_id = str(invoice.get("id") or "")
+        payment = self.db.scalar(
+            select(Payment).where(Payment.stripe_invoice_id == invoice_id).with_for_update()
+        )
+        if payment is None:
+            raise RuntimeError("Paid invoice does not map to a local payment")
+        if payment.payment_method != "invoice":
+            raise RuntimeError("Invoice event mapped to a non-invoice payment")
+        order = self.db.get(BookingOrder, payment.booking_order_id)
+        if order is None:
+            raise RuntimeError("Invoice booking order not found")
+        metadata = invoice.get("metadata") or {}
+        if metadata.get("booking_order_id") and metadata["booking_order_id"] != str(order.id):
+            raise RuntimeError("Invoice booking metadata does not match local order")
+        customer = invoice.get("customer")
+        if customer and str(customer) != str(payment.stripe_customer_id):
+            raise RuntimeError("Invoice customer does not match local customer")
+        amount_paid = self._int_or_none(invoice.get("amount_paid"))
+        if amount_paid is not None and amount_paid != payment.customer_total_minor:
+            raise RuntimeError("Invoice amount does not match local booking total")
+        currency = str(invoice.get("currency") or "").lower()
+        if currency and currency != payment.currency.lower():
+            raise RuntimeError("Invoice currency does not match local booking currency")
+        payment_intent = invoice.get("payment_intent")
+        payment_intent_id = (
+            payment_intent.get("id") if isinstance(payment_intent, dict) else payment_intent
+        )
+        if not payment_intent_id:
+            raise RuntimeError("Paid invoice is missing its PaymentIntent")
+        payment.stripe_payment_intent_id = str(payment_intent_id)
+        self.db.flush()
+        intent = StripePaymentService(get_settings()).retrieve_payment_intent(str(payment_intent_id))
+        intent_data = (
+            intent.to_dict_recursive() if hasattr(intent, "to_dict_recursive") else dict(intent)
+        )
+        self._payment_succeeded(intent_data, event)
+
+    def _invoice_payment_failed(self, invoice: dict[str, Any]) -> None:
+        payment = self.db.scalar(
+            select(Payment).where(Payment.stripe_invoice_id == str(invoice.get("id"))).with_for_update()
+        )
+        if payment is not None and payment.status != "succeeded":
+            payment.invoice_status = str(invoice.get("status") or "payment_failed")
+
+    def _invoice_terminated(self, invoice: dict[str, Any]) -> None:
+        payment = self.db.scalar(
+            select(Payment).where(Payment.stripe_invoice_id == str(invoice.get("id"))).with_for_update()
+        )
+        if payment is None or payment.status == "succeeded":
+            return
+        payment.invoice_status = str(invoice.get("status") or "terminated")
+        payment.status = "failed"
+        order = self.db.get(BookingOrder, payment.booking_order_id)
+        if order is None:
+            return
+        order.status = "expired"
+        for booking in self.db.scalars(
+            select(Booking).where(Booking.booking_order_id == order.id)
+        ):
+            if booking.status == "pending_payment":
+                booking.status = "failed"
+                booking.hold_expires_at = None
+                self.db.execute(
+                    insert(OutboxJob)
+                    .values(
+                        operator_id=booking.operator_id,
+                        booking_order_id=booking.booking_order_id,
+                        job_type="ghl_sync_appointment",
+                        idempotency_key=f"booking:{booking.id}:ghl_appointment:invoice-terminated",
+                        payload={"booking_id": str(booking.id)},
+                        status="pending",
+                    )
+                    .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
+                )
 
     def _payment_succeeded(self, intent: dict[str, Any], event: dict[str, Any]) -> None:
         intent_id = str(intent["id"])

@@ -119,7 +119,7 @@ def create_booking(
 ):
     require_permission(principal, Permission.OPERATE_BOOKINGS)
     operator_slug = db.scalar(select(Operator.slug).where(Operator.id == principal.operator_id))
-    return OrderService(db, settings).create(operator_slug, data)
+    return OrderService(db, settings).create(operator_slug, data, allow_payment_override=True)
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingDetail)

@@ -17,7 +17,7 @@ REQUIRED_PRODUCTION_TABLES = (
     "calendar_booking_policies",
     "message_templates",
 )
-REQUIRED_SCHEMA_VERSION = "030_message_templates"
+REQUIRED_SCHEMA_VERSION = "031_team_invoice_bookings"
 
 
 @lru_cache

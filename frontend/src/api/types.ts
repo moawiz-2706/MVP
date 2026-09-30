@@ -92,6 +92,9 @@ export interface BookingDetail extends Booking {
   location_name: string | null;
   location_address: string | null;
   payment_status: string;
+  payment_method: string;
+  invoice_status: string | null;
+  invoice_url: string | null;
   subtotal_minor: number;
   platform_fee_and_taxes_minor: number;
   customer_total_minor: number;

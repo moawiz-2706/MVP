@@ -13,6 +13,7 @@ from app.services.ghl_contact_service import GHLContactService
 from app.services.ghl_email_service import GHLEmailService
 from app.services.ghl_staff_user_service import GHLStaffUserService
 from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
+from app.services.stripe_invoice_service import StripeInvoiceService
 from app.services.stripe_refund_service import StripeRefundService
 from app.services.stripe_transfer_reversal_service import StripeTransferReversalService
 from app.services.stripe_transfer_service import StripeTransferService
@@ -196,6 +197,11 @@ class OutboxService:
             return
         if job.booking_order_id is None:
             raise RuntimeError("Outbox job has no booking order")
+        if job.job_type == "stripe_create_invoice":
+            StripeInvoiceService(self.db, self.settings).create_for_payment(
+                uuid.UUID(payload["payment_id"])
+            )
+            return
         if job.job_type == "stripe_create_transfer":
             StripeTransferService(self.db, self.settings).create_for_order(job.booking_order_id)
         elif job.job_type == "stripe_create_refund":

@@ -110,6 +110,9 @@ class BookingDetail(BookingListItem):
     location_name: str | None
     location_address: str | None
     payment_status: str
+    payment_method: str
+    invoice_status: str | None
+    invoice_url: str | None
     subtotal_minor: int
     platform_fee_and_taxes_minor: int
     customer_total_minor: int

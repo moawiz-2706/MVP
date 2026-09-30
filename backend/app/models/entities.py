@@ -713,6 +713,7 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "'partially_refunded','refunded')",
             name="status_valid",
         ),
+        CheckConstraint("payment_method IN ('card','invoice','none')", name="payment_method_valid"),
         CheckConstraint("refunded_minor >= 0", name="refunded_nonnegative"),
     )
 
@@ -723,6 +724,11 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("booking_orders.id"), nullable=False, unique=True
     )
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    stripe_customer_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    stripe_invoice_item_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    stripe_invoice_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    stripe_invoice_url: Mapped[str | None] = mapped_column(Text)
+    invoice_status: Mapped[str | None] = mapped_column(String(30))
     stripe_charge_id: Mapped[str | None] = mapped_column(Text, unique=True)
     stripe_balance_transaction_id: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
@@ -731,6 +737,7 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     customer_total_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     operator_transfer_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     platform_gross_retained_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(20), nullable=False, default="card")
     stripe_fee_minor: Mapped[int | None] = mapped_column(BigInteger)
     platform_net_minor: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -1003,7 +1010,7 @@ class OutboxJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "'ghl_staff_assigned_email','ghl_staff_reminder','ghl_staff_unassigned_email',"
             "'ghl_booking_cancellation_email','ghl_booking_weather_email','ghl_booking_reschedule_email',"
             "'ghl_sync_staff_user',"
-            "'stripe_create_refund','stripe_create_transfer_reversal','stripe_reconcile_payment_intent',"
+            "'stripe_create_invoice','stripe_create_refund','stripe_create_transfer_reversal','stripe_reconcile_payment_intent',"
             "'ghl_sync_calendar','ghl_delete_calendar','ghl_sync_appointment','ghl_cancel_appointment')",
             name="job_type_valid",
         ),

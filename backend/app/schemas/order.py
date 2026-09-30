@@ -42,6 +42,9 @@ class OrderQuoteRequest(BaseModel):
 class OrderCreateRequest(OrderQuoteRequest):
     customer: OrderCustomer
     custom_fields: dict[str, object] = Field(default_factory=dict)
+    # Only the authenticated team-booking endpoint consumes this override. Public
+    # checkout omits it and keeps its existing price-driven behavior.
+    payment_required: bool | None = None
 
 
 class QuotedItem(BaseModel):
@@ -79,6 +82,9 @@ class OrderCreateResponse(BaseModel):
     public_reference: str
     status: str
     client_secret: str | None
+    invoice_url: str | None = None
+    invoice_status: str | None = None
+    payment_method: str = "card"
     access_token: str | None = None
     hold_expires_at: datetime | None
     quote: OrderQuoteResponse

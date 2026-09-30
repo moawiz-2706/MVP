@@ -63,6 +63,8 @@ def create_order(
     request: Request,
     checkout_key: Annotated[str | None, Header(alias="X-Checkout-Key")] = None,
 ):
+    if data.payment_required is not None:
+        raise ConflictError("Payment choice is available only to authenticated team bookings")
     enforce_public_rate_limit(request, db, settings, scope=f"checkout:{operator_slug}")
     result = OrderService(db, settings).create(operator_slug, data, checkout_key=checkout_key)
     return result

@@ -118,6 +118,28 @@ class OrderService:
             raise NotFoundError("Booking page not found")
         return operator
 
+    @staticmethod
+    def payment_mode(
+        total_minor: int,
+        requested_payment: bool | None,
+        *,
+        allow_override: bool,
+    ) -> tuple[bool, bool, bool, str]:
+        """Return (requires_payment, invoice_mode, card_mode, method).
+
+        The public checkout cannot opt out of payment: its optional field is
+        deliberately ignored unless the authenticated team endpoint enables
+        the override.
+        """
+        override = requested_payment if allow_override else None
+        requires_payment = (
+            bool(override) if override is not None else total_minor > 0
+        ) and total_minor > 0
+        invoice_mode = requires_payment and override is True
+        card_mode = requires_payment and not invoice_mode
+        method = "invoice" if invoice_mode else "card" if card_mode else "none"
+        return requires_payment, invoice_mode, card_mode, method
+
     def _prepare(self, operator: Operator, items: Iterable) -> list[PreparedItem]:
         prepared: list[PreparedItem] = []
         availability = AvailabilityService(self.db)
@@ -367,6 +389,9 @@ class OrderService:
             public_reference=order.public_reference,
             status=order.status,
             client_secret=client_secret,
+            invoice_url=payment.stripe_invoice_url,
+            invoice_status=payment.invoice_status,
+            payment_method=payment.payment_method,
             access_token=token,
             hold_expires_at=next(
                 (booking.hold_expires_at for booking in self.db.scalars(
@@ -383,6 +408,7 @@ class OrderService:
         request: OrderCreateRequest,
         *,
         checkout_key: str | None = None,
+        allow_payment_override: bool = False,
     ) -> OrderCreateResponse:
         operator = self._operator(operator_slug)
         checkout_key = checkout_key or f"legacy:{uuid.uuid4()}"
@@ -408,8 +434,12 @@ class OrderService:
         # these resource rows until this transaction completes.
         prepared = self._prepare(operator, request.items)
         quote, money = self._quote(prepared)
-        paid = money.customer_total_minor > 0
-        if paid:
+        paid, invoice_mode, card_mode, payment_method = self.payment_mode(
+            money.customer_total_minor,
+            request.payment_required,
+            allow_override=allow_payment_override,
+        )
+        if card_mode or invoice_mode:
             connection = self.db.scalar(
                 select(StripeConnection).where(
                     StripeConnection.operator_id == operator.id,
@@ -567,12 +597,13 @@ class OrderService:
             operator_transfer_minor=money.operator_transfer_minor,
             platform_gross_retained_minor=money.platform_gross_retained_minor,
             status="requires_payment" if paid else "succeeded",
+            payment_method=payment_method,
             paid_at=None if paid else now,
         )
         self.db.add(payment)
         self.db.flush()
         payment_request = None
-        if paid:
+        if card_mode:
             payment_request = PaymentIntentRequest(
                 operator_id=operator.id,
                 payment_id=payment.id,
@@ -599,6 +630,17 @@ class OrderService:
         self._enqueue_appointment_jobs(operator.id, order.id)
         if not paid:
             self._enqueue_confirmation_jobs(operator.id, order.id)
+        elif invoice_mode:
+            self.db.add(
+                OutboxJob(
+                    operator_id=operator.id,
+                    booking_order_id=order.id,
+                    job_type="stripe_create_invoice",
+                    idempotency_key=f"payment:{payment.id}:stripe_invoice",
+                    payload={"payment_id": str(payment.id)},
+                    status="pending",
+                )
+            )
         access_token = PublicAccessService(self.db).issue(
             operator_id=operator.id,
             order_id=order.id,
@@ -616,7 +658,7 @@ class OrderService:
             logger.exception("Inline outbox processing failed after booking creation")
 
         client_secret = None
-        if paid:
+        if card_mode:
             try:
                 intent_id, client_secret = StripePaymentService(self.settings).create_payment_intent(
                     order_id=str(order.id),
@@ -659,6 +701,9 @@ class OrderService:
             public_reference=reference,
             status=order.status,
             client_secret=client_secret,
+            invoice_url=payment.stripe_invoice_url,
+            invoice_status=payment.invoice_status,
+            payment_method=payment_method,
             access_token=access_token,
             hold_expires_at=hold_expires,
             quote=quote,
