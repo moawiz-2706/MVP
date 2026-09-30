@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Annotated
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/api/v1"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/postgres"
+    api_url: str = ""
     # Session-pooler engine tuning: exactly one database connection per process.
     # GHL token refreshes reuse the caller's existing database session.
     db_pool_timeout_seconds: int = Field(default=10, ge=1, le=60)
@@ -85,6 +87,9 @@ class Settings(BaseSettings):
         if self.environment.lower() != "production":
             return
         required = {
+            "DATABASE_URL": self.database_url,
+            "API_URL": self.api_url,
+            "FRONTEND_URL": self.frontend_url,
             "GHL_CLIENT_ID": self.ghl_client_id,
             "GHL_CLIENT_SECRET": self.ghl_client_secret,
             "GHL_APP_ID": self.ghl_app_id,
@@ -96,13 +101,26 @@ class Settings(BaseSettings):
             "APP_SESSION_SECRET": self.app_session_secret,
             "STRIPE_SECRET_KEY": self.stripe_secret_key,
             "STRIPE_WEBHOOK_SECRET": self.stripe_webhook_secret,
+            "STRIPE_PUBLISHABLE_KEY": self.stripe_publishable_key,
             "CRON_SECRET": self.cron_secret,
         }
         missing = [name for name, value in required.items() if not value]
         if self.app_session_secret == "development-only-change-me":
             missing.append("APP_SESSION_SECRET(non-default)")
+        invalid = []
+        database_host = urlparse(self.database_url).hostname
+        if database_host in {None, "localhost", "127.0.0.1", "::1"}:
+            invalid.append("DATABASE_URL(non-localhost)")
+        for name, value in (("API_URL", self.api_url), ("FRONTEND_URL", self.frontend_url)):
+            parsed = urlparse(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                invalid.append(f"{name}(absolute-url)")
+            elif parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
+                invalid.append(f"{name}(non-localhost)")
+        if invalid:
+            missing.extend(invalid)
         if missing:
-            raise RuntimeError("Missing required production settings: " + ", ".join(missing))
+            raise RuntimeError("Missing required production settings or invalid values: " + ", ".join(missing))
 
 
 @lru_cache

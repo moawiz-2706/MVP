@@ -12,7 +12,6 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
     BookingOrder,
-    CalendarBookingPolicy,
     Calendar,
     Operator,
     Payment,
@@ -29,7 +28,8 @@ from app.schemas.order import (
 )
 from app.schemas.booking import BookingUpdate
 from app.services.order_service import OrderService
-from app.services.booking_admin_service import BookingAdminService
+from app.services.booking_lifecycle_service import BookingLifecycleService
+from app.services.policy_service import PolicyService
 from app.services.public_rate_limit_service import enforce_public_rate_limit
 from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.services.waiver_service import SIGNABLE_STATUSES, WaiverService, waiver_url
@@ -72,14 +72,16 @@ def create_order(
 def order_status(
     public_reference: str,
     db: DB,
-    response: Response,
-    request: Request,
+    response: Response = None,
+    request: Request = None,
     access_token: Annotated[str | None, Query(min_length=20, max_length=512)] = None,
     reconcile: Annotated[bool, Query()] = False,
 ):
-    enforce_public_rate_limit(request, db, get_settings(), scope=f"status:{public_reference}")
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    if request is not None:
+        enforce_public_rate_limit(request, db, get_settings(), scope=f"status:{public_reference}")
+    if response is not None:
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
     row = db.execute(
         select(BookingOrder, Payment, Operator)
         .join(Payment, Payment.booking_order_id == BookingOrder.id)
@@ -209,21 +211,18 @@ def cancel_public_order(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     now = datetime.now(UTC)
     for booking in bookings:
-        policy = db.scalar(
-            select(CalendarBookingPolicy)
-            .where(
-                CalendarBookingPolicy.calendar_id == booking.calendar_id,
-                CalendarBookingPolicy.operator_id == operator.id,
-                CalendarBookingPolicy.active.is_(True),
-            )
-            .order_by(CalendarBookingPolicy.version.desc())
-        )
-        cutoff = policy.cancellation_cutoff_minutes if policy else 0
+        policy = PolicyService(db).resolve_for_booking(booking)
+        cutoff = policy.cancellation_cutoff_minutes
         if now > booking.start_at - timedelta(minutes=cutoff):
             raise ConflictError("This booking is inside the cancellation window and cannot be cancelled online")
-    service = BookingAdminService(db, operator.id)
+    service = BookingLifecycleService(db, operator.id)
     for booking in bookings:
-        service.cancel(booking.id)
+        service.cancel(
+            booking.id,
+            reason="Customer self-service cancellation",
+            actor_type="customer",
+            force=True,
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -259,29 +258,23 @@ def reschedule_public_booking(
         raise ConflictError("Only active bookings can be rescheduled")
     if data.start_at <= datetime.now(UTC):
         raise ConflictError("The new booking time must be in the future")
-    policy = db.scalar(
-        select(CalendarBookingPolicy)
-        .where(
-            CalendarBookingPolicy.calendar_id == booking.calendar_id,
-            CalendarBookingPolicy.operator_id == operator.id,
-            CalendarBookingPolicy.active.is_(True),
-        )
-        .order_by(CalendarBookingPolicy.version.desc())
-    )
-    cutoff = policy.reschedule_cutoff_minutes if policy else 0
+    policy = PolicyService(db).resolve_for_booking(booking)
+    cutoff = policy.reschedule_cutoff_minutes
     if datetime.now(UTC) >= booking.start_at.astimezone(UTC) - timedelta(minutes=cutoff):
         raise ConflictError("This booking is inside the rescheduling window")
-    if policy and policy.reschedule_fee_minor > 0:
+    if policy.reschedule_fee_minor > 0:
         raise ConflictError("This booking requires an operator-assisted reschedule because a fee applies")
-    result = BookingAdminService(db, operator.id).reschedule(
+    result = BookingLifecycleService(db, operator.id).reschedule(
         booking.id,
         BookingUpdate(start_at=data.start_at, units=data.units),
-        "Customer self-service reschedule",
+        reason="Customer self-service reschedule",
+        actor_type="customer",
+        force=True,
     )
     return PublicRescheduleResponse(
         booking_id=booking.id,
         start_at=result["start_at"],
         end_at=result["end_at"],
         status="rescheduled",
-        payment_outcome="unchanged",
+        payment_outcome=result.get("payment_outcome", "unchanged"),
     )

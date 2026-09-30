@@ -342,15 +342,15 @@ class FareHarborReplicaService:
         return data.values
 
     def status(self, booking_id: uuid.UUID, data: BookingStatusRequest) -> dict[str, Any]:
-        booking = self.db.scalar(select(Booking).where(Booking.id == booking_id, Booking.operator_id == self.operator_id).with_for_update())
-        if booking is None:
-            raise NotFoundError("Booking not found")
-        booking.status = data.status
-        if data.status == "cancelled":
-            booking.hold_expires_at = None
-        self.db.add(BookingAdjustment(operator_id=self.operator_id, booking_id=booking.id, action="none", amount_minor=0, currency="usd", reason=data.reason, idempotency_key=data.idempotency_key or f"status:{booking.id}:{data.status}:{uuid.uuid4()}", status="completed"))
-        self.db.commit()
-        return BookingAdminService(self.db, self.operator_id).detail(booking.id)
+        from app.services.booking_lifecycle_service import BookingLifecycleService
+
+        BookingLifecycleService(self.db, self.operator_id).set_status(
+            booking_id,
+            data.status,
+            reason=data.reason,
+            idempotency_key=data.idempotency_key,
+        )
+        return BookingAdminService(self.db, self.operator_id).detail(booking_id)
 
     def weather_closure(self, data: WeatherClosureRequest, user_id: uuid.UUID) -> dict[str, Any]:
         self._calendar(data.calendar_id)
@@ -384,50 +384,18 @@ class FareHarborReplicaService:
                 .with_for_update()
             )
         )
+        from app.services.booking_lifecycle_service import BookingLifecycleService
+
+        lifecycle = BookingLifecycleService(self.db, self.operator_id)
         cancelled = 0
         for booking in bookings:
-            if data.refund_mode == "full_refund":
-                BookingAdminService(self.db, self.operator_id).cancel(booking.id)
-            else:
-                previous = booking.status
-                booking.status = "cancelled"
-                booking.hold_expires_at = None
-                self.db.add(
-                    BookingAdjustment(
-                        operator_id=self.operator_id,
-                        booking_id=booking.id,
-                        action="credit" if data.refund_mode == "credit" else "manual_review",
-                        amount_minor=0,
-                        currency="usd",
-                        reason=data.reason,
-                        idempotency_key=f"weather:{closure.id}:{booking.id}",
-                        status="pending",
-                    )
-                )
-                self.db.add(
-                    BookingEvent(
-                        operator_id=self.operator_id,
-                        booking_id=booking.id,
-                        order_id=booking.booking_order_id,
-                        event_type="weather_cancelled",
-                        from_status=previous,
-                        to_status="cancelled",
-                        actor_type="operator",
-                        actor_id=user_id,
-                        reason=data.reason,
-                        payload={"refund_mode": data.refund_mode, "closure_id": str(closure.id)},
-                    )
-                )
-                self.db.add(
-                    OutboxJob(
-                        operator_id=self.operator_id,
-                        booking_order_id=booking.booking_order_id,
-                        job_type="ghl_cancel_appointment",
-                        idempotency_key=f"booking:{booking.id}:weather:{closure.id}:ghl_cancel",
-                        payload={"booking_id": str(booking.id), "booking_order_id": str(booking.booking_order_id)},
-                        status="pending",
-                    )
-                )
+            lifecycle.weather_cancel(
+                booking.id,
+                closure_id=closure.id,
+                mode=data.refund_mode,
+                reason=data.reason,
+                actor_id=user_id,
+            )
             cancelled += 1
         self.db.commit()
         return {"closure_id": closure.id, "affected_bookings": cancelled, "refund_mode": data.refund_mode, "idempotent": False}

@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
@@ -58,9 +58,13 @@ class StaffService:
     the second one sees the first.
     """
 
-    def __init__(self, db: Session, operator_id: uuid.UUID) -> None:
+    def __init__(self, db: Session, operator_id: uuid.UUID, settings: Settings | None = None) -> None:
         self.db = db
         self.operator_id = operator_id
+        self.settings = settings
+
+    def _settings(self) -> Settings:
+        return self.settings or get_settings()
 
     def _zone(self):
         return require_timezone(
@@ -155,12 +159,6 @@ class StaffService:
 
     def _queue_job(self, job_type: str, key: str, payload: dict[str, Any]) -> None:
         """Queue a HighLevel side effect in the same transaction as the change."""
-        if job_type in {
-            "ghl_staff_assigned_email",
-            "ghl_staff_unassigned_email",
-            "ghl_staff_reminder",
-        } and not get_settings().ghl_notifications_enabled:
-            return
         self.db.add(
             OutboxJob(
                 operator_id=self.operator_id,
@@ -172,7 +170,7 @@ class StaffService:
         )
 
     def _queue_calendar_sync(self, calendar_id: uuid.UUID) -> None:
-        if not get_settings().ghl_calendar_sync_enabled:
+        if not self._settings().ghl_calendar_sync_enabled:
             return
         mapping = self.db.scalar(
             select(GHLCalendarMapping).where(
@@ -198,13 +196,13 @@ class StaffService:
         )
         self.db.commit()
         try:
-            OutboxService(self.db, get_settings()).process(limit=5)
+            OutboxService(self.db, self._settings()).process(limit=5)
         except Exception:
             # The change is committed; the scheduled worker can retry the job.
             pass
 
     def _queue_appointment_sync_for_calendars(self, calendar_ids: set[uuid.UUID]) -> None:
-        if not get_settings().ghl_calendar_sync_enabled or not calendar_ids:
+        if not self._settings().ghl_calendar_sync_enabled or not calendar_ids:
             return
         bookings = self.db.scalars(
             select(Booking).where(
@@ -225,7 +223,7 @@ class StaffService:
             )
         self.db.commit()
         try:
-            OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)
+            OutboxService(self.db, self._settings()).process(limit=100, prefer_newest=True)
         except Exception:
             # The local staff change is committed; appointment jobs retry through
             # the durable outbox if HighLevel is unavailable.
@@ -491,9 +489,7 @@ class StaffService:
         calendar = lock_calendar(self.db, self.operator_id, data.calendar_id)
         end_at = data.start_at + timedelta(minutes=calendar.duration_minutes)
         staff = self._staff(data.staff_id, lock=True)
-        if not staff.custom_role:
-            raise ConflictError(f"{staff.name} must be assigned a custom role on the Staff page first")
-        if data.role and staff.custom_role.casefold() != data.role.strip().casefold():
+        if data.role and staff.custom_role and staff.custom_role.casefold() != data.role.strip().casefold():
             raise ConflictError(f"{staff.name} is assigned the {staff.custom_role} role, not {data.role}")
         assignment_role = data.role or staff.custom_role
         if is_captain(assignment_role):

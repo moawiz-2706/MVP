@@ -354,123 +354,14 @@ class BookingAdminService:
         self.db.commit()
 
     def cancel(self, booking_id: uuid.UUID) -> None:
-        booking = self.db.scalar(
-            select(Booking)
-            .where(Booking.id == booking_id, Booking.operator_id == self.operator_id)
-            .with_for_update()
+        from app.services.booking_lifecycle_service import BookingLifecycleService
+
+        BookingLifecycleService(self.db, self.operator_id).cancel(
+            booking_id,
+            reason="operator_cancellation",
+            actor_type="operator",
+            force=True,
         )
-        if booking is None:
-            raise NotFoundError("Booking not found")
-        if booking.status in {"cancelled", "failed"}:
-            return
-        order = self.db.scalar(
-            select(BookingOrder).where(BookingOrder.id == booking.booking_order_id).with_for_update()
-        )
-        payment = self.db.scalar(
-            select(Payment).where(Payment.booking_order_id == booking.booking_order_id).with_for_update()
-        )
-        if order is None or payment is None:
-            raise NotFoundError("Booking payment not found")
-        bookings = list(
-            self.db.scalars(
-                select(Booking)
-                .where(Booking.booking_order_id == order.id)
-                .order_by(Booking.id)
-                .with_for_update()
-            )
-        )
-        self._ensure_financial_allocations(order, payment, bookings)
-        self.db.flush()
-        booking.status = "cancelled"
-        booking.hold_expires_at = None
-        remaining = self.db.scalar(
-            select(func.count(Booking.id)).where(
-                Booking.booking_order_id == booking.booking_order_id,
-                Booking.id != booking.id,
-                Booking.status.not_in(["cancelled", "failed"]),
-            )
-        )
-        if not remaining:
-            order.status = "cancelled"
-        allocation = self.db.scalar(
-            select(BookingFinancialAllocation).where(
-                BookingFinancialAllocation.booking_id == booking.id
-            )
-        )
-        if payment.status == "succeeded" and allocation and allocation.customer_refund_minor > 0:
-            attempt_id = self.db.scalar(
-                insert(PaymentRefundAttempt)
-                .values(
-                    operator_id=self.operator_id,
-                    payment_id=payment.id,
-                    scope_key=f"booking:{booking.id}",
-                    amount_minor=allocation.customer_refund_minor,
-                    currency=payment.currency,
-                    idempotency_key=f"payment:{payment.id}:refund:booking:{booking.id}",
-                    status="requested",
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[PaymentRefundAttempt.payment_id, PaymentRefundAttempt.scope_key]
-                )
-                .returning(PaymentRefundAttempt.id)
-            )
-            if attempt_id is not None:
-                self.db.add(
-                    OutboxJob(
-                        operator_id=self.operator_id,
-                        booking_order_id=order.id,
-                        job_type="stripe_create_refund",
-                        idempotency_key=f"payment:{payment.id}:refund-job:booking:{booking.id}",
-                        payload={"refund_attempt_id": str(attempt_id)},
-                        status="pending",
-                    )
-                )
-        transfer = self.db.scalar(select(StripeTransfer).where(StripeTransfer.payment_id == payment.id))
-        if transfer and allocation and allocation.operator_recovery_minor > 0 and transfer.stripe_transfer_id:
-            reversal_id = self.db.scalar(
-                insert(TransferReversalAttempt)
-                .values(
-                    operator_id=self.operator_id,
-                    transfer_id=transfer.id,
-                    scope_key=f"booking:{booking.id}",
-                    amount_minor=allocation.operator_recovery_minor,
-                    idempotency_key=f"transfer:{transfer.id}:reversal:booking:{booking.id}",
-                    status="requested",
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[TransferReversalAttempt.transfer_id, TransferReversalAttempt.scope_key]
-                )
-                .returning(TransferReversalAttempt.id)
-            )
-            if reversal_id is not None:
-                self.db.add(
-                    OutboxJob(
-                        operator_id=self.operator_id,
-                        booking_order_id=order.id,
-                        job_type="stripe_create_transfer_reversal",
-                        idempotency_key=f"transfer:{transfer.id}:reversal-job:booking:{booking.id}",
-                        payload={"reversal_attempt_id": str(reversal_id)},
-                        status="pending",
-                    )
-                )
-        self.db.add(
-            OutboxJob(
-                operator_id=self.operator_id,
-                booking_order_id=order.id,
-                job_type="ghl_cancel_appointment",
-                idempotency_key=f"booking:{booking.id}:ghl_cancel",
-                payload={
-                    "booking_id": str(booking.id),
-                    "booking_order_id": str(booking.booking_order_id),
-                },
-                status="pending",
-            )
-        )
-        self.db.commit()
-        try:
-            OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)
-        except Exception:
-            logger.exception("Inline outbox processing failed after booking cancellation")
 
     def _ensure_financial_allocations(
         self, order: BookingOrder, payment: Payment, bookings: list[Booking]
@@ -624,23 +515,15 @@ class BookingAdminService:
         return self.detail(booking.id)
 
     def reschedule(self, booking_id: uuid.UUID, data: BookingUpdate, reason: str) -> dict:
-        result = self.update(booking_id, data, allow_paid_reschedule=True)
-        booking = self._booking(booking_id)
-        self.db.add(
-            BookingEvent(
-                operator_id=self.operator_id,
-                booking_id=booking.id,
-                order_id=booking.booking_order_id,
-                event_type="rescheduled",
-                from_status=booking.status,
-                to_status=booking.status,
-                actor_type="customer_or_operator",
-                reason=reason,
-                payload={"start_at": booking.start_at.isoformat(), "units": booking.units},
-            )
+        from app.services.booking_lifecycle_service import BookingLifecycleService
+
+        return BookingLifecycleService(self.db, self.operator_id).reschedule(
+            booking_id,
+            data,
+            reason=reason,
+            actor_type="customer_or_operator",
+            force=True,
         )
-        self.db.commit()
-        return result
 
     def _booking(self, booking_id: uuid.UUID) -> Booking:
         booking = self.db.scalar(

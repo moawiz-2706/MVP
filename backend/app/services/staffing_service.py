@@ -16,6 +16,7 @@ from app.models.entities import (
     StaffAssignment,
     StaffAvailabilityWindow,
     StaffHour,
+    Operator,
 )
 from app.utils.timezone import require_timezone
 
@@ -121,7 +122,8 @@ def _staff_covers_interval(
         return any(window_start <= start_at and window_end >= end_at for window_start, window_end in windows)
     if staff.availability_sync_status == "synced":
         return False
-    zone = require_timezone(staff.availability_time_zone or "UTC")
+    operator_zone = db.scalar(select(Operator.time_zone).where(Operator.id == staff.operator_id))
+    zone = require_timezone(staff.availability_time_zone or operator_zone or "UTC")
     return _hours_cover_interval(db, staff.id, start_at, end_at, zone)
 
 

@@ -1089,10 +1089,13 @@ class BookingAdjustment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     payment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("payments.id"))
     action: Mapped[str] = mapped_column(String(30), nullable=False)
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    original_amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="usd")
     reason: Mapped[str] = mapped_column(Text, nullable=False)
+    policy_version: Mapped[int | None] = mapped_column(Integer)
     idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    stripe_reference: Mapped[str | None] = mapped_column(Text)
     adjustment_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB)
 
 

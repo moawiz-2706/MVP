@@ -25,6 +25,7 @@ from app.api.v1 import (
 )
 from app.core.config import get_settings
 from app.core.exceptions import DomainError, domain_error_handler
+from app.core.database import check_database_readiness
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="1.0.0")
@@ -33,6 +34,8 @@ app = FastAPI(title=settings.app_name, version="1.0.0")
 @app.on_event("startup")
 async def validate_runtime_settings() -> None:
     settings.validate_runtime()
+    if settings.environment.lower() == "production":
+        check_database_readiness()
 
 
 app.add_middleware(
@@ -80,6 +83,22 @@ async def iframe_security_headers(request: Request, call_next):
 @app.get("/api/health", tags=["health"])
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/readiness", tags=["health"])
+def readiness() -> JSONResponse:
+    try:
+        settings.validate_runtime()
+        if settings.environment.lower() == "production":
+            payload = check_database_readiness()
+        else:
+            payload = {"status": "ready", "schema_version": "development"}
+        return JSONResponse(status_code=200, content=payload)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "detail": str(exc)[:500]},
+        )
 
 
 for router in (

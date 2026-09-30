@@ -93,11 +93,12 @@ def _active_operator(db: Session, operator_slug: str) -> Operator:
 
 @router.get("/{operator_slug}", response_model=PublicOperatorCatalog)
 def public_catalog(
-    operator_slug: str, db: Annotated[Session, Depends(get_db)], response: Response
+    operator_slug: str, db: Annotated[Session, Depends(get_db)], response: Response = None
 ) -> PublicOperatorCatalog:
-    response.headers["Cache-Control"] = (
-        "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
-    )
+    if response is not None:
+        response.headers["Cache-Control"] = (
+            "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
+        )
     operator = _active_operator(db, operator_slug)
     rows = db.execute(
         select(Calendar, CalendarCategory, DepartureLocation)
@@ -134,11 +135,12 @@ def public_category(
     operator_slug: str,
     category_slug: str,
     db: Annotated[Session, Depends(get_db)],
-    response: Response,
+    response: Response = None,
 ) -> PublicCategoryPage:
-    response.headers["Cache-Control"] = (
-        "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
-    )
+    if response is not None:
+        response.headers["Cache-Control"] = (
+            "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
+        )
     operator = _active_operator(db, operator_slug)
     category = db.scalar(
         select(CalendarCategory).where(
@@ -191,9 +193,10 @@ def public_rates(
     operator_slug: str,
     calendar_slug: str,
     db: Annotated[Session, Depends(get_db)],
-    response: Response,
+    response: Response = None,
 ) -> list[PublicRate]:
-    response.headers["Cache-Control"] = "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
+    if response is not None:
+        response.headers["Cache-Control"] = "public, s-maxage=30, max-age=30, stale-while-revalidate=120"
     row = db.execute(
         select(Calendar, Operator)
         .join(Operator, Operator.id == Calendar.operator_id)

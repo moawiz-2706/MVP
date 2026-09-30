@@ -134,6 +134,7 @@ class WaiverService:
                 "activity_name": waiver.activity_name or booking.calendar_name_snapshot,
                 "activity_start_at": waiver.activity_start_at or booking.start_at,
                 "waiver_text": waiver.waiver_text,
+                "details": waiver.details or {},
                 "opt_in_label": None,
                 "signed_at": waiver.signed_at,
             }

@@ -16,23 +16,28 @@ logger = logging.getLogger("passport.ghl_oauth")
 
 router = APIRouter(prefix="/integrations/marketplace", tags=["GHL integration"])
 
+OAUTH_STATE_COOKIE_PATH = "/api/v1/integrations/marketplace"
+
+
+def _integration_redirect(settings: Settings, suffix: str) -> RedirectResponse:
+    response = RedirectResponse(f"{settings.frontend_url.rstrip('/')}{suffix}")
+    response.delete_cookie("ghl_oauth_state", path=OAUTH_STATE_COOKIE_PATH)
+    return response
+
 
 @router.get("/oauth/callback")
 def oauth_callback(
     code: Annotated[str, Query(min_length=8, max_length=4096)],
     db: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
-    state: Annotated[str | None, Query(min_length=20, max_length=512)] = None,
+    state: Annotated[str, Query(min_length=20, max_length=512)],
     ghl_oauth_state: Annotated[str | None, Cookie()] = None,
 ) -> RedirectResponse:
     service = GHLAuthService(db, settings)
     try:
-        if state:
-            if not ghl_oauth_state or not hmac.compare_digest(state, ghl_oauth_state):
-                raise ValueError("OAuth state does not match the installation browser")
-            state_row = service.consume_oauth_state(state)
-        else:
-            state_row = None
+        if not ghl_oauth_state or not hmac.compare_digest(state, ghl_oauth_state):
+            raise ValueError("OAuth state does not match the installation browser")
+        state_row = service.consume_oauth_state(state)
         token_payload = service.exchange_code(code)
         if state_row and state_row.expected_location_id and token_payload.get("locationId") != state_row.expected_location_id:
             raise ValueError("OAuth location does not match the installation request")
@@ -46,8 +51,8 @@ def oauth_callback(
             detail = f"HTTP {exc.response.status_code} from {exc.request.url}: {exc.response.text[:600]}"
         logger.error("GHL installation failed: %s", detail)
         message = quote("HighLevel installation could not be completed")
-        return RedirectResponse(f"{settings.frontend_url.rstrip('/')}/integration-result?error={message}")
-    return RedirectResponse(f"{settings.frontend_url.rstrip('/')}/integration-result?installed=1")
+        return _integration_redirect(settings, f"/integration-result?error={message}")
+    return _integration_redirect(settings, "/integration-result?installed=1")
 
 
 @router.get("/oauth/start")
@@ -72,6 +77,6 @@ def oauth_start(
         httponly=True,
         secure=settings.environment.lower() == "production",
         samesite="lax",
-        path="/api/v1/integrations/marketplace",
+        path=OAUTH_STATE_COOKIE_PATH,
     )
     return response

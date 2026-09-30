@@ -175,7 +175,7 @@ def test_customer_reminder_creates_tagged_contact_and_sends(db, ghl) -> None:
     booking = _booking(db, op, _calendar(db, op), _local(1, 10, base=datetime.now(UTC)))
     db.commit()
     ReminderService(db).enqueue()
-    OutboxService(db, Settings()).process()
+    OutboxService(db, Settings(ghl_notifications_enabled=True)).process()
 
     created = [body for method, path, body in ghl if method == "POST" and path == "/contacts/"]
     assert created and created[0]["email"] == "ada@example.com" and "tags" not in created[0]
@@ -251,7 +251,7 @@ def test_assignment_sends_immediate_email_with_role_and_guests(db, ghl) -> None:
     start = _local(1, 9, base=datetime.now(UTC))
     _booking(db, op, cal, start)  # 2 units booked on that slot
     db.commit()
-    service = StaffService(db, op.id)
+    service = StaffService(db, op.id, Settings(ghl_notifications_enabled=True))
     staff = service.create_staff(
         StaffCreate(
             name="Sam Captain",
@@ -260,7 +260,7 @@ def test_assignment_sends_immediate_email_with_role_and_guests(db, ghl) -> None:
         )
     )
     service.assign(StaffAssignmentCreate(staff_id=staff["id"], calendar_id=cal.id, start_at=start, role="Captain"))
-    OutboxService(db, Settings()).process()
+    OutboxService(db, Settings(ghl_notifications_enabled=True)).process()
     (message,) = _messages(ghl)
     assert message["subject"].startswith("You're scheduled: Sunset Cruise on ")
     assert "as Captain" in message["message"] and "Guests booked so far: 2" in message["message"]

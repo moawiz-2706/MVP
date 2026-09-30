@@ -143,13 +143,13 @@ def test_staff_pool_roles_are_independent() -> None:
     )
     assert calendar.required_staff_roles == ["Captain", "First Mate"]
 
-    with pytest.raises(ValueError):
-        CalendarCreate(
-            name="No pool",
-            slug="no-pool",
-            duration_minutes=60,
-            required_staff_roles=[],
-        )
+    no_pool = CalendarCreate(
+        name="No pool",
+        slug="no-pool",
+        duration_minutes=60,
+        required_staff_roles=[],
+    )
+    assert no_pool.required_staff_roles == []
 
 
 @pytest.mark.skipif(

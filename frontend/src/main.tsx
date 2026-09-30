@@ -32,7 +32,8 @@ function AppErrorBoundary() {
 const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/app" replace /> },
   { path: "/app", element: embedded, errorElement: <AppErrorBoundary />, children: [
-    { index: true, element: <BookingsPage /> },
+    { index: true, element: <Navigate to="bookings" replace /> },
+    { path: "bookings", element: <BookingsPage /> },
     { path: "notifications", element: <NotificationsPage /> },
     { path: "resources", element: <ResourcesPage /> },
     { path: "locations", element: <LocationsPage /> },

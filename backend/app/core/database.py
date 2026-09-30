@@ -1,10 +1,22 @@
 from collections.abc import Generator
 from functools import lru_cache
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
+
+REQUIRED_PRODUCTION_TABLES = (
+    "operators",
+    "calendars",
+    "bookings",
+    "payments",
+    "outbox_jobs",
+    "ghl_oauth_states",
+    "booking_adjustments",
+    "calendar_booking_policies",
+)
+REQUIRED_SCHEMA_VERSION = "029_booking_adjustment_audit_fields"
 
 
 @lru_cache
@@ -43,3 +55,33 @@ def get_session_factory() -> sessionmaker[Session]:
 def get_db() -> Generator[Session, None, None]:
     with get_session_factory()() as session:
         yield session
+
+
+def check_database_readiness() -> dict[str, object]:
+    """Verify connectivity, required tables, and the release marker migration."""
+    with get_session_factory()() as session:
+        session.execute(text("SELECT 1"))
+        rows = session.execute(
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = ANY(:tables)"
+            ),
+            {"tables": list(REQUIRED_PRODUCTION_TABLES)},
+        )
+        present = {row[0] for row in rows}
+        missing = [table for table in REQUIRED_PRODUCTION_TABLES if table not in present]
+        version = session.scalar(
+            text(
+                "SELECT version FROM passport_schema_version "
+                "WHERE version = :version"
+            ),
+            {"version": REQUIRED_SCHEMA_VERSION},
+        )
+        if missing or version is None:
+            parts = []
+            if missing:
+                parts.append("missing tables: " + ", ".join(missing))
+            if version is None:
+                parts.append(f"missing schema marker: {REQUIRED_SCHEMA_VERSION}")
+            raise RuntimeError("Database is not ready: " + "; ".join(parts))
+    return {"status": "ready", "schema_version": REQUIRED_SCHEMA_VERSION}

@@ -32,6 +32,7 @@ from app.schemas.staff import StaffAssignmentCreate, StaffCreate, StaffHourWrite
 from app.schemas.waiver import WaiverSignRequest
 from app.services.booking_admin_service import BookingAdminService
 from app.services.outbox_service import OutboxService
+from app.services.public_access_service import PublicAccessService
 from app.services.reminder_service import ReminderService
 from app.services.staff_service import StaffService
 from app.services.waiver_service import WaiverService
@@ -262,11 +263,18 @@ def test_confirmation_page_lists_waiver_links(db) -> None:
     booking = _booking(db, op, _calendar(db, op), units=1)
     db.commit()
     reference = db.get(BookingOrder, booking.booking_order_id).public_reference
-    item = order_status(reference, db).items[0]
+    token = PublicAccessService(db).issue(
+        operator_id=op.id,
+        purpose="order_status",
+        order_id=booking.booking_order_id,
+        lifetime=timedelta(hours=1),
+    )
+    db.commit()
+    item = order_status(reference, db, access_token=token).items[0]
     assert item.waiver_url and "/waiver/" in item.waiver_url and item.waiver_signed is False
 
     WaiverService(db).sign(item.waiver_url.rsplit("/", 1)[1], _sign_request([]), ip=None, user_agent=None)
-    assert order_status(reference, db).items[0].waiver_signed is True
+    assert order_status(reference, db, access_token=token).items[0].waiver_signed is True
 
 
 def test_reminder_email_carries_waiver_link_until_signed(db, ghl) -> None:
@@ -274,7 +282,7 @@ def test_reminder_email_carries_waiver_link_until_signed(db, ghl) -> None:
     _booking(db, op, _calendar(db, op), units=1, start=_tomorrow(10))
     db.commit()
     ReminderService(db).enqueue()
-    OutboxService(db, Settings()).process()
+    OutboxService(db, Settings(ghl_notifications_enabled=True)).process()
     (message,) = [body for _, path, body in ghl if path == "/conversations/messages"]
     assert "/waiver/" in message["message"] and 'href="' in message["html"]
 
@@ -283,16 +291,16 @@ def test_removing_staff_from_a_slot_emails_them(db, ghl) -> None:
     op = _operator(db)
     cal = _calendar(db, op)
     db.commit()
-    service = StaffService(db, op.id)
+    service = StaffService(db, op.id, Settings(ghl_notifications_enabled=True))
     staff = service.create_staff(StaffCreate(name="Sam Captain", email="sam@example.com", hours=ALL_WEEK))
     assignment = service.assign(
         StaffAssignmentCreate(staff_id=staff["id"], calendar_id=cal.id, start_at=_tomorrow(9), role="Captain")
     )
-    OutboxService(db, Settings()).process()
+    OutboxService(db, Settings(ghl_notifications_enabled=True)).process()
     ghl.clear()
 
     service.unassign(assignment["id"])
-    OutboxService(db, Settings()).process()
+    OutboxService(db, Settings(ghl_notifications_enabled=True)).process()
     (message,) = [body for _, path, body in ghl if path == "/conversations/messages"]
     assert message["subject"].startswith("Schedule change: Sunset Cruise on ")
     assert "no longer scheduled for Sunset Cruise as Captain" in message["message"]
