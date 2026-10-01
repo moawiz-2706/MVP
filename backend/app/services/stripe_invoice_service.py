@@ -40,6 +40,9 @@ class StripeInvoiceService:
         invoices = data.get("data", [])
         return invoices[0] if invoices else None
 
+    def _retrieve_invoice(self, invoice_id: str):
+        return self.client.v1.invoices.retrieve(invoice_id)
+
     def create_for_payment(self, payment_id: uuid.UUID) -> str | None:
         row = self.db.execute(
             select(Payment, BookingOrder, Operator)
@@ -100,7 +103,7 @@ class StripeInvoiceService:
 
         invoice = None
         if payment.stripe_invoice_id:
-            invoice = self.client.v1.invoices.retrieve(payment.stripe_invoice_id)
+            invoice = self._retrieve_invoice(payment.stripe_invoice_id)
         else:
             invoice = self._find_existing_invoice(order)
             if invoice is None:
@@ -127,13 +130,52 @@ class StripeInvoiceService:
         if status == "draft":
             invoice = self.client.v1.invoices.finalize_invoice(payment.stripe_invoice_id)
             status = self._value(invoice, "status") or "open"
-        if status == "open":
-            invoice = self.client.v1.invoices.send_invoice(payment.stripe_invoice_id)
-            status = self._value(invoice, "status") or "open"
+
+        # Stripe may return a partial invoice representation from finalize/send.
+        # Re-fetch the canonical object before deciding whether the hosted URL
+        # exists. A persisted open status means a previous send_invoice call
+        # completed successfully, so a retry must not send the invoice again.
+        hosted_url = self._value(invoice, "hosted_invoice_url")
+        sent_now = False
+        already_sent = payment.invoice_status == "open"
+        if status == "open" and not already_sent:
+            try:
+                invoice = self.client.v1.invoices.send_invoice(payment.stripe_invoice_id)
+                status = self._value(invoice, "status") or "open"
+                sent_now = True
+            except Exception:
+                # A network timeout can happen after Stripe accepted the send.
+                # Re-read the invoice before scheduling another attempt; an
+                # already-open invoice with a hosted URL is safe to complete.
+                invoice = self._retrieve_invoice(payment.stripe_invoice_id)
+                status = self._value(invoice, "status") or status
+                hosted_url = self._value(invoice, "hosted_invoice_url")
+                if status not in {"open", "paid"} or not hosted_url:
+                    raise
+                sent_now = True
+
+        invoice = self._retrieve_invoice(payment.stripe_invoice_id)
+        status = self._value(invoice, "status") or status
+        hosted_url = self._value(invoice, "hosted_invoice_url")
 
         payment.invoice_status = status
-        payment.stripe_invoice_url = self._value(invoice, "hosted_invoice_url")
-        if status != "open" or not payment.stripe_invoice_url:
-            raise RuntimeError("Stripe invoice was not finalized and sent to the customer")
+        payment.stripe_invoice_url = hosted_url
+        if status == "paid":
+            # The invoice can be paid before this worker persists its response.
+            # The verified invoice.paid webhook remains responsible for the
+            # local booking/payment confirmation transition.
+            self.db.commit()
+            return hosted_url
+        if status == "open" and (hosted_url or sent_now or already_sent):
+            # Stripe accepted the send request even when its response did not
+            # include hosted_invoice_url. The email is provider-owned; do not
+            # turn an accepted send into an endlessly retrying failed job.
+            self.db.commit()
+            return hosted_url
+        if status != "open" or not hosted_url:
+            raise RuntimeError(
+                f"Stripe invoice {payment.stripe_invoice_id} is {status!r} "
+                "without a hosted URL after finalization/send"
+            )
         self.db.commit()
-        return payment.stripe_invoice_url
+        return hosted_url

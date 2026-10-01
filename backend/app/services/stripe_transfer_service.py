@@ -34,13 +34,17 @@ class StripeTransferService:
         payment, order, connection = row
         if payment.status != "succeeded":
             raise RuntimeError("Payment has not succeeded")
-        if order.status in {"cancelled", "exception", "expired"}:
-            raise RuntimeError("Cancelled or exceptional orders cannot create operator transfers")
-        if not payment.stripe_charge_id or not payment.stripe_charge_id.startswith("ch_"):
-            raise RuntimeError("Transfer source_transaction must be a successful Charge ID")
         transfer = self.db.scalar(
             select(StripeTransfer).where(StripeTransfer.payment_id == payment.id)
         )
+        if order.status in {"cancelled", "exception", "expired"}:
+            # A late payment can legitimately create a refund instead of an
+            # operator transfer. Existing transfers remain the responsibility
+            # of the reversal outbox job; an uncreated transfer is a completed
+            # no-op and must not retry forever.
+            return transfer.stripe_transfer_id if transfer and transfer.status == "created" else None
+        if not payment.stripe_charge_id or not payment.stripe_charge_id.startswith("ch_"):
+            raise RuntimeError("Transfer source_transaction must be a successful Charge ID")
         if transfer and transfer.status == "created" and transfer.stripe_transfer_id:
             return transfer.stripe_transfer_id
         if transfer is None:

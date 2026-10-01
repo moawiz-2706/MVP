@@ -85,7 +85,7 @@ Financial audit fields added to `booking_adjustments`:
 - The database pool remains intentionally limited to one connection (`pool_size=1`, `max_overflow=0`); no additional pools were added.
 - Staff/manual availability now batches reservations and calendar blocks once per day instead of running the full availability query sequence once per candidate slot.
 - The staff page refreshes live availability every 30 seconds, avoids background polling, and refetches on foreground focus.
-- Stripe invoice creation releases the database connection before each provider network call. Invoice jobs remain failed/retryable unless Stripe returns an open invoice with a hosted URL, preventing silent “sent” records when customer delivery did not occur.
+- Stripe invoice creation releases the database connection before each provider network call, re-fetches the canonical invoice after finalization/send, and safely recovers when Stripe accepted a send but the first response omitted `hosted_invoice_url`. Invoice jobs remain retryable for a genuinely incomplete provider state. Obsolete transfer jobs for cancelled/exceptional orders complete as no-ops instead of retrying forever.
 
 ### Compatibility fixes discovered by the real DB gate
 
