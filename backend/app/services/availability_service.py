@@ -537,12 +537,13 @@ class AvailabilityService:
     def calendar_day(
         self, calendar_id: uuid.UUID, operator_id: uuid.UUID, day: date
     ) -> PublicAvailabilityResponse:
-        """Return live slots for an authenticated calendar page.
+        """Return live slots without an N+1 database query per candidate.
 
-        This deliberately uses the same candidate generation and ``check`` calls
-        as the public booking link. The calendar page may view a calendar that is
-        not publicly exposed, but it must never implement a second availability
-        algorithm.
+        Candidate generation remains shared with public booking, but the
+        authenticated/staff path batches resource reservations and blocks once
+        for the day. This is important for the single-connection serverless
+        deployment: availability requests must finish quickly instead of
+        holding the only pooled connection while repeatedly calling ``check``.
         """
         calendar, operator = self._calendar(calendar_id, operator_id=operator_id)
         location = self.db.scalar(
@@ -553,21 +554,62 @@ class AvailabilityService:
         )
         now = datetime.now(UTC)
         slots: list[AvailabilitySlot] = []
-        for candidate in self._candidate_starts(calendar, operator, day):
-            if candidate.astimezone(UTC) <= now:
-                continue
-            result = self.check(
-                calendar.id,
-                candidate,
-                1,
-                operator_id=operator_id,
+        candidates = [
+            candidate
+            for candidate in self._candidate_starts(calendar, operator, day)
+            if candidate.astimezone(UTC) > now
+        ]
+        mappings = self._mappings(calendar.id) if candidates else []
+        reservations: dict[uuid.UUID, list[CapacityInterval]] = {}
+        blocks: list[tuple[datetime, datetime]] = []
+        if candidates:
+            range_start = min(candidates)
+            range_end = max(candidates) + timedelta(minutes=calendar.duration_minutes)
+            reservations = self._reservations(
+                [resource.id for resource, _ in mappings], range_start, range_end
             )
+            blocks = list(
+                self.db.execute(
+                    select(CalendarBlock.start_at, CalendarBlock.end_at).where(
+                        CalendarBlock.calendar_id == calendar.id,
+                        CalendarBlock.start_at < range_end,
+                        CalendarBlock.end_at > range_start,
+                    )
+                )
+            )
+        for candidate in candidates:
+            end_at = candidate + timedelta(minutes=calendar.duration_minutes)
+            blocked = any(
+                block_start < end_at and block_end > candidate
+                for block_start, block_end in blocks
+            )
+            inventory_max: int | None = None
+            for resource, per_unit in mappings:
+                reserved = reserved_for_interval(
+                    reservations.get(resource.id, []), candidate, end_at
+                )
+                available = (
+                    max(0, resource.quantity - reserved)
+                    if resource.is_active and resource.deleted_at is None
+                    else 0
+                )
+                resource_max = floor(available / per_unit)
+                inventory_max = (
+                    resource_max
+                    if inventory_max is None
+                    else min(inventory_max, resource_max)
+                )
+            if inventory_max is None:
+                inventory_max = calendar.max_units_per_booking or 1
+            elif calendar.max_units_per_booking is not None:
+                inventory_max = min(inventory_max, calendar.max_units_per_booking)
+            available = not blocked and inventory_max > 0
             slots.append(
                 AvailabilitySlot(
-                    start_at=result.start_at,
-                    end_at=result.end_at,
-                    max_bookable_units=result.max_bookable_units,
-                    available=result.available and result.max_bookable_units > 0,
+                    start_at=candidate,
+                    end_at=end_at,
+                    max_bookable_units=inventory_max if available else 0,
+                    available=available,
                 )
             )
         return PublicAvailabilityResponse(

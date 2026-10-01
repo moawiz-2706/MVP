@@ -51,6 +51,10 @@ class StripeInvoiceService:
         if row is None:
             raise RuntimeError("Invoice payment record not found")
         payment, order, operator = row
+        # Do not hold the only pooled database connection while making Stripe
+        # network calls. Each persistence step below commits before the next
+        # provider call and therefore returns the connection to the pool.
+        self.db.commit()
         if payment.payment_method != "invoice":
             return None
         if payment.status == "succeeded":
@@ -129,5 +133,7 @@ class StripeInvoiceService:
 
         payment.invoice_status = status
         payment.stripe_invoice_url = self._value(invoice, "hosted_invoice_url")
+        if status != "open" or not payment.stripe_invoice_url:
+            raise RuntimeError("Stripe invoice was not finalized and sent to the customer")
         self.db.commit()
         return payment.stripe_invoice_url
