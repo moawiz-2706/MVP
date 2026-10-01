@@ -46,8 +46,8 @@ Templates support validated merge fields such as customer name, booking referenc
 ## Delivery and retry behavior
 
 1. Passport writes the booking/lifecycle mutation and its outbox jobs transactionally.
-2. The inline request may process a bounded batch immediately after commit.
-3. The persistent worker processes remaining jobs continuously when deployed.
+2. The booking request returns after the transaction commits; it does not wait for HighLevel or Stripe network calls.
+3. The persistent worker or protected frequent outbox runner processes jobs asynchronously.
 4. The protected daily cron queues reminders and drains the outbox as a fallback.
 5. Provider failures mark the job `failed`, record the error, and schedule exponential backoff retries.
 6. Jobs use unique idempotency keys and leases, preventing duplicate sends during normal retries.
@@ -65,7 +65,7 @@ If Stripe cannot return an open invoice with a hosted URL, the invoice outbox jo
 
 - Set `GHL_NOTIFICATIONS_ENABLED=true` in the backend production environment.
 - Apply migrations through `034_fix_staff_booking_target_constraint`.
-- Reauthorize each HighLevel sub-account with the required contacts and conversations permissions.
+- Reauthorize each HighLevel sub-account with `conversations/message.write` plus the required contacts, calendar, appointment, and staff permissions. The app must request this scope before the existing installation is reauthorized.
 - Confirm the HighLevel location has permission to create/update contacts and send conversation emails.
 - Ensure the operator's account-level customer email switch is enabled when customer messages are wanted.
 - Run `backend/worker.py` continuously, or provide an equivalent frequent protected outbox runner. The daily Vercel cron is a fallback and is not a substitute for a continuously running worker for prompt delivery.

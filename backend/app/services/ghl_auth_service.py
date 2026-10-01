@@ -29,6 +29,8 @@ logger = logging.getLogger("passport.ghl_auth")
 REQUIRED_SCOPES = {
     "contacts.readonly",
     "contacts.write",
+    # Required by POST /conversations/messages for customer/staff emails.
+    "conversations/message.write",
     "locations.readonly",
     "calendars.readonly",
     "calendars.write",

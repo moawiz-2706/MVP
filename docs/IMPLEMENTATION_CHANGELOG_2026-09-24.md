@@ -12,7 +12,7 @@ This increment adds a persistent reservation lifecycle service. It locks eligibl
 
 Public order status now authenticates the purpose-bound status credential before optional Stripe reconciliation. The admin calendar booking modal and operator-created booking flow preserve that credential through Stripe confirmation. The frontend production API client uses same-origin `/api/v1` when a production build has no explicit API base, so localhost is not silently shipped.
 
-The GHL installation contract no longer requests `conversations/message.write`. GHL confirmation, booking-reminder, and staff-email jobs are disabled by default and become no-ops unless the separately controlled `GHL_NOTIFICATIONS_ENABLED` switch is deliberately enabled. Calendar, appointment, contact, and staff synchronization remain independent capabilities.
+The GHL installation contract requests `conversations/message.write` because confirmation, booking-reminder, and staff-email jobs use `POST /conversations/messages`. These jobs remain disabled by default unless the separately controlled `GHL_NOTIFICATIONS_ENABLED` switch is deliberately enabled. Existing installations must be reauthorized after this scope is added; calendar, appointment, contact, and staff synchronization remain independent capabilities.
 
 Stripe provider-unknown reconciliation can search PaymentIntents by immutable booking-order metadata and will attach a candidate only after validating the local order ID, amount, and currency. The booking operator UI now exposes participant manifest CRUD, while checkout automatically seeds the primary customer as participant one.
 

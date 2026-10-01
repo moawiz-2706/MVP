@@ -48,7 +48,7 @@ def test_payment_mode_requires_explicit_team_authorization():
     assert OrderService.payment_mode(0, True, allow_override=True) == (False, False, False, "none")
 
 
-def test_authenticated_free_booking_skips_invoice_and_confirms_immediately(db, monkeypatch):
+def test_authenticated_free_booking_skips_invoice_and_confirms_immediately(db):
     operator, calendar = _operator_calendar(db)
     operator.public_booking_enabled = True
     calendar.public_booking_enabled = True
@@ -59,7 +59,6 @@ def test_authenticated_free_booking_skips_invoice_and_confirms_immediately(db, m
         ]
     )
     db.commit()
-    monkeypatch.setattr("app.services.order_service.OutboxService.process", lambda *args, **kwargs: {})
     request = OrderCreateRequest(
         items=[OrderItemRequest(calendar_id=calendar.id, start_at=datetime(2027, 1, 4, 14, tzinfo=UTC), units=1)],
         customer=OrderCustomer(first_name="Free", last_name="Client", email="free@example.com"),
@@ -78,7 +77,7 @@ def test_authenticated_free_booking_skips_invoice_and_confirms_immediately(db, m
     assert db.scalar(select(OutboxJob).where(OutboxJob.job_type == "stripe_create_invoice")) is None
 
 
-def test_authenticated_invoice_booking_creates_pending_invoice_job(db, monkeypatch):
+def test_authenticated_invoice_booking_creates_pending_invoice_job(db):
     operator, calendar = _operator_calendar(db)
     operator.public_booking_enabled = True
     calendar.public_booking_enabled = True
@@ -98,7 +97,6 @@ def test_authenticated_invoice_booking_creates_pending_invoice_job(db, monkeypat
         )
     )
     db.commit()
-    monkeypatch.setattr("app.services.order_service.OutboxService.process", lambda *args, **kwargs: {})
     request = OrderCreateRequest(
         items=[OrderItemRequest(calendar_id=calendar.id, start_at=datetime(2027, 1, 5, 14, tzinfo=UTC), units=1)],
         customer=OrderCustomer(first_name="Invoice", last_name="Client", email="invoice@example.com"),

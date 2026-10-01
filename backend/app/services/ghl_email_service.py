@@ -16,6 +16,7 @@ from app.models.entities import (
     OperatorSettings,
     Staff,
     StaffAssignment,
+    GHLInstallation,
 )
 from app.services.ghl_client import GHLClient
 from app.services.ghl_contact_service import GHLContactService
@@ -265,6 +266,22 @@ class GHLEmailService:
         markup: str,
         settings: OperatorSettings | None,
     ) -> dict[str, Any]:
+        installation = self.db.scalar(
+            select(GHLInstallation).where(
+                GHLInstallation.operator_id == self.operator_id,
+                GHLInstallation.is_installed.is_(True),
+            )
+        )
+        granted_scopes = set(installation.granted_scopes or []) if installation else set()
+        if (
+            installation is not None
+            and installation.granted_scopes is not None
+            and "conversations/message.write" not in granted_scopes
+        ):
+            raise RuntimeError(
+                "HighLevel email permission is missing: reauthorize Passport and grant "
+                "conversations/message.write"
+            )
         payload = {
             "type": "Email",
             "contactId": contact_id,

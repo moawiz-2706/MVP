@@ -1,6 +1,5 @@
 import hashlib
 import json
-import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable
@@ -44,14 +43,10 @@ from app.schemas.order import (
 from app.services.availability_service import AvailabilityService
 from app.services.capacity import CapacityInterval, batch_fits
 from app.services.public_access_service import PublicAccessService
-from app.services.outbox_service import OutboxService
 from app.services.staffing_service import lock_calendars
 from app.services.stripe_payment_service import StripePaymentService
 from app.utils.identifiers import public_reference
 from app.utils.money import PaymentBreakdown, apply_basis_points, calculate_payment
-
-
-logger = logging.getLogger("passport.order")
 
 
 @dataclass(slots=True)
@@ -657,13 +652,12 @@ class OrderService:
         )
         self.db.commit()
 
-        # Apply the GHL contact/email/appointment jobs immediately after the
-        # booking transaction is durable. Failed external calls remain in the
-        # outbox with backoff and must not make the local booking fail.
-        try:
-            OutboxService(self.db, self.settings).process(limit=100, prefer_newest=True)
-        except Exception:
-            logger.exception("Inline outbox processing failed after booking creation")
+        # External provider work is intentionally not performed in the booking
+        # request. The booking is durable once the transaction commits; the
+        # protected outbox runner processes contact, appointment, email, and
+        # invoice jobs asynchronously with leases, retries, and idempotency.
+        # This keeps the customer/staff page responsive and prevents a slow or
+        # unavailable provider from making a valid booking appear to hang.
 
         client_secret = None
         if card_mode:
