@@ -1,0 +1,39 @@
+name: Process Passport outbox
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  process-outbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Process pending Passport jobs
+        env:
+          PASSPORT_API_URL: ${{ secrets.PASSPORT_API_URL }}
+          PASSPORT_CRON_SECRET: ${{ secrets.PASSPORT_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          response="$(
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 2 \
+              --retry-delay 5 \
+              --max-time 90 \
+              -X POST \
+              "${PASSPORT_API_URL}/api/v1/internal/process-outbox" \
+              -H "Authorization: Bearer ${PASSPORT_CRON_SECRET}" \
+              -H "Accept: application/json"
+           )"
+
+          echo "Passport outbox response:"
+          echo "$response"
