@@ -138,7 +138,7 @@ export interface BookingNotificationsResponse {
   pending_count: number;
 }
 
-export type NotificationType = "booking_staff" | "calendar_availability" | "calendar_resources";
+export type NotificationType = "booking_staff" | "calendar_availability" | "calendar_resources" | "ghl_sync_failed";
 export interface NotificationItem {
   id: string;
   type: NotificationType;
@@ -153,6 +153,10 @@ export interface NotificationItem {
   end_at: string | null;
   required_roles: string[];
   missing_roles: string[];
+  order_id: Id | null;
+  sync_run_id: Id | null;
+  sync_attempts: number | null;
+  error_code: string | null;
 }
 export interface NotificationsResponse {
   items: NotificationItem[];

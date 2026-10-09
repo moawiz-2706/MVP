@@ -44,6 +44,7 @@ from app.services.availability_service import AvailabilityService
 from app.services.capacity import CapacityInterval, batch_fits
 from app.services.public_access_service import PublicAccessService
 from app.services.staffing_service import lock_calendars
+from app.services.ghl_sync_service import GHLSyncService
 from app.services.stripe_payment_service import StripePaymentService
 from app.utils.identifiers import public_reference
 from app.utils.money import PaymentBreakdown, apply_basis_points, calculate_payment
@@ -117,6 +118,7 @@ class OrderService:
         total_minor: int,
         requested_payment: bool | None,
         *,
+        requested_payment_method: str | None = None,
         allow_override: bool,
     ) -> tuple[bool, bool, bool, str]:
         """Return (requires_payment, invoice_mode, card_mode, method).
@@ -125,13 +127,19 @@ class OrderService:
         deliberately ignored unless the authenticated team endpoint enables
         the override.
         """
-        override = requested_payment if allow_override else None
-        requires_payment = (
-            bool(override) if override is not None else total_minor > 0
-        ) and total_minor > 0
-        invoice_mode = requires_payment and override is True
-        card_mode = requires_payment and not invoice_mode
-        method = "invoice" if invoice_mode else "card" if card_mode else "none"
+        override_method = requested_payment_method if allow_override else None
+        if override_method is not None and override_method not in {"card", "invoice", "none"}:
+            raise ConflictError("Unsupported payment method")
+        if override_method is None and allow_override and requested_payment is not None:
+            # Preserve the original staff/team contract: true meant invoice and
+            # false meant a free booking.
+            override_method = "invoice" if requested_payment else "none"
+        method = override_method or ("card" if total_minor > 0 else "none")
+        requires_payment = method in {"card", "invoice"} and total_minor > 0
+        invoice_mode = requires_payment and method == "invoice"
+        card_mode = requires_payment and method == "card"
+        if not requires_payment:
+            method = "none"
         return requires_payment, invoice_mode, card_mode, method
 
     def _prepare(
@@ -440,6 +448,7 @@ class OrderService:
         paid, invoice_mode, card_mode, payment_method = self.payment_mode(
             money.customer_total_minor,
             request.payment_required,
+            requested_payment_method=request.payment_method,
             allow_override=allow_payment_override,
         )
         if card_mode or invoice_mode:
@@ -484,7 +493,9 @@ class OrderService:
             checkout_request_hash=request_hash,
             status="pending_payment" if paid else "confirmed",
             ghl_confirmation_email_status=(
-                "pending" if self.settings.ghl_notifications_enabled else "disabled"
+                "pending"
+                if self.settings.ghl_sync_mode == "outbox" and self.settings.ghl_notifications_enabled
+                else "disabled"
             ),
         )
         self.db.add(order)
@@ -626,13 +637,11 @@ class OrderService:
                 status="pending",
             )
             self.db.add(payment_request)
-        # Create the GHL appointment for every booking immediately. Paid
-        # bookings start as pending_payment/new in GHL and are promoted to
-        # confirmed by the Stripe webhook; staff assignment later updates the
-        # same appointment description from Unassigned to the assigned names.
-        self._enqueue_appointment_jobs(operator.id, order.id)
-        if not paid:
-            self._enqueue_confirmation_jobs(operator.id, order.id)
+        if self.settings.ghl_sync_mode == "outbox":
+            # The legacy mode keeps all GHL work durable and asynchronous.
+            self._enqueue_appointment_jobs(operator.id, order.id)
+            if not paid:
+                self._enqueue_confirmation_jobs(operator.id, order.id)
         elif invoice_mode:
             self.db.add(
                 OutboxJob(
@@ -652,12 +661,13 @@ class OrderService:
         )
         self.db.commit()
 
-        # External provider work is intentionally not performed in the booking
-        # request. The booking is durable once the transaction commits; the
-        # protected outbox runner processes contact, appointment, email, and
-        # invoice jobs asynchronously with leases, retries, and idempotency.
-        # This keeps the customer/staff page responsive and prevents a slow or
-        # unavailable provider from making a valid booking appear to hang.
+        if self.settings.ghl_sync_mode == "synchronous":
+            # The local booking is durable before any provider call. GHL
+            # failures are returned as sync state rather than rolling back a
+            # valid booking or payment hold.
+            GHLSyncService(self.db, operator.id).sync_order(
+                order.id, trigger_type="booking_created"
+            )
 
         client_secret = None
         if card_mode:

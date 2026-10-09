@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
@@ -42,6 +43,9 @@ class OrderQuoteRequest(BaseModel):
 class OrderCreateRequest(OrderQuoteRequest):
     customer: OrderCustomer
     custom_fields: dict[str, object] = Field(default_factory=dict)
+    # Authenticated/team and private staff-booking flows may choose the
+    # payment rail explicitly. Public checkout ignores this override.
+    payment_method: Literal["card", "invoice", "none"] | None = None
     # Only the authenticated team-booking endpoint consumes this override. Public
     # checkout omits it and keeps its existing price-driven behavior.
     payment_required: bool | None = None

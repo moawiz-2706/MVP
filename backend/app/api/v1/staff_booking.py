@@ -12,12 +12,14 @@ from app.core.database import get_db
 from app.core.exceptions import NotFoundError
 from app.models.entities import (
     BookingCustomFieldDefinition,
+    BookingOrder,
     Calendar,
     CalendarRate,
     CalendarRateResource,
     CustomerType,
     Operator,
     PublicAccessCredential,
+    Payment,
     Resource,
     Staff,
 )
@@ -28,6 +30,7 @@ from app.schemas.staff_booking import StaffBookingContext
 from app.services.availability_service import AvailabilityService
 from app.services.order_service import OrderService
 from app.services.public_access_service import PublicAccessService
+from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.core.config import Settings, get_settings
 
 router = APIRouter(prefix="/staff-booking", tags=["staff-booking"])
@@ -205,4 +208,37 @@ def create_staff_booking(
         checkout_key=checkout_key or f"staff:{staff.id}:{uuid.uuid4()}",
         allow_payment_override=True,
         allow_private_operator=True,
+    )
+
+
+@router.get("/{token}/orders/{public_reference}", response_model=OrderCreateResponse)
+def staff_booking_order_status(
+    token: str,
+    public_reference: str,
+    db: DB,
+    settings: AppSettings,
+):
+    staff = _staff_for_token(db, token)
+    order = db.scalar(
+        select(BookingOrder).where(
+            BookingOrder.operator_id == staff.operator_id,
+            BookingOrder.public_reference == public_reference,
+        )
+    )
+    if order is None:
+        raise NotFoundError("Booking not found")
+    payment = db.scalar(select(Payment).where(Payment.booking_order_id == order.id))
+    if payment is None:
+        raise NotFoundError("Booking payment not found")
+    if payment.payment_method == "card" and payment.status == "processing" and payment.stripe_payment_intent_id:
+        try:
+            StripePaymentReconciliationService(db, settings).reconcile(payment.id)
+            payment = db.scalar(select(Payment).where(Payment.booking_order_id == order.id))
+        except Exception:
+            db.rollback()
+            payment = db.scalar(select(Payment).where(Payment.booking_order_id == order.id))
+        if payment is None:
+            raise NotFoundError("Booking payment not found")
+    return OrderService(db, settings)._existing_response(
+        order, payment, order.checkout_request_hash or ""
     )

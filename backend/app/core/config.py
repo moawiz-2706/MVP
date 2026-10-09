@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     outbox_lease_minutes: int = Field(default=15, ge=1, le=60)
     outbox_max_attempts: int = Field(default=12, ge=1, le=100)
     ghl_calendar_sync_enabled: bool = True
+    # Booking/contact projection mode. Keep the durable outbox as the default
+    # until synchronous mode is explicitly enabled for a deployment.
+    ghl_sync_mode: Literal["outbox", "synchronous", "disabled"] = "outbox"
     # Enable the durable GHL email outbox in production. Account owners can
     # still disable customer messages per sub-account via OperatorSettings.
     ghl_notifications_enabled: bool = False

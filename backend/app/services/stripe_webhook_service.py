@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -22,13 +23,18 @@ from app.models.entities import (
 )
 from app.services.availability_service import AvailabilityService
 from app.services.capacity import CapacityInterval, batch_fits
+from app.services.ghl_sync_service import GHLSyncService
 from app.services.stripe_payment_service import StripePaymentService
+
+
+logger = logging.getLogger("passport.stripe_webhooks")
 
 
 class StripeWebhookService:
     def __init__(self, db: Session, settings: Settings | None = None) -> None:
         self.db = db
         self.settings = settings or get_settings()
+        self._synchronous_sync_orders: dict[uuid.UUID, str] = {}
 
     def process(self, event: dict[str, Any]) -> bool:
         event_id, event_type = str(event["id"]), str(event["type"])
@@ -75,6 +81,7 @@ class StripeWebhookService:
             event_row.status = "processed"
             event_row.processed_at = datetime.now(UTC)
             self.db.commit()
+            self._run_synchronous_syncs()
             return True
         except Exception as exc:
             self.db.rollback()
@@ -90,6 +97,32 @@ class StripeWebhookService:
             failed.error_message = str(exc)[:2000]
             self.db.commit()
             raise
+
+    def _schedule_synchronous_sync(self, order_id: uuid.UUID, trigger_type: str) -> None:
+        if self.settings.ghl_sync_mode == "synchronous":
+            self._synchronous_sync_orders[order_id] = trigger_type
+
+    def _run_synchronous_syncs(self) -> None:
+        if self.settings.ghl_sync_mode != "synchronous":
+            return
+        scheduled = self._synchronous_sync_orders
+        self._synchronous_sync_orders = {}
+        for order_id, trigger_type in scheduled.items():
+            order = self.db.get(BookingOrder, order_id)
+            if order is None:
+                logger.error("Cannot synchronize missing Stripe order to GHL: %s", order_id)
+                continue
+            try:
+                GHLSyncService(self.db, order.operator_id).sync_order(
+                    order_id, trigger_type=trigger_type
+                )
+            except Exception:
+                # Stripe webhook processing is already committed. The sync
+                # service normally converts provider failures into a failed
+                # run; this guard prevents an unexpected integration error
+                # from causing Stripe to redeliver a successfully processed
+                # financial event.
+                logger.exception("Synchronous GHL sync failed for order %s", order_id)
 
     def _invoice_paid(self, invoice: dict[str, Any], event: dict[str, Any]) -> None:
         invoice_id = str(invoice.get("id") or "")
@@ -154,18 +187,20 @@ class StripeWebhookService:
             if booking.status == "pending_payment":
                 booking.status = "failed"
                 booking.hold_expires_at = None
-                self.db.execute(
-                    insert(OutboxJob)
-                    .values(
-                        operator_id=booking.operator_id,
-                        booking_order_id=booking.booking_order_id,
-                        job_type="ghl_sync_appointment",
-                        idempotency_key=f"booking:{booking.id}:ghl_appointment:invoice-terminated",
-                        payload={"booking_id": str(booking.id)},
-                        status="pending",
+                if self.settings.ghl_sync_mode == "outbox":
+                    self.db.execute(
+                        insert(OutboxJob)
+                        .values(
+                            operator_id=booking.operator_id,
+                            booking_order_id=booking.booking_order_id,
+                            job_type="ghl_sync_appointment",
+                            idempotency_key=f"booking:{booking.id}:ghl_appointment:invoice-terminated",
+                            payload={"booking_id": str(booking.id)},
+                            status="pending",
+                        )
+                        .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
                     )
-                    .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
-                )
+        self._schedule_synchronous_sync(order.id, "cancelled")
 
     def _payment_succeeded(self, intent: dict[str, Any], event: dict[str, Any]) -> None:
         intent_id = str(intent["id"])
@@ -343,12 +378,15 @@ class StripeWebhookService:
         )
 
     def _enqueue(self, order: BookingOrder, payment: Payment) -> None:
-        jobs = [
-            ("stripe_create_transfer", f"order:{order.id}:stripe_transfer"),
-            ("ghl_upsert_contact", f"order:{order.id}:ghl_contact"),
-        ]
-        if self.settings.ghl_notifications_enabled:
-            jobs.append(("ghl_send_confirmation_email", f"order:{order.id}:ghl_email"))
+        jobs = [("stripe_create_transfer", f"order:{order.id}:stripe_transfer")]
+        if self.settings.ghl_sync_mode == "outbox":
+            jobs.append(("ghl_upsert_contact", f"order:{order.id}:ghl_contact"))
+            if self.settings.ghl_notifications_enabled:
+                jobs.append(("ghl_send_confirmation_email", f"order:{order.id}:ghl_email"))
+            else:
+                order.ghl_confirmation_email_status = "disabled"
+        elif self.settings.ghl_sync_mode == "synchronous":
+            self._schedule_synchronous_sync(order.id, "payment_confirmed")
         else:
             order.ghl_confirmation_email_status = "disabled"
         for job_type, key in jobs:
@@ -365,21 +403,22 @@ class StripeWebhookService:
                 )
                 .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
             )
-        for booking in self.db.scalars(
-            select(Booking).where(Booking.booking_order_id == order.id)
-        ):
-            self.db.execute(
-                insert(OutboxJob)
-                .values(
-                    operator_id=order.operator_id,
-                    booking_order_id=order.id,
-                    job_type="ghl_sync_appointment",
-                    idempotency_key=f"booking:{booking.id}:ghl_appointment:confirmed",
-                    payload={"booking_id": str(booking.id)},
-                    status="pending",
+        if self.settings.ghl_sync_mode == "outbox":
+            for booking in self.db.scalars(
+                select(Booking).where(Booking.booking_order_id == order.id)
+            ):
+                self.db.execute(
+                    insert(OutboxJob)
+                    .values(
+                        operator_id=order.operator_id,
+                        booking_order_id=order.id,
+                        job_type="ghl_sync_appointment",
+                        idempotency_key=f"booking:{booking.id}:ghl_appointment:confirmed",
+                        payload={"booking_id": str(booking.id)},
+                        status="pending",
+                    )
+                    .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
                 )
-                .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
-            )
 
     def _enqueue_refund(self, payment: Payment, order: BookingOrder, *, scope_key: str) -> None:
         attempt_id = self.db.scalar(
@@ -443,18 +482,20 @@ class StripeWebhookService:
             if booking.status == "pending_payment":
                 booking.status = "failed"
                 booking.hold_expires_at = None
-                self.db.execute(
-                    insert(OutboxJob)
-                    .values(
-                        operator_id=booking.operator_id,
-                        booking_order_id=booking.booking_order_id,
-                        job_type="ghl_sync_appointment",
-                        idempotency_key=f"booking:{booking.id}:ghl_appointment:payment-failed",
-                        payload={"booking_id": str(booking.id)},
-                        status="pending",
+                if self.settings.ghl_sync_mode == "outbox":
+                    self.db.execute(
+                        insert(OutboxJob)
+                        .values(
+                            operator_id=booking.operator_id,
+                            booking_order_id=booking.booking_order_id,
+                            job_type="ghl_sync_appointment",
+                            idempotency_key=f"booking:{booking.id}:ghl_appointment:payment-failed",
+                            payload={"booking_id": str(booking.id)},
+                            status="pending",
+                        )
+                        .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
                     )
-                    .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
-                )
+        self._schedule_synchronous_sync(payment.booking_order_id, "cancelled")
 
     def _account_updated(self, account: dict[str, Any]) -> None:
         connection = self.db.scalar(

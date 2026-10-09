@@ -43,8 +43,12 @@ def test_payment_mode_requires_explicit_team_authorization():
     assert OrderService.payment_mode(5000, None, allow_override=False) == (True, False, True, "card")
     assert OrderService.payment_mode(5000, True, allow_override=True) == (True, True, False, "invoice")
     assert OrderService.payment_mode(5000, False, allow_override=True) == (False, False, False, "none")
+    assert OrderService.payment_mode(5000, None, requested_payment_method="card", allow_override=True) == (True, False, True, "card")
+    assert OrderService.payment_mode(5000, None, requested_payment_method="invoice", allow_override=True) == (True, True, False, "invoice")
+    assert OrderService.payment_mode(5000, None, requested_payment_method="none", allow_override=True) == (False, False, False, "none")
     # A public request cannot smuggle in payment_required=false to bypass payment.
     assert OrderService.payment_mode(5000, False, allow_override=False) == (True, False, True, "card")
+    assert OrderService.payment_mode(5000, None, requested_payment_method="none", allow_override=False) == (True, False, True, "card")
     assert OrderService.payment_mode(0, True, allow_override=True) == (False, False, False, "none")
 
 

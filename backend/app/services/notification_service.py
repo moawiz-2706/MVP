@@ -14,6 +14,7 @@ from app.models.entities import (
     CalendarHour,
     CalendarPushedSlot,
     CalendarResource,
+    GHLSyncRun,
     StaffAssignment,
 )
 from app.schemas.notifications import NotificationItem, NotificationsResponse
@@ -45,12 +46,69 @@ class NotificationService:
         if calendar_ids:
             items.extend(self._calendar_items(calendars))
             items.extend(self._booking_items(now, calendar_ids))
+        items.extend(self._ghl_sync_items())
         items.sort(key=self._sort_key)
         return NotificationsResponse(
             items=items,
             pending_count=len(items),
             generated_at=now,
         )
+
+    def _ghl_sync_items(self) -> list[NotificationItem]:
+        runs = list(
+            self.db.scalars(
+                select(GHLSyncRun)
+                .where(
+                    GHLSyncRun.operator_id == self.operator_id,
+                    GHLSyncRun.status.in_(("failed", "partial", "manual_review")),
+                    GHLSyncRun.resolved_at.is_(None),
+                )
+                .order_by(GHLSyncRun.created_at.desc())
+                .limit(100)
+            )
+        )
+        result: list[NotificationItem] = []
+        for run in runs:
+            if run.booking_order_id is None:
+                continue
+            row = self.db.execute(
+                select(Booking, BookingOrder, Calendar)
+                .join(BookingOrder, BookingOrder.id == Booking.booking_order_id)
+                .join(Calendar, Calendar.id == Booking.calendar_id)
+                .where(
+                    Booking.booking_order_id == run.booking_order_id,
+                    Booking.operator_id == self.operator_id,
+                )
+                .order_by(Booking.start_at, Booking.id)
+                .limit(1)
+            ).one_or_none()
+            if row is None:
+                continue
+            booking, order, calendar = row
+            customer = f"{order.customer_first_name} {order.customer_last_name}".strip()
+            result.append(
+                NotificationItem(
+                    id=f"ghl-sync:{run.id}",
+                    type="ghl_sync_failed",
+                    title=f"Resync {customer or 'booking'} to HighLevel",
+                    description=(
+                        f"HighLevel synchronization failed after {run.attempt_count} attempt(s): "
+                        f"{run.last_error or 'Unknown provider error'}."
+                    ),
+                    action_label="Resync to GHL",
+                    calendar_id=calendar.id,
+                    calendar_name=booking.calendar_name_snapshot or calendar.name,
+                    booking_id=booking.id,
+                    customer_name=customer,
+                    start_at=booking.start_at,
+                    end_at=booking.end_at,
+                    order_id=order.id,
+                    sync_run_id=run.id,
+                    sync_attempts=run.attempt_count,
+                    error_code=run.last_error_code,
+                )
+            )
+        return result
 
     def _calendar_items(self, calendars: list[Calendar]) -> list[NotificationItem]:
         ids = [calendar.id for calendar in calendars]
@@ -201,5 +259,10 @@ class NotificationService:
 
     @staticmethod
     def _sort_key(item: NotificationItem) -> tuple[int, datetime, str]:
-        priority = {"booking_staff": 0, "calendar_availability": 1, "calendar_resources": 2}
+        priority = {
+            "ghl_sync_failed": 0,
+            "booking_staff": 1,
+            "calendar_availability": 2,
+            "calendar_resources": 3,
+        }
         return priority[item.type], item.start_at or datetime.max.replace(tzinfo=UTC), item.id

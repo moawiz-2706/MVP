@@ -25,6 +25,7 @@ from app.schemas.booking import (
 from app.schemas.order import OrderCreateRequest, OrderCreateResponse
 from app.services.booking_admin_service import BookingAdminService
 from app.services.booking_notification_service import BookingNotificationService
+from app.services.ghl_sync_service import GHLSyncService
 from app.services.order_service import OrderService
 
 router = APIRouter(tags=["bookings"])
@@ -169,3 +170,14 @@ def retry_ghl(
     require_permission(principal, Permission.OPERATE_BOOKINGS)
     BookingAdminService(db, principal.operator_id).retry_ghl(order_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/orders/{order_id}/resync-ghl")
+def resync_ghl(order_id: uuid.UUID, principal: CurrentPrincipal, db: DB) -> dict:
+    require_permission(principal, Permission.OPERATE_BOOKINGS)
+    result = GHLSyncService(db, principal.operator_id).sync_order(
+        order_id,
+        trigger_type="manual_resync",
+        requested_by_user_id=principal.app_user_id,
+    )
+    return result.as_dict()

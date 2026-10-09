@@ -1,6 +1,14 @@
 from pathlib import Path
 
-from app.models.entities import MessageTemplate, PublicAccessCredential, Staff, OutboxJob
+from app.models.entities import (
+    GHLCustomFieldMapping,
+    GHLSyncAttempt,
+    GHLSyncRun,
+    MessageTemplate,
+    OutboxJob,
+    PublicAccessCredential,
+    Staff,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -12,6 +20,8 @@ MESSAGE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "030_message_t
 STAFF_LINK_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "032_private_staff_booking_links.sql"
 STAFF_LINK_FIX_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "033_fix_staff_booking_purpose_constraint.sql"
 STAFF_TARGET_FIX_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "034_fix_staff_booking_target_constraint.sql"
+WAIVER_RECONCILIATION_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "035_schema_reconciliation.sql"
+GHL_SYNC_STATE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "036_ghl_sync_state.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -84,3 +94,30 @@ def test_private_staff_booking_target_constraint_fix_covers_staff_scope() -> Non
     assert "public_credentials_one_target" in sql
     assert "num_nonnulls(order_id, booking_id, staff_id) = 1" in sql
     assert "034_fix_staff_booking_target_constraint" in sql
+
+
+def test_waiver_reconciliation_migration_and_model_are_aligned() -> None:
+    sql = WAIVER_RECONCILIATION_MIGRATION.read_text()
+    assert "ADD COLUMN IF NOT EXISTS token_digest text" in sql
+    assert "digest(token, 'sha256')" in sql
+    assert "ALTER COLUMN token_digest SET NOT NULL" in sql
+    assert "035_schema_reconciliation" in sql
+
+
+def test_ghl_sync_state_migration_and_models_are_aligned() -> None:
+    sql = GHL_SYNC_STATE_MIGRATION.read_text()
+    for table in ("ghl_sync_runs", "ghl_sync_attempts", "ghl_custom_field_mappings"):
+        assert f"CREATE TABLE IF NOT EXISTS public.{table}" in sql
+    for model in (GHLSyncRun, GHLSyncAttempt, GHLCustomFieldMapping):
+        assert model.__tablename__ in sql
+    for column in (
+        "last_attempt_at",
+        "last_synced_at",
+        "sync_attempt_count",
+        "last_error_code",
+        "last_http_status",
+        "last_sync_trigger",
+    ):
+        assert f"ADD COLUMN IF NOT EXISTS {column}" in sql
+    assert "ghl_contact_sync_status" in sql
+    assert "036_ghl_sync_state" in sql

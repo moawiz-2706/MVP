@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from app.models.entities import Booking, BookingOrder, Operator
 from app.schemas.waiver import WaiverSettings, WaiverSignRequest
 from app.services.ghl_email_service import GHLEmailService, booking_reminder_content, staff_content
-from app.services.waiver_service import age_on
+from app.services.waiver_service import age_on, waiver_token_digest
 
 PNG = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
 URL = "https://passport.example/waiver/abc123"
@@ -68,6 +68,12 @@ def test_blank_settings_mean_unset() -> None:
 def test_age_turns_over_on_the_birthday() -> None:
     assert age_on(date(2008, 9, 15), date(2026, 9, 14)) == 17
     assert age_on(date(2008, 9, 15), date(2026, 9, 15)) == 18
+
+
+def test_waiver_token_digest_is_deterministic_sha256() -> None:
+    assert waiver_token_digest("waiver-token") == (
+        "b3ccaa863fa4200f5a60152037b9544535f02b69926ea85fe6e8a8c16aea8d92"
+    )
 
 
 def _operator() -> Operator:

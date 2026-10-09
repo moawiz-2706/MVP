@@ -638,6 +638,7 @@ class BookingWaiver(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "booking_waivers"
     __table_args__ = (
+        UniqueConstraint("token_digest", name="uq_booking_waivers_token_digest"),
         CheckConstraint("status IN ('pending', 'signed')", name="status_valid"),
         CheckConstraint(
             "status <> 'signed' OR (signed_at IS NOT NULL AND waiver_text IS NOT NULL"
@@ -654,6 +655,8 @@ class BookingWaiver(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     # Secret link credential sent to the customer; never sequential.
     token: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # SHA-256 lookup key; the raw token is retained temporarily for existing URL reconstruction.
+    token_digest: Mapped[str] = mapped_column(String(128), nullable=False)
     public_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -968,6 +971,12 @@ class GHLCalendarMapping(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     applied_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     last_error: Mapped[str | None] = mapped_column(Text)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sync_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error_code: Mapped[str | None] = mapped_column(String(80))
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    last_sync_trigger: Mapped[str | None] = mapped_column(String(40))
 
 
 class GHLAppointmentMapping(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -988,6 +997,126 @@ class GHLAppointmentMapping(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     applied_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     payload_hash: Mapped[str | None] = mapped_column(String(128))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sync_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error_code: Mapped[str | None] = mapped_column(String(80))
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    last_sync_trigger: Mapped[str | None] = mapped_column(String(40))
+
+
+class GHLSyncRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ghl_sync_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "trigger_type IN ('booking_created','payment_confirmed','waiver_updated',"
+            "'booking_updated','cancelled','manual_resync')",
+            name="trigger_type_valid",
+        ),
+        CheckConstraint(
+            "status IN ('running','succeeded','partial','failed','manual_review')",
+            name="status_valid",
+        ),
+        CheckConstraint("max_attempts BETWEEN 1 AND 3", name="max_attempts_valid"),
+        CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
+        Index("ix_ghl_sync_runs_operator_status_created", "operator_id", "status", "created_at"),
+        Index("ix_ghl_sync_runs_order_created", "booking_order_id", "created_at"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
+    )
+    booking_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("booking_orders.id")
+    )
+    trigger_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error_code: Mapped[str | None] = mapped_column(String(80))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_users.id")
+    )
+
+
+class GHLSyncAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ghl_sync_attempts"
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type IN ('contact','appointment','calendar','custom_fields')",
+            name="entity_type_valid",
+        ),
+        CheckConstraint(
+            "operation IN ('upsert','create','update','cancel','reconcile')",
+            name="operation_valid",
+        ),
+        CheckConstraint(
+            "status IN ('started','succeeded','failed','unknown','manual_review')",
+            name="status_valid",
+        ),
+        CheckConstraint("attempt_number BETWEEN 1 AND 3", name="attempt_number_valid"),
+        Index("ix_ghl_sync_attempts_run_attempt", "run_id", "attempt_number"),
+        Index("ix_ghl_sync_attempts_operator_status_created", "operator_id", "status", "created_at"),
+        Index("ix_ghl_sync_attempts_booking_entity_created", "booking_id", "entity_type", "created_at"),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ghl_sync_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
+    )
+    booking_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("booking_orders.id")
+    )
+    booking_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("bookings.id")
+    )
+    entity_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    operation: Mapped[str] = mapped_column(String(20), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="started")
+    provider_http_status: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    payload_hash: Mapped[str | None] = mapped_column(String(128))
+    remote_id: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GHLCustomFieldMapping(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ghl_custom_field_mappings"
+    __table_args__ = (
+        UniqueConstraint(
+            "operator_id", "object_type", "passport_key", name="uq_ghl_custom_fields_key"
+        ),
+        UniqueConstraint(
+            "operator_id", "object_type", "ghl_field_id", name="uq_ghl_custom_fields_remote"
+        ),
+        CheckConstraint("object_type IN ('contact','appointment')", name="object_type_valid"),
+        CheckConstraint(
+            "data_type IN ('text','number','date_time','boolean','url')", name="data_type_valid"
+        ),
+        Index("ix_ghl_custom_field_mappings_operator", "operator_id", "object_type", "enabled"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
+    )
+    object_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    passport_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    ghl_field_id: Mapped[str | None] = mapped_column(Text)
+    ghl_field_name: Mapped[str | None] = mapped_column(Text)
+    data_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
@@ -1064,6 +1193,10 @@ event.listen(
 class Customer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "customers"
     __table_args__ = (
+        CheckConstraint(
+            "ghl_contact_sync_status IN ('pending','synced','failed','disabled')",
+            name="ghl_contact_sync_status_valid",
+        ),
         Index("uq_customers_operator_email", "operator_id", "normalized_email", unique=True),
         Index("ix_customers_operator_phone", "operator_id", "normalized_phone"),
     )
@@ -1075,6 +1208,13 @@ class Customer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     phone: Mapped[str | None] = mapped_column(Text)
     normalized_phone: Mapped[str | None] = mapped_column(Text)
     ghl_contact_id: Mapped[str | None] = mapped_column(Text)
+    ghl_contact_sync_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )
+    ghl_contact_sync_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ghl_contact_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ghl_contact_last_error: Mapped[str | None] = mapped_column(Text)
+    ghl_contact_payload_hash: Mapped[str | None] = mapped_column(String(128))
     external_provider: Mapped[str | None] = mapped_column(Text)
     external_id: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)

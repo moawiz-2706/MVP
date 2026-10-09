@@ -10,6 +10,7 @@ NotificationType = Literal[
     "booking_staff",
     "calendar_availability",
     "calendar_resources",
+    "ghl_sync_failed",
 ]
 
 
@@ -27,6 +28,10 @@ class NotificationItem(BaseModel):
     end_at: datetime | None = None
     required_roles: list[str] = Field(default_factory=list)
     missing_roles: list[str] = Field(default_factory=list)
+    order_id: uuid.UUID | None = None
+    sync_run_id: uuid.UUID | None = None
+    sync_attempts: int | None = None
+    error_code: str | None = None
 
 
 class NotificationsResponse(BaseModel):

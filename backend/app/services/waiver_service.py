@@ -7,6 +7,7 @@ activity, records the signer's IP and browser, and a database trigger rejects
 any later change to a signed waiver.
 """
 
+import hashlib
 import secrets
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -35,6 +36,10 @@ def waiver_url(token: str) -> str:
     return f"{get_settings().frontend_url.rstrip('/')}/waiver/{token}"
 
 
+def waiver_token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def _has_text(settings: OperatorSettings | None) -> bool:
     return bool(settings and settings.waiver_text and settings.waiver_text.strip())
 
@@ -53,12 +58,14 @@ class WaiverService:
         """The booking's waiver, created with a fresh secret link if it has none yet."""
         waiver = self.get(booking.id)
         if waiver is None:
+            token = secrets.token_urlsafe(24)
             self.db.execute(
                 insert(BookingWaiver)
                 .values(
                     operator_id=booking.operator_id,
                     booking_id=booking.id,
-                    token=secrets.token_urlsafe(24),
+                    token=token,
+                    token_digest=waiver_token_digest(token),
                     status="pending",
                     public_expires_at=datetime.now(UTC) + timedelta(days=get_settings().waiver_public_days),
                 )
@@ -99,7 +106,7 @@ class WaiverService:
             .join(BookingOrder, BookingOrder.id == Booking.booking_order_id)
             .join(Operator, Operator.id == BookingWaiver.operator_id)
             .outerjoin(OperatorSettings, OperatorSettings.operator_id == Operator.id)
-            .where(BookingWaiver.token == token)
+            .where(BookingWaiver.token_digest == waiver_token_digest(token))
         )
         if lock:
             statement = statement.with_for_update(of=BookingWaiver)

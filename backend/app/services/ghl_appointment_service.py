@@ -27,6 +27,7 @@ from app.services.ghl_calendar_service import GHLCalendarService
 from app.services.ghl_client import GHLAPIError, GHLClient
 from app.services.ghl_contact_service import GHLContactService
 from app.services.ghl_staff_user_service import GHLStaffUserService
+from app.services.waiver_service import WaiverService
 
 
 class GHLAppointmentService:
@@ -68,6 +69,7 @@ class GHLAppointmentService:
                 .order_by(Resource.name)
             )
         ]
+        waiver = WaiverService(self.db).summary(booking)
         lines = [
             f"Passport booking: {booking.id}",
             f"Reference: {order.public_reference}",
@@ -86,7 +88,10 @@ class GHLAppointmentService:
             f"Payment status: {self.db.scalar(select(Payment.status).where(Payment.booking_order_id == order.id)) or 'unknown'}",
             "Assigned staff: " + (", ".join(staff_names) if staff_names else "Unassigned"),
             "Resources: " + (", ".join(resources) if resources else "None"),
+            f"Waiver status: {waiver['status']}",
         ]
+        if waiver.get("url"):
+            lines.append(f"Waiver URL: {waiver['url']}")
         return "\n".join(lines)
 
     def _find_remote_appointment(
@@ -233,7 +238,10 @@ class GHLAppointmentService:
             "endTime": booking.end_at.isoformat(),
             "appointmentStatus": self._appointment_status(booking),
             "ignoreFreeSlotValidation": True,
-            "toNotify": False,
+            # HighLevel documents that false suppresses workflow automation.
+            # The legacy outbox mode keeps that behavior; synchronous mode is
+            # explicitly used for GHL-owned email/SMS workflows.
+            "toNotify": self.settings.ghl_sync_mode == "synchronous",
         }
         if captain_user_id:
             body["assignedUserId"] = captain_user_id
@@ -315,7 +323,10 @@ class GHLAppointmentService:
                 "PUT",
                 f"/calendars/events/appointments/{mapping.ghl_event_id}",
                 version="v3",
-                json={"appointmentStatus": "cancelled", "toNotify": False},
+                json={
+                    "appointmentStatus": "cancelled",
+                    "toNotify": self.settings.ghl_sync_mode == "synchronous",
+                },
             )
             mapping.status = "cancelled"
             mapping.last_error = None

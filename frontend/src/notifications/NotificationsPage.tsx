@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CalendarClock, CheckCircle2, Package, UserPlus, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, Package, RefreshCw, UserPlus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, json } from "../api/client";
 import type { Calendar, CalendarResource, NotificationItem, NotificationsResponse, Resource, StaffCandidate, BookingDetail } from "../api/types";
@@ -9,6 +9,7 @@ import { AvailabilityEditor } from "../calendars/AvailabilityEditor";
 import { formatLongDate, formatTime, zoneLabel } from "../lib/datetime";
 
 const iconFor = (type: NotificationItem["type"]) => {
+  if (type === "ghl_sync_failed") return AlertTriangle;
   if (type === "booking_staff") return UserPlus;
   if (type === "calendar_resources") return Package;
   return CalendarClock;
@@ -91,11 +92,24 @@ function BookingStaffAction({ item, onSaved }: { item: NotificationItem; onSaved
   </div>;
 }
 
+function GHLResyncAction({ item, onSaved }: { item: NotificationItem; onSaved: () => void }) {
+  const resync = useMutation({
+    mutationFn: () => api(`/orders/${item.order_id}/resync-ghl`, { method: "POST" }),
+    onSuccess: onSaved,
+  });
+  return <div className="drawer-action-content">
+    <div className="warning-box"><AlertTriangle size={17} /><p>{item.description}</p></div>
+    {item.error_code && <p className="muted-note">Error code: {item.error_code}{item.sync_attempts ? ` · ${item.sync_attempts} attempts` : ""}</p>}
+    {resync.error && <div className="error-banner">{resync.error.message}</div>}
+    <button className="button" disabled={resync.isPending || !item.order_id} onClick={() => resync.mutate()}><RefreshCw size={16} />{resync.isPending ? "Resyncing…" : "Resync to GHL"}</button>
+  </div>;
+}
+
 function NotificationDrawer({ item, onClose, onResolved }: { item: NotificationItem; onClose: () => void; onResolved: () => void }) {
   const client = useQueryClient();
-  const calendar = useQuery({ queryKey: ["calendar", item.calendar_id], queryFn: () => api<Calendar>(`/calendars/${item.calendar_id}`), enabled: item.type !== "booking_staff" });
-  const title = item.type === "booking_staff" ? "Assign booking staff" : item.type === "calendar_resources" ? "Configure calendar resources" : "Configure calendar availability";
-  return <><button className="drawer-overlay" onClick={onClose} aria-label="Close notification details" /><aside className="drawer notification-drawer" aria-label="Notification details"><div className="drawer-header"><div><h2>{title}</h2><p>{item.calendar_name}</p></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button></div><div className="notification-drawer-summary"><strong>{item.title}</strong><p>{item.description}</p></div>{item.type === "booking_staff" && <BookingStaffAction item={item} onSaved={onResolved} />}{item.type === "calendar_resources" && (calendar.isLoading || !calendar.data ? <div className="loading">Loading calendar…</div> : <ResourceAction calendar={calendar.data} onSaved={onResolved} />)}{item.type === "calendar_availability" && (calendar.isLoading || !calendar.data ? <div className="loading">Loading calendar…</div> : <AvailabilityEditor calendar={calendar.data} onCalendarChange={(updated) => { client.setQueryData(["calendar", item.calendar_id], updated); void client.invalidateQueries({ queryKey: ["notifications"] }); }} onSaved={() => void client.invalidateQueries({ queryKey: ["notifications"] })} />)}</aside></>;
+  const calendar = useQuery({ queryKey: ["calendar", item.calendar_id], queryFn: () => api<Calendar>(`/calendars/${item.calendar_id}`), enabled: item.type !== "booking_staff" && item.type !== "ghl_sync_failed" });
+  const title = item.type === "booking_staff" ? "Assign booking staff" : item.type === "calendar_resources" ? "Configure calendar resources" : item.type === "calendar_availability" ? "Configure calendar availability" : "HighLevel synchronization";
+  return <><button className="drawer-overlay" onClick={onClose} aria-label="Close notification details" /><aside className="drawer notification-drawer" aria-label="Notification details"><div className="drawer-header"><div><h2>{title}</h2><p>{item.calendar_name}</p></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button></div><div className="notification-drawer-summary"><strong>{item.title}</strong><p>{item.description}</p></div>{item.type === "booking_staff" && <BookingStaffAction item={item} onSaved={onResolved} />}{item.type === "ghl_sync_failed" && <GHLResyncAction item={item} onSaved={onResolved} />}{item.type === "calendar_resources" && (calendar.isLoading || !calendar.data ? <div className="loading">Loading calendar…</div> : <ResourceAction calendar={calendar.data} onSaved={onResolved} />)}{item.type === "calendar_availability" && (calendar.isLoading || !calendar.data ? <div className="loading">Loading calendar…</div> : <AvailabilityEditor calendar={calendar.data} onCalendarChange={(updated) => { client.setQueryData(["calendar", item.calendar_id], updated); void client.invalidateQueries({ queryKey: ["notifications"] }); }} onSaved={() => void client.invalidateQueries({ queryKey: ["notifications"] })} />)}</aside></>;
 }
 
 export function NotificationsPage() {
