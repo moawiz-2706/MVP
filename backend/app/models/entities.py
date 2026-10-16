@@ -941,6 +941,25 @@ class GHLOAuthState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class PWAAuthHandoff(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "pwa_auth_handoffs"
+    __table_args__ = (
+        UniqueConstraint("code_digest", name="uq_pwa_auth_handoffs_code_digest"),
+        Index("ix_pwa_auth_handoffs_expires", "expires_at"),
+    )
+
+    code_digest: Mapped[str] = mapped_column(String(128), nullable=False)
+    app_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False
+    )
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id", ondelete="CASCADE"), nullable=False
+    )
+    ghl_location_id: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class GHLWebhookEvent(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "ghl_webhook_events"
 

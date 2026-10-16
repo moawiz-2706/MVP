@@ -6,6 +6,7 @@ from app.models.entities import (
     GHLSyncRun,
     MessageTemplate,
     OutboxJob,
+    PWAAuthHandoff,
     PublicAccessCredential,
     Staff,
 )
@@ -22,6 +23,7 @@ STAFF_LINK_FIX_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "033_fi
 STAFF_TARGET_FIX_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "034_fix_staff_booking_target_constraint.sql"
 WAIVER_RECONCILIATION_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "035_schema_reconciliation.sql"
 GHL_SYNC_STATE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "036_ghl_sync_state.sql"
+PWA_AUTH_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "037_pwa_auth_handoffs.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -121,3 +123,11 @@ def test_ghl_sync_state_migration_and_models_are_aligned() -> None:
         assert f"ADD COLUMN IF NOT EXISTS {column}" in sql
     assert "ghl_contact_sync_status" in sql
     assert "036_ghl_sync_state" in sql
+
+
+def test_pwa_auth_handoff_migration_and_model_are_aligned() -> None:
+    sql = PWA_AUTH_MIGRATION.read_text()
+    assert "CREATE TABLE IF NOT EXISTS public.pwa_auth_handoffs" in sql
+    assert "code_digest" in PWAAuthHandoff.__table__.columns
+    assert "expires_at" in PWAAuthHandoff.__table__.columns
+    assert "037_pwa_auth_handoffs" in sql

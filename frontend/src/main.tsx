@@ -21,6 +21,7 @@ import { IntegrationResultPage } from "./IntegrationResultPage";
 import { CustomersPage } from "./customers/CustomersPage";
 import { ReportsPage } from "./reports/ReportsPage";
 import { StaffBookingPage } from "./staff-booking/StaffBookingPage";
+import { registerPwaServiceWorker } from "./pwa";
 import "./styles.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: true } } });
@@ -57,3 +58,4 @@ const router = createBrowserRouter([
 ]);
 
 createRoot(document.getElementById("root")!).render(<StrictMode><QueryClientProvider client={queryClient}><RouterProvider router={router} /></QueryClientProvider></StrictMode>);
+registerPwaServiceWorker();

@@ -1,0 +1,24 @@
+{
+  "routes": [
+    { "path": "/", "title": "Passport" },
+    { "path": "/app", "title": "Staff Operations" },
+    { "path": "/app/bookings", "title": "Bookings" },
+    { "path": "/app/notifications", "title": "Notifications" },
+    { "path": "/app/resources", "title": "Resources" },
+    { "path": "/app/locations", "title": "Locations" },
+    { "path": "/app/calendars", "title": "Calendars" },
+    { "path": "/app/staff", "title": "Staff" },
+    { "path": "/app/customers", "title": "Customers" },
+    { "path": "/app/reports", "title": "Reports" },
+    { "path": "/app/settings", "title": "Settings" },
+    { "path": "/book/:operatorSlug", "title": "Public Booking" },
+    { "path": "/book/:operatorSlug/category/:categorySlug", "title": "Booking Category" },
+    { "path": "/book/:operatorSlug/:calendarSlug", "title": "Calendar Booking" },
+    { "path": "/staff-book/:token", "title": "Staff Booking" },
+    { "path": "/booking/:publicReference/confirmation", "title": "Booking Confirmation" },
+    { "path": "/integration-result", "title": "Integration Result" },
+    { "path": "/stripe/connect/return", "title": "Stripe Connect" },
+    { "path": "/stripe/connect/refresh", "title": "Stripe Connect Refresh" },
+    { "path": "/waiver/:token", "title": "Waiver" }
+  ]
+}

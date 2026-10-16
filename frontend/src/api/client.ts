@@ -1,6 +1,10 @@
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
 const API_BASE = (configuredApiBase || (import.meta.env.DEV ? "http://localhost:8000/api/v1" : "/api/v1")).replace(/\/$/, "");
 
+export function apiUrl(path: string): string {
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 let sessionToken: string | null = null;
 let refreshSession: (() => Promise<void>) | null = null;
 let refreshInFlight: Promise<void> | null = null;
@@ -30,7 +34,7 @@ export async function api<T>(
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const response = await fetch(apiUrl(path), { ...init, headers });
   if (response.status === 401 && sessionToken && retryOnUnauthorized && refreshSession) {
     try {
       if (!refreshInFlight) {
@@ -73,7 +77,7 @@ export function json(method: string, body: unknown): RequestInit {
 export async function download(path: string, filename: string): Promise<void> {
   const headers = new Headers();
   if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
-  const response = await fetch(`${API_BASE}${path}`, { headers });
+  const response = await fetch(apiUrl(path), { headers });
   if (!response.ok) throw new ApiError(response.status, "Report download failed");
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);

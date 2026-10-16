@@ -9,6 +9,10 @@ class GHLSessionRequest(BaseModel):
     encrypted_data: str = Field(alias="encryptedData", min_length=20, max_length=32_000)
 
 
+class PWAHandoffRequest(BaseModel):
+    code: str = Field(min_length=20, max_length=512)
+
+
 class GHLSessionResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -35,4 +39,3 @@ class MeOperator(BaseModel):
 class MeResponse(BaseModel):
     user: MeUser
     operator: MeOperator
-

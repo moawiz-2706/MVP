@@ -71,12 +71,14 @@ class GHLAuthService:
         self.db = db
         self.settings = settings
 
-    def create_oauth_state(self, *, expected_location_id: str | None = None) -> str:
+    def create_oauth_state(
+        self, *, expected_location_id: str | None = None, flow: str = "app_start"
+    ) -> str:
         state = secrets.token_urlsafe(32)
         self.db.add(
             GHLOAuthState(
                 state_digest=hashlib.sha256(state.encode()).hexdigest(),
-                flow="app_start",
+                flow=flow,
                 expected_location_id=expected_location_id,
                 expires_at=datetime.now(UTC) + timedelta(minutes=10),
             )

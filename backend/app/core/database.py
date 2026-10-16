@@ -17,8 +17,9 @@ REQUIRED_PRODUCTION_TABLES = (
     "calendar_booking_policies",
     "message_templates",
     "public_access_credentials",
+    "pwa_auth_handoffs",
 )
-REQUIRED_SCHEMA_VERSION = "036_ghl_sync_state"
+REQUIRED_SCHEMA_VERSION = "037_pwa_auth_handoffs"
 
 
 @lru_cache

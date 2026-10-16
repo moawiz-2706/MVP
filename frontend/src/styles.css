@@ -362,6 +362,11 @@ a { color: inherit; text-decoration: none; }
   .rate-section-heading { align-items: flex-start; flex-direction: column; }
   .staff-booking-mobile-card { margin: 12px; padding: 18px; }
   .staff-booking-summary { flex-direction: column; gap: 4px; }
+  .desktop-calendar { display: none; }
+  .mobile-agenda, .mobile-calendar-list { display: block; }
+  .calendar-toolbar { margin-bottom: 10px; }
+  .calendar-toolbar > div { max-width: none !important; }
+  .calendar-card { padding: 12px !important; }
 }
 
 /* Waivers */
@@ -443,3 +448,44 @@ a { color: inherit; text-decoration: none; }
 
 .notification-badges { display: inline-flex; align-items: center; gap: 4px; }
 .badge.new { color: #155e75; background: #e0f2fe; }
+
+.pwa-install-prompt { position: sticky; top: 8px; z-index: 25; display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid #b8d8d1; border-radius: 9px; background: #fbfdfc; box-shadow: 0 4px 14px rgba(24,32,43,.08); }
+.pwa-install-prompt > div:first-child { display: grid; gap: 2px; min-width: 0; }
+.pwa-install-prompt strong { color: #24453f; font-size: 12px; }
+.pwa-install-prompt span { color: #65736f; font-size: 11px; }
+@media (max-width: 640px) {
+  .app-main { padding: calc(14px + env(safe-area-inset-top)) 14px calc(28px + env(safe-area-inset-bottom)); }
+  .pwa-install-prompt { align-items: flex-start; }
+.pwa-install-prompt .toolbar { flex: 0 0 auto; }
+}
+.pwa-login-card { display: grid; gap: 12px; }
+.pwa-login-card .brand-mark { margin: 0 auto 4px; }
+.pwa-login-card h1 { margin: 0; }
+.pwa-login-card p { margin: 0; line-height: 1.55; }
+.pwa-login-card .button { width: 100%; }
+.pwa-login-card small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.mobile-agenda { display: none; }
+.mobile-agenda-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.mobile-agenda-heading > div { display: grid; gap: 2px; }
+.mobile-agenda-heading strong { font-size: 14px; }
+.mobile-agenda-heading span:not(.badge) { color: var(--muted); font-size: 11px; }
+.mobile-agenda-card { display: grid; gap: 8px; padding: 12px; margin-bottom: 9px; border: 1px solid var(--line); border-left: 3px solid #8ebbb0; border-radius: 9px; background: #fff; }
+.mobile-agenda-slot, .mobile-agenda-booking, .mobile-agenda-empty { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; }
+.mobile-agenda-slot { display: grid; gap: 4px; padding: 0; }
+.mobile-agenda-slot time { color: var(--accent); font-size: 10.5px; font-weight: 700; }
+.mobile-agenda-slot strong { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.mobile-agenda-slot > span { color: var(--muted); font-size: 11px; }
+.mobile-agenda-bookings { display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid #eef0f2; }
+.mobile-agenda-booking { display: flex; align-items: center; gap: 8px; padding: 7px 0; }
+.mobile-agenda-booking > span:first-child { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.mobile-agenda-booking strong { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-agenda-booking small, .mobile-agenda-more { color: var(--muted); font-size: 10.5px; }
+.mobile-agenda-more { padding-left: 2px; }
+.mobile-agenda-empty { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0 0; border-top: 1px solid #eef0f2; color: var(--accent); font-size: 11px; }
+.mobile-calendar-list { display: none; }
+.mobile-calendar-card { display: grid; gap: 9px; padding: 13px; margin-bottom: 9px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.mobile-calendar-card > div:first-child { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.mobile-calendar-card .cell-title { min-width: 0; }
+.mobile-calendar-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; color: var(--muted); font-size: 11px; }
+.mobile-calendar-meta strong { display: block; color: #344054; font-size: 11.5px; }
+.mobile-calendar-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 2px; }
