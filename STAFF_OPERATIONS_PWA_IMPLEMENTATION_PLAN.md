@@ -882,3 +882,8 @@ The standalone HighLevel OAuth request no longer asks Passport to send conversat
 Standalone Staff PWA OAuth previously required an existing `GHLInstallation` row and returned a “HighLevel location has not installed Passport” error when the PWA was the first authorized entry point. The PWA callback now uses the newly authorized Location token to fetch the HighLevel location and create the same Passport installation record used by the embedded GHL application before creating the Staff session. This removes the requirement to open the embedded GHL app first, while still enforcing the selected location, active operator, user role, token scopes, and OAuth state checks.
 
 The operating system may still return an OAuth redirect to a normal browser tab rather than reopening an installed web-app window. The callback URL remains on the same Passport origin and completes the one-time PWA handoff there; the app cannot universally force iOS or Android to reopen a standalone web-app window after an external OAuth provider redirect.
+
+
+## 18. HighLevel API-version correction
+
+The post-OAuth PWA failure was traced to the first-login location lookup. Passport called the current `GET /locations/:locationId` endpoint with the legacy `Version: 2021-07-28` header, while the current HighLevel endpoint requires `Version: v3`. HighLevel rejected that request before Passport could create the one-time PWA handoff, which made the browser remain on the HighLevel flow instead of opening the Staff app. The location lookup now uses `Version: v3`, and a regression test protects this header.

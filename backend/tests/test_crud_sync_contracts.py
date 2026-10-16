@@ -7,7 +7,7 @@ import pytest
 from app.core.exceptions import ConflictError
 from app.services.booking_admin_service import BookingAdminService
 from app.services.ghl_appointment_service import GHLAppointmentService
-from app.services.ghl_auth_service import REQUIRED_SCOPES
+from app.services.ghl_auth_service import GHLAuthService, REQUIRED_SCOPES
 from app.services.ghl_calendar_service import GHLCalendarService
 
 
@@ -23,6 +23,28 @@ def test_highlevel_calendar_and_appointment_scopes_are_required() -> None:
 def test_highlevel_conversation_message_scope_is_not_requested() -> None:
     # Customer email/SMS delivery is owned by GHL workflows, not Passport.
     assert "conversations/message.write" not in REQUIRED_SCOPES
+
+
+def test_location_lookup_uses_current_highlevel_api_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"location": {"id": "loc-1", "name": "Demo"}}
+
+    def fake_get(url, *, headers, timeout):
+        calls.append((url, headers, timeout))
+        return Response()
+
+    monkeypatch.setattr("app.services.ghl_auth_service.httpx.get", fake_get)
+    service = GHLAuthService.__new__(GHLAuthService)
+    service.settings = SimpleNamespace(ghl_api_base_url="https://services.leadconnectorhq.com")
+
+    assert service.fetch_location("loc-1", "access-token")["name"] == "Demo"
+    assert calls[0][1]["Version"] == "v3"
 
 
 def test_calendar_recovery_uses_stable_passport_marker() -> None:

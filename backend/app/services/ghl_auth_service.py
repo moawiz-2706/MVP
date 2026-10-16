@@ -136,7 +136,7 @@ class GHLAuthService:
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Accept": "application/json",
-                "Version": "2021-07-28",
+                "Version": "v3",
             },
             timeout=15,
         )
