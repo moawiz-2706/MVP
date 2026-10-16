@@ -7,6 +7,32 @@ const SessionContext = createContext<SessionState | null>(null);
 const PWA_SESSION_KEY = "passport_staff_session";
 const PWA_LOGIN_PENDING_KEY = "passport_staff_login_pending";
 
+function storePwaSession(token: string): void {
+  try {
+    localStorage.setItem(PWA_SESSION_KEY, token);
+  } catch {
+    // Safari private browsing or storage restrictions can reject localStorage.
+  }
+  sessionStorage.setItem(PWA_SESSION_KEY, token);
+}
+
+function readPwaSession(): string | null {
+  try {
+    return localStorage.getItem(PWA_SESSION_KEY) || sessionStorage.getItem(PWA_SESSION_KEY);
+  } catch {
+    return sessionStorage.getItem(PWA_SESSION_KEY);
+  }
+}
+
+function clearPwaSession(): void {
+  try {
+    localStorage.removeItem(PWA_SESSION_KEY);
+  } catch {
+    // Continue clearing the tab session below.
+  }
+  sessionStorage.removeItem(PWA_SESSION_KEY);
+}
+
 function requestEncryptedContext(): Promise<string> {
   const allowedOrigins = (import.meta.env.VITE_GHL_PARENT_ORIGINS || "")
     .split(",")
@@ -78,12 +104,12 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
         if (handoff) {
           const session = await api<{ access_token: string; expires_in: number }>("/pwa-auth/exchange", json("POST", { code: handoff }), { retryOnUnauthorized: false, notifySessionExpired: false });
           setSessionToken(session.access_token);
-          sessionStorage.setItem(PWA_SESSION_KEY, session.access_token);
+          storePwaSession(session.access_token);
           sessionStorage.removeItem(PWA_LOGIN_PENDING_KEY);
           expiresIn = session.expires_in;
           window.history.replaceState({}, document.title, window.location.pathname);
         } else {
-          const stored = sessionStorage.getItem(PWA_SESSION_KEY);
+          const stored = readPwaSession();
           if (!stored) {
             setStandaloneNeedsLogin(true);
             return;
@@ -91,7 +117,7 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
           setSessionToken(stored);
           const session = await api<{ access_token: string; expires_in: number }>("/pwa-auth/refresh", json("POST", {}), { retryOnUnauthorized: false, notifySessionExpired: false });
           setSessionToken(session.access_token);
-          sessionStorage.setItem(PWA_SESSION_KEY, session.access_token);
+          storePwaSession(session.access_token);
           expiresIn = session.expires_in;
         }
         setStandaloneNeedsLogin(false);
@@ -99,7 +125,7 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
         setMe(await api<UserContext>("/me", {}, { retryOnUnauthorized: false, notifySessionExpired: false }));
       } catch (reason) {
         setSessionToken(null);
-        sessionStorage.removeItem(PWA_SESSION_KEY);
+        clearPwaSession();
         setStandaloneNeedsLogin(true);
         setError(reason instanceof Error ? reason.message : "HighLevel login could not be completed.");
       }

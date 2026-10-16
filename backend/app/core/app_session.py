@@ -31,9 +31,18 @@ class SessionPrincipal:
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def create_app_session(principal: SessionPrincipal, settings: Settings) -> tuple[str, int]:
+def create_app_session(
+    principal: SessionPrincipal,
+    settings: Settings,
+    *,
+    lifetime_minutes: int | None = None,
+) -> tuple[str, int]:
     now = datetime.now(UTC)
-    lifetime = timedelta(minutes=settings.app_session_minutes)
+    lifetime = timedelta(
+        minutes=lifetime_minutes
+        if lifetime_minutes is not None
+        else settings.app_session_minutes
+    )
     token = jwt.encode(
         {
             "sub": str(principal.app_user_id),

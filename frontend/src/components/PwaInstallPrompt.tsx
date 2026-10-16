@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isEmbeddedInHighLevel, standalonePwaUrl } from "../pwa";
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -10,6 +11,8 @@ export function PwaInstallPrompt() {
   const [installed, setInstalled] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const embedded = isEmbeddedInHighLevel();
+  const appUrl = standalonePwaUrl();
 
   useEffect(() => {
     const onBeforeInstall = (event: Event) => {
@@ -32,6 +35,9 @@ export function PwaInstallPrompt() {
   const isIos = /iPad|iPhone|iPod/.test(userAgent) && !("MSStream" in window);
   const isAndroid = /Android/.test(userAgent);
   const isMobile = isIos || isAndroid;
+  if (embedded) {
+    return <div className="pwa-install-prompt" role="status"><div><strong>Install Passport Staff</strong><span>Do not install from the HighLevel page. Open Passport in its own browser tab first.</span></div><div className="toolbar"><a className="button small" href={appUrl} target="_blank" rel="noreferrer">Open Passport PWA</a></div></div>;
+  }
   if (installed || dismissed || window.matchMedia("(display-mode: standalone)").matches || (!installEvent && !isMobile)) return null;
 
   const install = async () => {

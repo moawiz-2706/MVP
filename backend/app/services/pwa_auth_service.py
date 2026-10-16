@@ -153,6 +153,7 @@ class PWAAuthService:
                 authz_version=installation.authz_version,
             ),
             self.settings,
+            lifetime_minutes=self.settings.pwa_session_minutes,
         )
 
     def refresh_session(self, principal: SessionPrincipal) -> tuple[str, int]:
@@ -184,6 +185,7 @@ class PWAAuthService:
                 authz_version=installation.authz_version,
             ),
             self.settings,
+            lifetime_minutes=self.settings.pwa_session_minutes,
         )
 
     def _fetch_user(self, user_id: str, location_id: str, access_token: str) -> dict[str, Any]:

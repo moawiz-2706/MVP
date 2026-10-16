@@ -124,6 +124,29 @@ site for `/api/v1`, which produces the same generic Booking-page request error.
 The detailed API contract and GHL integration boundary are documented in
 `docs/FAREHARBOR_REPLICA_IMPLEMENTATION_SPEC.md`.
 
+## Standalone Staff PWA installation
+
+The Staff PWA is the same `frontend/` project, deployed at its own public
+Passport frontend origin. Set `VITE_PWA_APP_URL` to that origin, for example
+`https://passport.example.com`, and install the PWA from
+`https://passport.example.com/app`. Do not use **Add to Home Screen** while the
+top-level browser page is `app.gohighlevel.com` or a HighLevel white-label
+host; that creates a HighLevel shortcut and opens native HighLevel pages.
+
+When Passport is embedded inside HighLevel, the install banner now provides an
+**Open Passport PWA** link instead of presenting the embedded page as the
+install target. On iPhone, open that standalone Passport URL in Safari and use
+Share → Add to Home Screen. On Android, open that URL in Chrome and use Install
+app or Add to Home screen.
+
+The standalone PWA stores its Passport session in device local storage and
+receives a separate 31-day session token (`PWA_SESSION_MINUTES=44640`). It can
+be renewed while the app is used. The backend still checks the operator,
+installation, membership, and authorization version on every request, so an
+admin can invalidate access by disabling the operator, removing membership, or
+rotating authorization. Clearing site data or using a different browser/device
+requires login again.
+
 Calendar editors can configure one or more independent staff pools for
 assignment and GHL ownership. Existing calendars default to `Captain`; these
 pools no longer make a booking slot unavailable when a staff member or role is

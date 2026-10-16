@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     app_session_secret: str = "development-only-change-me"
     app_session_minutes: int = Field(default=15, ge=5, le=60)
+    # Standalone Staff PWA sessions are intentionally longer than embedded
+    # sessions because the installed mobile app should stay signed in between
+    # uses. Membership, installation status, and authz_version are still
+    # checked on every request so an admin can invalidate access.
+    pwa_session_minutes: int = Field(default=44_640, ge=43_200, le=129_600)
 
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
