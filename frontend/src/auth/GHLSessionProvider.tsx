@@ -5,6 +5,7 @@ import type { UserContext } from "../api/types";
 interface SessionState { me: UserContext; refresh: () => Promise<void> }
 const SessionContext = createContext<SessionState | null>(null);
 const PWA_SESSION_KEY = "passport_staff_session";
+const PWA_LOGIN_PENDING_KEY = "passport_staff_login_pending";
 
 function requestEncryptedContext(): Promise<string> {
   const allowedOrigins = (import.meta.env.VITE_GHL_PARENT_ORIGINS || "")
@@ -30,19 +31,24 @@ function requestEncryptedContext(): Promise<string> {
 }
 
 function isStandalonePwa(): boolean {
-  return window.parent === window;
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const query = new URLSearchParams(window.location.search);
+  const returnedFromPwaLogin = hash.has("pwa_code") || query.has("pwa_auth_error");
+  const loginWasStarted = sessionStorage.getItem(PWA_LOGIN_PENDING_KEY) === "1";
+  return window.parent === window || returnedFromPwaLogin || loginWasStarted;
 }
 
 function PwaLoginScreen({ error }: { error: string | null }) {
-  return <main className="center-state"><section className="state-card pwa-login-card"><div className="brand-mark">P</div><h1>Passport Staff</h1><p>{error || "Sign in with your HighLevel account to manage bookings, calendars, staff, payments, and waivers."}</p>{error && <div className="error-banner">{error}</div>}<a className="button" href={apiUrl("/pwa-auth/highlevel/start")}>Login with HighLevel</a><small>HighLevel credentials are entered on HighLevel. Passport never stores your HighLevel password.</small><div className="pwa-login-install-note"><strong>Install on your phone</strong><span>iPhone: open this page in Safari, tap Share, then Add to Home Screen. Android: open the browser menu, then choose Install app or Add to Home screen.</span></div></section></main>;
+  return <main className="center-state"><section className="state-card pwa-login-card"><div className="brand-mark">P</div><h1>Passport Staff</h1><p>{error || "Sign in with your HighLevel account to manage bookings, calendars, staff, payments, and waivers."}</p>{error && <div className="error-banner">{error}</div>}<a className="button" href={apiUrl("/pwa-auth/highlevel/start")} onClick={() => sessionStorage.setItem(PWA_LOGIN_PENDING_KEY, "1")}>Login with HighLevel</a><small>HighLevel credentials are entered on HighLevel. Passport never stores your HighLevel password.</small><div className="pwa-login-install-note"><strong>Install on your phone</strong><span>iPhone: open this page in Safari, tap Share, then Add to Home Screen. Android: open the browser menu, then choose Install app or Add to Home screen.</span></div></section></main>;
 }
 
 export function GHLSessionProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<UserContext | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [standaloneNeedsLogin, setStandaloneNeedsLogin] = useState(false);
+  // Keep callback mode stable after the one-time hash is removed on success.
+  const [standalone] = useState(isStandalonePwa);
   const refreshTimer = useRef<number | null>(null);
-  const standalone = isStandalonePwa();
 
   const scheduleRefresh = useCallback((expiresIn: number, refresh: () => Promise<void>) => {
     if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
@@ -63,6 +69,7 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
         if (callbackError) {
           window.history.replaceState({}, document.title, window.location.pathname);
           setStandaloneNeedsLogin(true);
+          sessionStorage.removeItem(PWA_LOGIN_PENDING_KEY);
           setError(callbackError);
           return;
         }
@@ -72,6 +79,7 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
           const session = await api<{ access_token: string; expires_in: number }>("/pwa-auth/exchange", json("POST", { code: handoff }), { retryOnUnauthorized: false, notifySessionExpired: false });
           setSessionToken(session.access_token);
           sessionStorage.setItem(PWA_SESSION_KEY, session.access_token);
+          sessionStorage.removeItem(PWA_LOGIN_PENDING_KEY);
           expiresIn = session.expires_in;
           window.history.replaceState({}, document.title, window.location.pathname);
         } else {

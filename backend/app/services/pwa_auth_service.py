@@ -42,7 +42,27 @@ class PWAAuthService:
             )
         )
         if installation is None:
-            raise ValueError("This HighLevel location has not installed Passport")
+            # Standalone PWA login is also an authorized installation flow. The
+            # user has just granted the Passport OAuth app access to this
+            # location, so create the same installation record used by the
+            # embedded GHL app before creating the Staff session.
+            from app.services.ghl_auth_service import GHLAuthService
+
+            auth_service = GHLAuthService(self.db, self.settings)
+            location = auth_service.fetch_location(
+                location_id,
+                token_payload["access_token"],
+            )
+            auth_service.provision_installation(token_payload, location)
+            installation = self.db.scalar(
+                select(GHLInstallation).where(
+                    GHLInstallation.location_id == location_id,
+                    GHLInstallation.is_installed.is_(True),
+                    GHLInstallation.lifecycle_status == "active",
+                )
+            )
+            if installation is None:
+                raise ValueError("Passport installation could not be created for this HighLevel location")
         operator = self.db.get(Operator, installation.operator_id)
 
         if operator is None or installation is None or not operator.is_active:

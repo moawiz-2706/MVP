@@ -875,3 +875,10 @@ Validation for this phase:
 The mobile testing issue identified two separate behaviors. iPhone does not expose the Android-style `beforeinstallprompt` event; installation must use Safari Share → Add to Home Screen. Android may also omit the event when the page is not yet installable or when the event fires before the authenticated shell mounts. The PWA now shows phone installation guidance on the login screen and a mobile fallback help dialog, while preserving the native Android install prompt when available.
 
 The standalone HighLevel OAuth request no longer asks Passport to send conversation messages. Customer SMS and email delivery is intended to be handled by HighLevel workflows, so the obsolete `conversations/message.write` scope was removed. The OAuth callback now also converts unexpected server-side failures into a controlled login error redirect and logs the underlying exception for backend diagnosis. The service-worker cache version was advanced to force mobile clients to refresh stale shell code.
+
+
+## 17. First-login installation provisioning
+
+Standalone Staff PWA OAuth previously required an existing `GHLInstallation` row and returned a “HighLevel location has not installed Passport” error when the PWA was the first authorized entry point. The PWA callback now uses the newly authorized Location token to fetch the HighLevel location and create the same Passport installation record used by the embedded GHL application before creating the Staff session. This removes the requirement to open the embedded GHL app first, while still enforcing the selected location, active operator, user role, token scopes, and OAuth state checks.
+
+The operating system may still return an OAuth redirect to a normal browser tab rather than reopening an installed web-app window. The callback URL remains on the same Passport origin and completes the one-time PWA handoff there; the app cannot universally force iOS or Android to reopen a standalone web-app window after an external OAuth provider redirect.
