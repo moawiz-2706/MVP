@@ -458,12 +458,21 @@ a { color: inherit; text-decoration: none; }
   .pwa-install-prompt { align-items: flex-start; }
 .pwa-install-prompt .toolbar { flex: 0 0 auto; }
 }
+.pwa-install-help { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: rgba(17,26,36,.42); }
+.pwa-install-help-card { width: min(430px, 100%); padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: 0 18px 50px rgba(17,26,36,.22); }
+.pwa-install-help-card .section-heading { margin-bottom: 10px; }
+.pwa-install-help-card h2 { margin: 0 0 4px; font-size: 16px; }
+.pwa-install-help-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.pwa-install-help-card ol { margin: 12px 0 18px; padding-left: 22px; color: #344054; font-size: 12px; line-height: 1.75; }
+.pwa-install-help-card .button { width: 100%; }
 .pwa-login-card { display: grid; gap: 12px; }
 .pwa-login-card .brand-mark { margin: 0 auto 4px; }
 .pwa-login-card h1 { margin: 0; }
 .pwa-login-card p { margin: 0; line-height: 1.55; }
 .pwa-login-card .button { width: 100%; }
 .pwa-login-card small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.pwa-login-install-note { display: grid; gap: 3px; padding: 10px; border: 1px solid #d9e5e1; border-radius: 8px; background: #f5faf8; color: #52635f; font-size: 11px; line-height: 1.45; text-align: left; }
+.pwa-login-install-note strong { color: #24453f; font-size: 11.5px; }
 .mobile-agenda { display: none; }
 .mobile-agenda-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .mobile-agenda-heading > div { display: grid; gap: 2px; }

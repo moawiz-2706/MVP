@@ -868,3 +868,10 @@ Validation for this phase:
 - Production frontend build: passed
 - Backend Python compilation: passed
 - Backend non-database regression suite: passed
+
+
+## 16. Mobile login and installation troubleshooting fixes
+
+The mobile testing issue identified two separate behaviors. iPhone does not expose the Android-style `beforeinstallprompt` event; installation must use Safari Share → Add to Home Screen. Android may also omit the event when the page is not yet installable or when the event fires before the authenticated shell mounts. The PWA now shows phone installation guidance on the login screen and a mobile fallback help dialog, while preserving the native Android install prompt when available.
+
+The standalone HighLevel OAuth request no longer asks Passport to send conversation messages. Customer SMS and email delivery is intended to be handled by HighLevel workflows, so the obsolete `conversations/message.write` scope was removed. The OAuth callback now also converts unexpected server-side failures into a controlled login error redirect and logs the underlying exception for backend diagnosis. The service-worker cache version was advanced to force mobile clients to refresh stale shell code.

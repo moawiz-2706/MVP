@@ -34,7 +34,7 @@ function isStandalonePwa(): boolean {
 }
 
 function PwaLoginScreen({ error }: { error: string | null }) {
-  return <main className="center-state"><section className="state-card pwa-login-card"><div className="brand-mark">P</div><h1>Passport Staff</h1><p>{error || "Sign in with your HighLevel account to manage bookings, calendars, staff, payments, and waivers."}</p>{error && <div className="error-banner">{error}</div>}<a className="button" href={apiUrl("/pwa-auth/highlevel/start")}>Login with HighLevel</a><small>HighLevel credentials are entered on HighLevel. Passport never stores your HighLevel password.</small></section></main>;
+  return <main className="center-state"><section className="state-card pwa-login-card"><div className="brand-mark">P</div><h1>Passport Staff</h1><p>{error || "Sign in with your HighLevel account to manage bookings, calendars, staff, payments, and waivers."}</p>{error && <div className="error-banner">{error}</div>}<a className="button" href={apiUrl("/pwa-auth/highlevel/start")}>Login with HighLevel</a><small>HighLevel credentials are entered on HighLevel. Passport never stores your HighLevel password.</small><div className="pwa-login-install-note"><strong>Install on your phone</strong><span>iPhone: open this page in Safari, tap Share, then Add to Home Screen. Android: open the browser menu, then choose Install app or Add to Home screen.</span></div></section></main>;
 }
 
 export function GHLSessionProvider({ children }: { children: ReactNode }) {

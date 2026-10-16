@@ -20,8 +20,9 @@ def test_highlevel_calendar_and_appointment_scopes_are_required() -> None:
     }.issubset(REQUIRED_SCOPES)
 
 
-def test_highlevel_message_send_scope_is_required_for_email_delivery() -> None:
-    assert "conversations/message.write" in REQUIRED_SCOPES
+def test_highlevel_conversation_message_scope_is_not_requested() -> None:
+    # Customer email/SMS delivery is owned by GHL workflows, not Passport.
+    assert "conversations/message.write" not in REQUIRED_SCOPES
 
 
 def test_calendar_recovery_uses_stable_passport_marker() -> None:

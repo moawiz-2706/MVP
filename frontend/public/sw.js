@@ -1,4 +1,4 @@
-const CACHE_NAME = "passport-staff-shell-v1";
+const CACHE_NAME = "passport-staff-shell-v2";
 const SHELL_ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/offline.html"];
 
 self.addEventListener("install", (event) => {

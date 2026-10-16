@@ -69,6 +69,10 @@ def oauth_callback(
         logger.error("GHL installation failed: %s", detail)
         message = quote("HighLevel login could not be completed" if pwa_flow else "HighLevel installation could not be completed")
         return _integration_redirect(settings, f"/app?pwa_auth_error={message}" if pwa_flow else f"/integration-result?error={message}")
+    except Exception:
+        logger.exception("Unexpected HighLevel OAuth callback failure")
+        message = quote("HighLevel login could not be completed" if pwa_flow else "HighLevel installation could not be completed")
+        return _integration_redirect(settings, f"/app?pwa_auth_error={message}" if pwa_flow else f"/integration-result?error={message}")
     return _integration_redirect(settings, "/integration-result?installed=1")
 
 
