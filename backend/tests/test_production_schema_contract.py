@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from app.models.entities import (
+    Booking,
+    BookingWaiver,
     GHLCustomFieldMapping,
     GHLSyncAttempt,
     GHLSyncRun,
@@ -24,6 +26,7 @@ STAFF_TARGET_FIX_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "034_
 WAIVER_RECONCILIATION_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "035_schema_reconciliation.sql"
 GHL_SYNC_STATE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "036_ghl_sync_state.sql"
 PWA_AUTH_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "037_pwa_auth_handoffs.sql"
+PWA_WORKSPACE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "038_pwa_workspace_performance.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -131,3 +134,18 @@ def test_pwa_auth_handoff_migration_and_model_are_aligned() -> None:
     assert "code_digest" in PWAAuthHandoff.__table__.columns
     assert "expires_at" in PWAAuthHandoff.__table__.columns
     assert "037_pwa_auth_handoffs" in sql
+
+
+def test_pwa_workspace_performance_migration_is_aligned() -> None:
+    sql = PWA_WORKSPACE_MIGRATION.read_text()
+    for index in (
+        "ix_bookings_operator_status_start",
+        "ix_booking_waivers_operator_status_booking",
+        "ix_staff_assignments_operator_calendar_interval",
+    ):
+        assert f"CREATE INDEX IF NOT EXISTS {index}" in sql
+    assert "038_pwa_workspace_performance" in sql
+    assert "ix_bookings_operator_status_start" in {index.name for index in Booking.__table__.indexes}
+    assert "ix_booking_waivers_operator_status_booking" in {
+        index.name for index in BookingWaiver.__table__.indexes
+    }

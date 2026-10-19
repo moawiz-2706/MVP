@@ -8,6 +8,7 @@
 --   1. Secure waiver token-digest lookup
 --   2. Durable synchronous GHL sync attempts, diagnostics, and recovery
 --   3. One-time Staff Operations PWA OAuth handoffs
+--   4. Fast, tenant-scoped Staff PWA dashboard queries
 --
 -- The dollar-input change and staff card/invoice/free booking options do not
 -- require additional database columns; they use the existing money and payment
@@ -178,7 +179,7 @@ COMMIT;
 
 -- Optional verification queries:
 -- SELECT version FROM public.passport_schema_version
--- WHERE version IN ('035_schema_reconciliation', '036_ghl_sync_state', '037_pwa_auth_handoffs')
+-- WHERE version IN ('035_schema_reconciliation', '036_ghl_sync_state', '037_pwa_auth_handoffs', '038_pwa_workspace_performance')
 -- ORDER BY version;
 -- SELECT to_regclass('public.ghl_sync_runs'), to_regclass('public.ghl_sync_attempts'),
 --        to_regclass('public.ghl_custom_field_mappings');
@@ -229,3 +230,28 @@ COMMIT;
 -- SELECT version FROM public.passport_schema_version
 -- WHERE version = '037_pwa_auth_handoffs';
 -- SELECT to_regclass('public.pwa_auth_handoffs');
+
+
+BEGIN;
+
+-- ================================================================
+-- Migration 038: PWA workspace performance indexes
+-- ================================================================
+CREATE INDEX IF NOT EXISTS ix_bookings_operator_status_start
+  ON public.bookings (operator_id, status, start_at);
+
+CREATE INDEX IF NOT EXISTS ix_booking_waivers_operator_status_booking
+  ON public.booking_waivers (operator_id, status, booking_id);
+
+CREATE INDEX IF NOT EXISTS ix_staff_assignments_operator_calendar_interval
+  ON public.staff_assignments (operator_id, calendar_id, start_at, end_at);
+
+INSERT INTO public.passport_schema_version(version)
+VALUES ('038_pwa_workspace_performance')
+ON CONFLICT (version) DO NOTHING;
+
+COMMIT;
+
+-- Verification:
+-- SELECT version FROM public.passport_schema_version
+-- WHERE version = '038_pwa_workspace_performance';

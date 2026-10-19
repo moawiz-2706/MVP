@@ -19,7 +19,7 @@ REQUIRED_PRODUCTION_TABLES = (
     "public_access_credentials",
     "pwa_auth_handoffs",
 )
-REQUIRED_SCHEMA_VERSION = "037_pwa_auth_handoffs"
+REQUIRED_SCHEMA_VERSION = "038_pwa_workspace_performance"
 
 
 @lru_cache

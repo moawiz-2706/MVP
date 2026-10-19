@@ -1,7 +1,7 @@
 {
   "routes": [
     { "path": "/", "title": "Passport" },
-    { "path": "/app", "title": "Staff Operations" },
+    { "path": "/app", "title": "Staff Operations Home" },
     { "path": "/app/bookings", "title": "Bookings" },
     { "path": "/app/notifications", "title": "Notifications" },
     { "path": "/app/resources", "title": "Resources" },

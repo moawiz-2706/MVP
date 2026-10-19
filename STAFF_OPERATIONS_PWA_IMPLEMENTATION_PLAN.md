@@ -4,6 +4,8 @@
 **Local clone reviewed:** `/home/ubuntu/MVP_20261016`  
 **Status:** In progress. The implementation is being delivered in tested slices inside the existing repository.
 
+> **Implementation update — 20 October 2026:** The Passport PWA now has a mobile-first `/app` home dashboard, universal search, responsive booking/calendar views, an installable shell, offline status notice, persistent theme preference, Passport-side session support, and deferred page loading. The dashboard and search query Passport through three protected, tenant-scoped endpoints rather than triggering multiple browser-side queries. The Staff screen now reads Passport’s cached staff directory first; a person explicitly runs **Sync GHL staff** when they want a provider refresh. Existing booking, calendar, payment, waiver, and desktop routes are retained unchanged.
+
 ## 1. Product decision
 
 The application will have **one PWA experience only**:

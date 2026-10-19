@@ -341,6 +341,7 @@ export function BookingsPage() {
   const params = new URLSearchParams({ range_start: range.start, range_end: range.end }); if (filter.type === "calendar" && filter.id) params.set("calendar_id", filter.id); if (filter.type === "category" && filter.id) params.set("category_id", filter.id); if (search.trim()) params.set("search", search.trim());
   const slots = useQuery({ queryKey:["bookings","slots",params.toString()], queryFn:() => api<DashboardSlot[]>(`/booking-slots?${params}`), refetchInterval:45_000 });
   useEffect(() => { const bookingId = new URLSearchParams(location.search).get("booking"); if (bookingId) setSelected(bookingId); }, [location.search]);
+  useEffect(() => { if (new URLSearchParams(location.search).get("new") === "1") setCreating(true); }, [location.search]);
   const eventData = useMemo(() => (slots.data || []).flatMap((slot) => slot.calendars.filter((entry) => isValidDateTime(slot.start_at) && isValidDateTime(entry.end_at)).map((entry) => ({
     id: `${entry.calendar_id}|${slot.start_at}`,
     start: slot.start_at,

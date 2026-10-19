@@ -553,6 +553,7 @@ class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="status_valid",
         ),
         Index("ix_bookings_operator_interval", "operator_id", "start_at", "end_at"),
+        Index("ix_bookings_operator_status_start", "operator_id", "status", "start_at"),
         Index("ix_bookings_calendar_interval", "calendar_id", "start_at", "end_at"),
     )
 
@@ -640,6 +641,7 @@ class BookingWaiver(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("token_digest", name="uq_booking_waivers_token_digest"),
         CheckConstraint("status IN ('pending', 'signed')", name="status_valid"),
+        Index("ix_booking_waivers_operator_status_booking", "operator_id", "status", "booking_id"),
         CheckConstraint(
             "status <> 'signed' OR (signed_at IS NOT NULL AND waiver_text IS NOT NULL"
             " AND details IS NOT NULL AND signature_png IS NOT NULL)",

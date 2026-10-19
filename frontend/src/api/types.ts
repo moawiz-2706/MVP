@@ -18,6 +18,50 @@ export interface UserContext {
   };
 }
 
+export interface PwaBootstrapResponse extends UserContext {
+  permissions: string[];
+  features: Record<string, boolean>;
+  badge_counts: { notifications: number; staff_missing_roles: number };
+}
+
+export interface PwaDashboardCounts {
+  today: number;
+  upcoming: number;
+  pending_payment: number;
+  waivers_pending: number;
+  unassigned_bookings: number;
+  sync_failures: number;
+  staff_conflicts: number;
+}
+
+export interface PwaDashboardAlert {
+  id: string;
+  title: string;
+  description: string;
+  href: string;
+  severity: "warning" | "danger";
+}
+
+export interface PwaDashboardResponse {
+  date: string;
+  time_zone: string;
+  today: Booking[];
+  upcoming: Booking[];
+  counts: PwaDashboardCounts;
+  attention: PwaDashboardAlert[];
+}
+
+export interface PwaSearchResult {
+  type: "booking" | "customer" | "calendar" | "staff" | "payment" | "waiver" | "note";
+  id: Id;
+  title: string;
+  subtitle: string | null;
+  status: string | null;
+  href: string;
+}
+
+export interface PwaSearchResponse { query: string; results: PwaSearchResult[] }
+
 export interface Entity { id: Id; created_at: string; updated_at: string }
 export interface Location extends Entity { name: string; address: string; is_active: boolean; calendars_count: number }
 export interface Resource extends Entity { name: string; resource_type: string; quantity: number; capacity_limit: number | null; notes: string | null; is_active: boolean; calendars_count: number }
