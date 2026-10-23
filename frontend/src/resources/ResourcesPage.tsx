@@ -16,10 +16,74 @@ function ResourceForm({ resource, onDone }: { resource: Resource | null; onDone:
   const [capacityLimit, setCapacityLimit] = useState(resource?.capacity_limit ?? "");
   const [notes, setNotes] = useState(resource?.notes || "");
   const [active, setActive] = useState(resource?.is_active ?? true);
-  useEffect(() => { setName(resource?.name || ""); setResourceType(resource?.resource_type || "equipment"); setQuantity(resource?.quantity ?? 1); setCapacityLimit(resource?.capacity_limit ?? ""); setNotes(resource?.notes || ""); setActive(resource?.is_active ?? true); }, [resource]);
-  const mutation = useMutation({ mutationFn: () => api<Resource>(resource ? `/resources/${resource.id}` : "/resources", json(resource ? "PATCH" : "POST", { name, resource_type: resourceType, quantity, capacity_limit: capacityLimit === "" ? null : Number(capacityLimit), notes: notes.trim() || null, is_active: active })), onSuccess: async () => { await client.invalidateQueries({ queryKey: ["resources"] }); onDone(); } });
-  const submit = (event: FormEvent) => { event.preventDefault(); mutation.mutate(); };
-  return <form onSubmit={submit}><div className="form-grid"><label className="field full"><span>Name</span><input autoFocus required maxLength={160} value={name} onChange={(e) => setName(e.target.value)} placeholder="Single Kayaks" /></label><label className="field"><span>Resource type</span><select value={resourceType} onChange={(e) => setResourceType(e.target.value)}><option value="equipment">Equipment</option><option value="boat">Boat</option><option value="vehicle">Vehicle</option><option value="guide">Guide pool</option><option value="facility">Facility</option><option value="other">Other</option></select></label><label className="field"><span>Total quantity</span><input required type="number" min={0} value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /></label><label className="field"><span>Use limit per unit (optional)</span><input type="number" min={0} value={capacityLimit} onChange={(e) => setCapacityLimit(e.target.value === "" ? "" : Number(e.target.value))} placeholder="For reporting" /></label><label className="check-field"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />Available for scheduling</label><label className="field full"><span>Operational notes</span><textarea rows={3} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Inspection, assignment, or safety notes" /></label></div>{mutation.error && <div className="error-banner">{mutation.error.message}</div>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={onDone}>Cancel</button><button className="button" disabled={mutation.isPending}>{mutation.isPending ? "Saving…" : "Save resource"}</button></div></form>;
+
+  useEffect(() => {
+    setName(resource?.name || "");
+    setResourceType(resource?.resource_type || "equipment");
+    setQuantity(resource?.quantity ?? 1);
+    setCapacityLimit(resource?.capacity_limit ?? "");
+    setNotes(resource?.notes || "");
+    setActive(resource?.is_active ?? true);
+  }, [resource]);
+
+  const mutation = useMutation({
+    mutationFn: () => api<Resource>(
+      resource ? `/resources/${resource.id}` : "/resources",
+      json(resource ? "PATCH" : "POST", {
+        name,
+        resource_type: resourceType,
+        quantity,
+        capacity_limit: capacityLimit === "" ? null : Number(capacityLimit),
+        notes: notes.trim() || null,
+        is_active: active,
+      }),
+    ),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ["resources"] });
+      onDone();
+    },
+  });
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    mutation.mutate();
+  };
+
+  return (
+    <form onSubmit={submit}>
+      <div className="form-grid">
+        <label className="field full"><span>Name</span><input autoFocus required maxLength={160} value={name} onChange={(event) => setName(event.target.value)} placeholder="Single Kayaks" /></label>
+        <label className="field"><span>Resource type</span><select value={resourceType} onChange={(event) => setResourceType(event.target.value)}><option value="equipment">Equipment</option><option value="boat">Boat</option><option value="vehicle">Vehicle</option><option value="guide">Guide pool</option><option value="facility">Facility</option><option value="other">Other</option></select></label>
+        <label className="field"><span>Total quantity</span><input required type="number" min={0} value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></label>
+        <label className="field"><span>Use limit per unit (optional)</span><input type="number" min={0} value={capacityLimit} onChange={(event) => setCapacityLimit(event.target.value === "" ? "" : Number(event.target.value))} placeholder="For reporting" /></label>
+        <label className="check-field"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />Available for scheduling</label>
+        <label className="field full"><span>Operational notes</span><textarea rows={3} maxLength={2000} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Inspection, assignment, or safety notes" /></label>
+      </div>
+      {mutation.error && <div className="error-banner">{mutation.error.message}</div>}
+      <div className="dialog-actions"><button type="button" className="button secondary" onClick={onDone}>Cancel</button><button className="button" disabled={mutation.isPending}>{mutation.isPending ? "Saving…" : "Save resource"}</button></div>
+    </form>
+  );
+}
+
+function MobileResourceList({ resources, onEdit, onDelete }: { resources: Resource[]; onEdit: (resource: Resource) => void; onDelete: (resource: Resource) => void }) {
+  return (
+    <div className="mobile-resource-list">
+      {resources.map((resource) => (
+        <article className="mobile-resource-card" key={resource.id}>
+          <div className="mobile-resource-heading">
+            <div><strong>{resource.name}</strong><span>{resource.notes || "Reusable requirement pool"}</span></div>
+            <span className={`badge ${resource.is_active ? "success" : ""}`}><i className="status-dot" />{resource.is_active ? "Active" : "Inactive"}</span>
+          </div>
+          <dl className="mobile-resource-meta">
+            <div><dt>Type</dt><dd>{resource.resource_type}</dd></div>
+            <div><dt>Quantity</dt><dd>{resource.quantity}{resource.capacity_limit !== null ? ` · limit ${resource.capacity_limit}` : ""}</dd></div>
+            <div><dt>Calendars</dt><dd>{resource.calendars_count}</dd></div>
+          </dl>
+          <div className="mobile-resource-actions"><button className="button secondary small" onClick={() => onEdit(resource)}><Pencil size={14} />Edit</button><button className="button ghost small" onClick={() => onDelete(resource)}><Trash2 size={14} />Delete</button></div>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 export function ResourcesPage() {
@@ -27,7 +91,32 @@ export function ResourcesPage() {
   const { data = [], isLoading, error } = useQuery({ queryKey: ["resources"], queryFn: () => api<Resource[]>("/resources") });
   const [editing, setEditing] = useState<Resource | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<Resource | null>(null);
-  const remove = useMutation({ mutationFn: (id: string) => api<void>(`/resources/${id}`, { method: "DELETE" }), onSuccess: async () => { setDeleting(null); await Promise.all([client.invalidateQueries({ queryKey: ["resources"] }), client.invalidateQueries({ queryKey: ["calendars"] })]); } });
-  const errorMessage = error instanceof ApiError && error.status >= 500 ? "Resources could not load because the resource metadata schema is not applied. Run supabase/migrations/024_resource_metadata_repair.sql, then reload this page." : error?.message;
-  return <div className="page"><PageHeader title="Resources" description="Shared inventory pools, crew pools, boats, equipment, and reusable capacity requirements." action={<button className="button" onClick={() => setEditing(null)}><Plus size={16} />Add resource</button>} />{errorMessage && <div className="error-banner">{errorMessage}</div>}<div className="card table-card">{isLoading ? <div className="loading">Loading inventory…</div> : data.length === 0 ? <EmptyState title="No resources yet" copy="Create a quantity pool such as Single Kayaks, Guides, or Trailers." /> : <table className="data-table"><thead><tr><th>Resource</th><th>Type</th><th>Quantity</th><th>Status</th><th>Calendars</th><th aria-label="Actions" /></tr></thead><tbody>{data.map((resource) => <tr key={resource.id}><td><div className="cell-title"><strong>{resource.name}</strong><span>{resource.notes || "Reusable requirement pool"}</span></div></td><td>{resource.resource_type}</td><td>{resource.quantity}{resource.capacity_limit !== null && <small className="muted-note"> · limit {resource.capacity_limit}</small>}</td><td><span className={`badge ${resource.is_active ? "success" : ""}`}><i className="status-dot" />{resource.is_active ? "Active" : "Inactive"}</span></td><td>{resource.calendars_count}</td><td><div className="toolbar"><button className="icon-button" aria-label={`Edit ${resource.name}`} onClick={() => setEditing(resource)}><Pencil size={15} /></button><button className="icon-button" aria-label={`Delete ${resource.name}`} onClick={() => setDeleting(resource)}><Trash2 size={15} /></button></div></td></tr>)}</tbody></table>}</div><Modal open={editing !== undefined} onOpenChange={(open) => !open && setEditing(undefined)} title={editing ? `Edit ${editing.name}` : "Add resource"} description="Map this reusable pool to calendars and customer-type rates as a resource requirement."><ResourceForm resource={editing || null} onDone={() => setEditing(undefined)} /></Modal>{deleting && <DestructiveConfirmationDialog open itemName={deleting.name} consequences={`This detaches the resource from ${deleting.calendars_count} active calendar${deleting.calendars_count === 1 ? "" : "s"}.`} onOpenChange={(open) => !open && setDeleting(null)} onConfirm={() => remove.mutate(deleting.id)} busy={remove.isPending} />}</div>;
+  const remove = useMutation({
+    mutationFn: (id: string) => api<void>(`/resources/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      setDeleting(null);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["resources"] }),
+        client.invalidateQueries({ queryKey: ["calendars"] }),
+      ]);
+    },
+  });
+  const errorMessage = error instanceof ApiError && error.status >= 500
+    ? "Resources could not load because the resource metadata schema is not applied. Run supabase/migrations/024_resource_metadata_repair.sql, then reload this page."
+    : error?.message;
+
+  return (
+    <div className="page">
+      <PageHeader title="Resources" description="Shared inventory pools, crew pools, boats, equipment, and reusable capacity requirements." action={<button className="button" onClick={() => setEditing(null)}><Plus size={16} />Add resource</button>} />
+      {errorMessage && <div className="error-banner">{errorMessage}</div>}
+      <div className="card table-card">
+        {isLoading ? <div className="loading">Loading inventory…</div> : data.length === 0 ? <EmptyState title="No resources yet" copy="Create a quantity pool such as Single Kayaks, Guides, or Trailers." /> : <>
+          <div className="desktop-resource-table"><table className="data-table"><thead><tr><th>Resource</th><th>Type</th><th>Quantity</th><th>Status</th><th>Calendars</th><th aria-label="Actions" /></tr></thead><tbody>{data.map((resource) => <tr key={resource.id}><td><div className="cell-title"><strong>{resource.name}</strong><span>{resource.notes || "Reusable requirement pool"}</span></div></td><td>{resource.resource_type}</td><td>{resource.quantity}{resource.capacity_limit !== null && <small className="muted-note"> · limit {resource.capacity_limit}</small>}</td><td><span className={`badge ${resource.is_active ? "success" : ""}`}><i className="status-dot" />{resource.is_active ? "Active" : "Inactive"}</span></td><td>{resource.calendars_count}</td><td><div className="toolbar"><button className="icon-button" aria-label={`Edit ${resource.name}`} onClick={() => setEditing(resource)}><Pencil size={15} /></button><button className="icon-button" aria-label={`Delete ${resource.name}`} onClick={() => setDeleting(resource)}><Trash2 size={15} /></button></div></td></tr>)}</tbody></table></div>
+          <MobileResourceList resources={data} onEdit={setEditing} onDelete={setDeleting} />
+        </>}
+      </div>
+      <Modal open={editing !== undefined} onOpenChange={(open) => !open && setEditing(undefined)} title={editing ? `Edit ${editing.name}` : "Add resource"} description="Map this reusable pool to calendars and customer-type rates as a resource requirement."><ResourceForm resource={editing || null} onDone={() => setEditing(undefined)} /></Modal>
+      {deleting && <DestructiveConfirmationDialog open itemName={deleting.name} consequences={`This detaches the resource from ${deleting.calendars_count} active calendar${deleting.calendars_count === 1 ? "" : "s"}.`} onOpenChange={(open) => !open && setDeleting(null)} onConfirm={() => remove.mutate(deleting.id)} busy={remove.isPending} />}
+    </div>
+  );
 }

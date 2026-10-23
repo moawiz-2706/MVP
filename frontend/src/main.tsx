@@ -27,7 +27,12 @@ const IntegrationResultPage = lazy(() => import("./IntegrationResultPage").then(
 const StaffBookingPage = lazy(() => import("./staff-booking/StaffBookingPage").then((module) => ({ default: module.StaffBookingPage })));
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: true } },
+  // Mobile PWAs regain focus whenever users switch apps, complete a payment, or
+  // unlock their phone. Refetching every mounted query at that point looked like
+  // a full page reload and created unnecessary requests. Screens still refetch
+  // after reconnecting, from their explicit refresh actions, or by their own
+  // focused polling interval where one is needed.
+  defaultOptions: { queries: { staleTime: 60_000, retry: 1, refetchOnWindowFocus: false } },
 });
 const embedded = <GHLSessionProvider><AppShell /></GHLSessionProvider>;
 

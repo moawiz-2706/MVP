@@ -1,4 +1,4 @@
-const CACHE_NAME = "passport-staff-shell-v3";
+const CACHE_NAME = "passport-staff-shell-v4";
 const SHELL_ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/offline.html"];
 
 self.addEventListener("install", (event) => {
@@ -29,8 +29,10 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          void caches.open(CACHE_NAME).then((cache) => cache.put("/index.html", copy));
+          if (response.ok && response.type === "basic") {
+            const copy = response.clone();
+            void caches.open(CACHE_NAME).then((cache) => cache.put("/index.html", copy));
+          }
           return response;
         })
         .catch(async () => (await caches.match("/index.html")) || caches.match("/offline.html")),
@@ -41,8 +43,10 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/")) {
     event.respondWith(
       caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-        const copy = response.clone();
-        void caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        if (response.ok && response.type === "basic") {
+          const copy = response.clone();
+          void caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
         return response;
       })),
     );

@@ -34,7 +34,14 @@ export async function api<T>(
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
-  const response = await fetch(apiUrl(path), { ...init, headers });
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    headers,
+    // The deployed PWA uses the same Passport origin for /api. Keeping this
+    // explicit preserves the HTTP-only PWA refresh cookie after an app reopen
+    // without opting into unsafe cross-origin credential sharing.
+    credentials: init.credentials ?? "same-origin",
+  });
   if (response.status === 401 && sessionToken && retryOnUnauthorized && refreshSession) {
     try {
       if (!refreshInFlight) {

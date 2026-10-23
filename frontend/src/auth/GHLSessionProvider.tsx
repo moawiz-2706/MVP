@@ -1,36 +1,62 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { api, apiUrl, json, setSessionRefresher, setSessionToken } from "../api/client";
+import { ApiError, api, apiUrl, json, setSessionRefresher, setSessionToken } from "../api/client";
 import type { UserContext } from "../api/types";
 
-interface SessionState { me: UserContext; refresh: () => Promise<void> }
+interface SessionState {
+  me: UserContext;
+  refresh: () => Promise<void>;
+}
+
 const SessionContext = createContext<SessionState | null>(null);
 const PWA_SESSION_KEY = "passport_staff_session";
 const PWA_LOGIN_PENDING_KEY = "passport_staff_login_pending";
 
-function storePwaSession(token: string): void {
+function readLegacyPwaSession(): string | null {
   try {
-    localStorage.setItem(PWA_SESSION_KEY, token);
+    const persistent = localStorage.getItem(PWA_SESSION_KEY);
+    if (persistent) return persistent;
   } catch {
-    // Safari private browsing or storage restrictions can reject localStorage.
+    // Continue to the tab storage fallback.
   }
-  sessionStorage.setItem(PWA_SESSION_KEY, token);
-}
-
-function readPwaSession(): string | null {
   try {
-    return localStorage.getItem(PWA_SESSION_KEY) || sessionStorage.getItem(PWA_SESSION_KEY);
-  } catch {
     return sessionStorage.getItem(PWA_SESSION_KEY);
+  } catch {
+    return null;
   }
 }
 
-function clearPwaSession(): void {
+function clearLegacyPwaSession(): void {
   try {
     localStorage.removeItem(PWA_SESSION_KEY);
   } catch {
     // Continue clearing the tab session below.
   }
-  sessionStorage.removeItem(PWA_SESSION_KEY);
+  try {
+    sessionStorage.removeItem(PWA_SESSION_KEY);
+  } catch {
+    // The HTTP-only refresh cookie is cleared by the logout endpoint.
+  }
+}
+
+function setPwaLoginPending(value: boolean): void {
+  try {
+    if (value) sessionStorage.setItem(PWA_LOGIN_PENDING_KEY, "1");
+    else sessionStorage.removeItem(PWA_LOGIN_PENDING_KEY);
+  } catch {
+    // Standalone detection also works from window.parent and the callback hash.
+  }
+}
+
+function hasPwaLoginPending(): boolean {
+  try {
+    return sessionStorage.getItem(PWA_LOGIN_PENDING_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function isDefinitiveSessionFailure(reason: unknown): boolean {
+  return reason instanceof ApiError && reason.status === 401;
 }
 
 function requestEncryptedContext(): Promise<string> {
@@ -60,12 +86,32 @@ function isStandalonePwa(): boolean {
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const query = new URLSearchParams(window.location.search);
   const returnedFromPwaLogin = hash.has("pwa_code") || query.has("pwa_auth_error");
-  const loginWasStarted = sessionStorage.getItem(PWA_LOGIN_PENDING_KEY) === "1";
-  return window.parent === window || returnedFromPwaLogin || loginWasStarted;
+  return window.parent === window || returnedFromPwaLogin || hasPwaLoginPending();
 }
 
 function PwaLoginScreen({ error }: { error: string | null }) {
-  return <main className="center-state"><section className="state-card pwa-login-card"><div className="brand-mark">P</div><h1>Passport Staff</h1><p>{error || "Sign in with your HighLevel account to manage bookings, calendars, staff, payments, and waivers."}</p>{error && <div className="error-banner">{error}</div>}<a className="button" href={apiUrl("/pwa-auth/highlevel/start")} onClick={() => sessionStorage.setItem(PWA_LOGIN_PENDING_KEY, "1")}>Login with HighLevel</a><small>HighLevel credentials are entered on HighLevel. Passport never stores your HighLevel password.</small><div className="pwa-login-install-note"><strong>Install on your phone</strong><span>iPhone: open this page in Safari, tap Share, then Add to Home Screen. Android: open the browser menu, then choose Install app or Add to Home screen.</span></div></section></main>;
+  return (
+    <main className="center-state">
+      <section className="state-card pwa-login-card">
+        <div className="brand-mark">P</div>
+        <h1>Passport Staff</h1>
+        <p>{error || "Sign in with your HighLevel account to manage bookings, calendars, staff, payments, and waivers."}</p>
+        {error && <div className="error-banner">{error}</div>}
+        <a
+          className="button"
+          href={apiUrl("/pwa-auth/highlevel/start")}
+          onClick={() => setPwaLoginPending(true)}
+        >
+          Login with HighLevel
+        </a>
+        <small>HighLevel credentials are entered on HighLevel. Passport never stores your HighLevel password.</small>
+        <div className="pwa-login-install-note">
+          <strong>Install on your phone</strong>
+          <span>iPhone: open this page in Safari, tap Share, then Add to Home Screen. Android: open the browser menu, then choose Install app or Add to Home screen.</span>
+        </div>
+      </section>
+    </main>
+  );
 }
 
 export function GHLSessionProvider({ children }: { children: ReactNode }) {
@@ -75,6 +121,7 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
   // Keep callback mode stable after the one-time hash is removed on success.
   const [standalone] = useState(isStandalonePwa);
   const refreshTimer = useRef<number | null>(null);
+  const sessionActive = useRef(false);
 
   const scheduleRefresh = useCallback((expiresIn: number, refresh: () => Promise<void>) => {
     if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
@@ -83,8 +130,6 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
-    setError(null);
-    setMe(null);
     if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
 
     if (standalone) {
@@ -95,46 +140,69 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
         if (callbackError) {
           window.history.replaceState({}, document.title, window.location.pathname);
           setStandaloneNeedsLogin(true);
-          sessionStorage.removeItem(PWA_LOGIN_PENDING_KEY);
+          setPwaLoginPending(false);
           setError(callbackError);
           return;
         }
 
-        let expiresIn = 0;
+        let expiresIn: number;
         if (handoff) {
-          const session = await api<{ access_token: string; expires_in: number }>("/pwa-auth/exchange", json("POST", { code: handoff }), { retryOnUnauthorized: false, notifySessionExpired: false });
+          const session = await api<{ access_token: string; expires_in: number }>(
+            "/pwa-auth/exchange",
+            json("POST", { code: handoff }),
+            { retryOnUnauthorized: false, notifySessionExpired: false },
+          );
           setSessionToken(session.access_token);
-          storePwaSession(session.access_token);
-          sessionStorage.removeItem(PWA_LOGIN_PENDING_KEY);
+          clearLegacyPwaSession();
+          setPwaLoginPending(false);
           expiresIn = session.expires_in;
           window.history.replaceState({}, document.title, window.location.pathname);
         } else {
-          const stored = readPwaSession();
-          if (!stored) {
-            setStandaloneNeedsLogin(true);
-            return;
-          }
+          // New PWA sessions are restored from the same-origin HTTP-only refresh
+          // cookie. A previously deployed local-storage bearer is accepted once
+          // by the backend and migrated to that cookie on this response.
+          const stored = readLegacyPwaSession();
           setSessionToken(stored);
-          const session = await api<{ access_token: string; expires_in: number }>("/pwa-auth/refresh", json("POST", {}), { retryOnUnauthorized: false, notifySessionExpired: false });
+          const session = await api<{ access_token: string; expires_in: number }>(
+            "/pwa-auth/refresh",
+            json("POST", {}),
+            { retryOnUnauthorized: false, notifySessionExpired: false },
+          );
           setSessionToken(session.access_token);
-          storePwaSession(session.access_token);
+          clearLegacyPwaSession();
           expiresIn = session.expires_in;
         }
+        setError(null);
         setStandaloneNeedsLogin(false);
         scheduleRefresh(expiresIn, refresh);
         setMe(await api<UserContext>("/me", {}, { retryOnUnauthorized: false, notifySessionExpired: false }));
+        sessionActive.current = true;
       } catch (reason) {
-        setSessionToken(null);
-        clearPwaSession();
-        setStandaloneNeedsLogin(true);
-        setError(reason instanceof Error ? reason.message : "HighLevel login could not be completed.");
+        if (isDefinitiveSessionFailure(reason)) {
+          setSessionToken(null);
+          clearLegacyPwaSession();
+          sessionActive.current = false;
+          setStandaloneNeedsLogin(true);
+          setError("Your Passport session has expired or was revoked. Please sign in again.");
+        } else if (!sessionActive.current) {
+          setError("Passport could not reconnect. Check your connection and try again; your existing login has not been removed.");
+        } else {
+          // Do not discard a month-long mobile login because a Vercel cold start,
+          // temporary network loss, or provider outage interrupted one refresh.
+          console.warn("Passport PWA session refresh will be retried later", reason);
+        }
       }
       return;
     }
 
     try {
+      setError(null);
       const encryptedData = await requestEncryptedContext();
-      const session = await api<{ access_token: string; expires_in: number }>("/auth/ghl-session", json("POST", { encryptedData }), { retryOnUnauthorized: false, notifySessionExpired: false });
+      const session = await api<{ access_token: string; expires_in: number }>(
+        "/auth/ghl-session",
+        json("POST", { encryptedData }),
+        { retryOnUnauthorized: false, notifySessionExpired: false },
+      );
       setSessionToken(session.access_token);
       scheduleRefresh(session.expires_in, refresh);
       setMe(await api<UserContext>("/me", {}, { retryOnUnauthorized: false, notifySessionExpired: false }));
@@ -156,8 +224,29 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   if (standalone && standaloneNeedsLogin) return <PwaLoginScreen error={error} />;
-  if (error) return <div className="center-state"><div className="state-card"><div className="brand-mark">P</div><h1>Passport</h1><p>{error}</p><button className="button secondary" onClick={() => void refresh()}>Try again</button></div></div>;
-  if (!me) return <div className="center-state"><div className="state-card"><div className="spinner" /><h1>Opening Passport</h1><p>{standalone ? "Verifying your HighLevel account…" : "Verifying your HighLevel workspace…"}</p></div></div>;
+  if (error) {
+    return (
+      <div className="center-state">
+        <div className="state-card">
+          <div className="brand-mark">P</div>
+          <h1>Passport</h1>
+          <p>{error}</p>
+          <button className="button secondary" onClick={() => void refresh()}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+  if (!me) {
+    return (
+      <div className="center-state">
+        <div className="state-card">
+          <div className="spinner" />
+          <h1>Opening Passport</h1>
+          <p>{standalone ? "Restoring your Passport session…" : "Verifying your HighLevel workspace…"}</p>
+        </div>
+      </div>
+    );
+  }
   return <SessionContext.Provider value={{ me, refresh }}>{children}</SessionContext.Provider>;
 }
 

@@ -62,6 +62,35 @@ def create_app_session(
     return token, int(lifetime.total_seconds())
 
 
+def create_pwa_refresh_session(
+    principal: SessionPrincipal,
+    settings: Settings,
+    *,
+    lifetime_minutes: int,
+) -> tuple[str, int]:
+    """Create a PWA-only refresh token, never accepted by normal API routes."""
+    now = datetime.now(UTC)
+    lifetime = timedelta(minutes=lifetime_minutes)
+    token = jwt.encode(
+        {
+            "sub": str(principal.app_user_id),
+            "operator_id": str(principal.operator_id),
+            "ghl_location_id": principal.ghl_location_id,
+            "role": principal.role,
+            "is_agency_owner": principal.is_agency_owner,
+            "authz_version": principal.authz_version,
+            "session_type": "pwa_refresh",
+            "iat": now,
+            "exp": now + lifetime,
+            "aud": "passport-pwa-refresh",
+            "iss": "passport-api",
+        },
+        settings.app_session_secret,
+        algorithm="HS256",
+    )
+    return token, int(lifetime.total_seconds())
+
+
 def decode_app_session(token: str, settings: Settings) -> SessionPrincipal:
     try:
         claims = jwt.decode(
@@ -85,15 +114,37 @@ def decode_app_session(token: str, settings: Settings) -> SessionPrincipal:
         raise HTTPException(status_code=401, detail="Invalid or expired application session") from exc
 
 
-def get_current_principal(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-    settings: Annotated[Settings, Depends(get_settings)],
-    db: Annotated[Session, Depends(get_db)],
+def decode_pwa_refresh_session(token: str, settings: Settings) -> SessionPrincipal:
+    """Decode only a refresh token produced by ``create_pwa_refresh_session``."""
+    try:
+        claims = jwt.decode(
+            token,
+            settings.app_session_secret,
+            algorithms=["HS256"],
+            audience="passport-pwa-refresh",
+            issuer="passport-api",
+            options={"require": ["sub", "operator_id", "ghl_location_id", "role", "session_type", "exp"]},
+        )
+        if claims["session_type"] != "pwa_refresh":
+            raise ValueError("Unexpected PWA session type")
+        return SessionPrincipal(
+            app_user_id=uuid.UUID(claims["sub"]),
+            operator_id=uuid.UUID(claims["operator_id"]),
+            ghl_location_id=claims["ghl_location_id"],
+            role=claims["role"],
+            is_agency_owner=bool(claims.get("is_agency_owner", False)),
+            authz_version=int(claims.get("authz_version", 1)),
+        )
+    except (InvalidTokenError, ValueError, KeyError, TypeError) as exc:
+        logger.warning("PWA refresh token rejected reason=%s", type(exc).__name__)
+        raise HTTPException(status_code=401, detail="Invalid or expired Passport PWA session") from exc
+
+
+def validate_session_principal(
+    principal: SessionPrincipal,
+    db: Session,
 ) -> SessionPrincipal:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        logger.warning("Application session rejected reason=missing_bearer")
-        raise HTTPException(status_code=401, detail="Application session required")
-    principal = decode_app_session(credentials.credentials, settings)
+    """Confirm that a decoded Passport session is still authorized in the database."""
     row = db.execute(
         select(GHLInstallation, OperatorUser, Operator)
         .join(OperatorUser, OperatorUser.operator_id == GHLInstallation.operator_id)
@@ -136,6 +187,18 @@ def get_current_principal(
         is_agency_owner=membership.is_agency_owner,
         authz_version=installation.authz_version,
     )
+
+
+def get_current_principal(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[Session, Depends(get_db)],
+) -> SessionPrincipal:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        logger.warning("Application session rejected reason=missing_bearer")
+        raise HTTPException(status_code=401, detail="Application session required")
+    principal = decode_app_session(credentials.credentials, settings)
+    return validate_session_principal(principal, db)
 
 
 CurrentPrincipal = Annotated[SessionPrincipal, Depends(get_current_principal)]

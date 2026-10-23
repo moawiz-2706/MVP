@@ -98,9 +98,14 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", openSearch);
   }, []);
 
+  useEffect(() => {
+    document.body.classList.toggle("passport-mobile-nav-open", mobileOpen);
+    return () => document.body.classList.remove("passport-mobile-nav-open");
+  }, [mobileOpen]);
+
   return (
     <div className="app-shell">
-      <button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu /></button>
+      <button className={`mobile-menu ${mobileOpen ? "menu-hidden" : ""}`} onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu /></button>
       {mobileOpen && <button className="mobile-scrim" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
       <aside className={`app-sidebar ${mobileOpen ? "open" : ""}`}>
         <div className="sidebar-brand">

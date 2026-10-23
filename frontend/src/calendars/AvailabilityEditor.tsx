@@ -126,8 +126,8 @@ function DateWiseEditor({ calendar, onCalendarChange, onSaved }: ModeProps) {
     <div>
       <p style={{ fontSize: 12, color: "#697386" }}>Availability applies only on these date ranges. Each range has its own opening intervals, and a booking must fit completely inside one of them.</p>
       {ranges.map((range, rangeIndex) => (
-        <div key={rangeIndex} style={{ borderTop: "1px solid #eef0f2", padding: "13px 0", display: "grid", gap: 9 }}>
-          <div className="toolbar">
+        <div key={rangeIndex} className="date-hours-range">
+          <div className="toolbar date-hours-dates">
             <label className="field" style={{ margin: 0 }}><span>From date</span>
               <input className="control" type="date" value={range.start_date} onChange={(e) => update(rangeIndex, { start_date: e.target.value })} />
             </label>
@@ -136,9 +136,9 @@ function DateWiseEditor({ calendar, onCalendarChange, onSaved }: ModeProps) {
             </label>
             <button className="icon-button" title="Remove date range" onClick={() => setRanges(ranges.filter((_, i) => i !== rangeIndex))}><Trash2 size={14} /></button>
           </div>
-          <div style={{ display: "grid", gap: 7, paddingLeft: 12 }}>
+          <div className="date-hours-intervals">
             {range.intervals.map((interval, intervalIndex) => (
-              <div className="toolbar" key={intervalIndex}>
+              <div className="toolbar date-hours-interval" key={intervalIndex}>
                 <input className="control" type="time" style={{ maxWidth: 125 }} value={interval.start_time} onChange={(e) => updateInterval(rangeIndex, intervalIndex, { start_time: e.target.value })} />
                 <span style={{ fontSize: 11, color: "#7b8492" }}>to</span>
                 <input className="control" type="time" style={{ maxWidth: 125 }} value={interval.end_time} onChange={(e) => updateInterval(rangeIndex, intervalIndex, { end_time: e.target.value })} />
@@ -202,10 +202,10 @@ function PushEditor({ calendar, onCalendarChange, onSaved }: ModeProps) {
       {!isActive && (
         <div className="warning-box"><p>Pushing a time switches this calendar to push availability, so its {modeLabels[activeMode(calendar)]} hours stop applying until you save that tab again.{query.data?.length ? <> <button className="button secondary small" style={{ marginLeft: 6 }} disabled={switchMode.isPending} onClick={() => switchMode.mutate()}>Use pushed times now</button></> : null}</p></div>
       )}
-      <form className="toolbar" style={{ alignItems: "flex-end", paddingBottom: 14 }} onSubmit={(e) => { e.preventDefault(); push.mutate(); }}>
+      <form className="toolbar pushed-slot-form" onSubmit={(e) => { e.preventDefault(); push.mutate(); }}>
         <label className="field" style={{ margin: 0 }}><span>Date</span><input className="control" type="date" required min={isoDayInZone(new Date(), tz)} value={day} onChange={(e) => setDay(e.target.value)} /></label>
         <label className="field" style={{ margin: 0 }}><span>Start time</span><input className="control" type="time" required value={time} onChange={(e) => setTime(e.target.value)} /></label>
-        <div className="field" style={{ margin: 0 }}><span>Ends</span><div className="control" style={{ background: "#f8f9fa", minWidth: 110 }}>{time ? endPreview(time, calendar.duration_minutes) : "—"}</div></div>
+        <div className="field pushed-slot-end"><span>Ends</span><div className="control">{time ? endPreview(time, calendar.duration_minutes) : "—"}</div></div>
         <button className="button" disabled={push.isPending || !day || !time}><Send size={14} />{push.isPending ? "Pushing…" : "Push availability"}</button>
       </form>
       {error && <div className="error-banner">{error.message}</div>}
