@@ -1,13 +1,14 @@
 import hmac
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
-from app.models.entities import GHLInstallation
+from app.models.entities import GHLInstallation, PWASession
 from app.services.ghl_staff_user_service import GHLStaffUserService
 from app.services.outbox_service import OutboxService
 from app.services.reminder_service import ReminderService
@@ -58,6 +59,15 @@ def daily_cron(
     _authorize(settings, authorization, x_cron_secret)
     queued = ReminderService(db, settings).enqueue()
     expired = ReservationLifecycleService(db).expire_pending_holds()
+    deleted_pwa_sessions = db.execute(
+        delete(PWASession).where(
+            or_(
+                PWASession.expires_at < datetime.now(UTC),
+                PWASession.revoked_at < datetime.now(UTC) - timedelta(days=30),
+            )
+        )
+    ).rowcount or 0
+    db.commit()
     directory_synced = directory_failed = deactivated = 0
     availability_synced = availability_failed = 0
     operator_ids = list(
@@ -88,5 +98,6 @@ def daily_cron(
         "deactivated": deactivated,
         "availability_synced": availability_synced,
         "availability_failed": availability_failed,
+        "pwa_sessions_cleaned": deleted_pwa_sessions,
         **OutboxService(db, settings).drain(budget_seconds=DRAIN_BUDGET_SECONDS),
     }

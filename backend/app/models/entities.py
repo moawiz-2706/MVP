@@ -962,6 +962,32 @@ class PWAAuthHandoff(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class PWASession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Revocable device session for standalone Passport PWA use.
+
+    The browser's HTTP-only refresh token contains a nonce; only its SHA-256
+    digest is retained so logout and refresh-token rotation work immediately.
+    """
+
+    __tablename__ = "pwa_sessions"
+    __table_args__ = (
+        UniqueConstraint("refresh_nonce_digest", name="uq_pwa_sessions_refresh_nonce_digest"),
+        Index("ix_pwa_sessions_active_expiry", "operator_id", "app_user_id", "expires_at"),
+    )
+
+    app_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False
+    )
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id", ondelete="CASCADE"), nullable=False
+    )
+    ghl_location_id: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_nonce_digest: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class GHLWebhookEvent(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "ghl_webhook_events"
 

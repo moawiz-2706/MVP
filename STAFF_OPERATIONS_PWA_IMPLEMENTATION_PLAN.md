@@ -6,6 +6,8 @@
 
 > **Implementation update — 20 October 2026:** The Passport PWA now has a mobile-first `/app` home dashboard, universal search, responsive booking/calendar views, an installable shell, offline status notice, persistent theme preference, Passport-side session support, and deferred page loading. The dashboard and search query Passport through three protected, tenant-scoped endpoints rather than triggering multiple browser-side queries. The Staff screen now reads Passport’s cached staff directory first; a person explicitly runs **Sync GHL staff** when they want a provider refresh. Existing booking, calendar, payment, waiver, and desktop routes are retained unchanged.
 
+> **Stability update — 23 October 2026:** Standalone mobile sessions now use a short-lived in-memory API token plus a revocable, rotating, host-only HTTP-only recovery cookie. Migration `039_pwa_sessions.sql` stores only hashed rotation nonces, enables immediate Sign out/session revocation, and expires idle device sessions after 31 days. The built service worker now precaches the exact Vite shell assets and icons, uses a build-specific cache, and refuses to cache redirects or failed navigation responses. Public booking availability polling is visibility-aware and Stripe webhook delivery no longer drains the outbox inside its response.
+
 ## 1. Product decision
 
 The application will have **one PWA experience only**:

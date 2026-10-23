@@ -1,5 +1,13 @@
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
 const API_BASE = (configuredApiBase || (import.meta.env.DEV ? "http://localhost:8000/api/v1" : "/api/v1")).replace(/\/$/, "");
+const apiOrigin = (() => {
+  try {
+    return /^https?:\/\//i.test(API_BASE) ? new URL(API_BASE).origin : window.location.origin;
+  } catch {
+    return null;
+  }
+})();
+const unsupportedProductionApiTopology = import.meta.env.PROD && apiOrigin !== window.location.origin;
 
 export function apiUrl(path: string): string {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
@@ -28,6 +36,9 @@ export async function api<T>(
   init: RequestInit = {},
   options: { retryOnUnauthorized?: boolean; notifySessionExpired?: boolean } = {},
 ): Promise<T> {
+  if (unsupportedProductionApiTopology) {
+    throw new ApiError(0, "Passport Staff PWA requires same-origin /api/v1 in production. Remove VITE_API_BASE_URL and deploy through the root Vercel project.");
+  }
   const retryOnUnauthorized = options.retryOnUnauthorized ?? true;
   const notifySessionExpired = options.notifySessionExpired ?? true;
   const method = (init.method || "GET").toUpperCase();

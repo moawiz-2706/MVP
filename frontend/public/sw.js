@@ -1,4 +1,4 @@
-const CACHE_NAME = "passport-staff-shell-v4";
+const CACHE_NAME = "passport-staff-shell-source";
 const SHELL_ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/offline.html"];
 
 self.addEventListener("install", (event) => {
@@ -29,7 +29,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok && response.type === "basic") {
+          if (
+            response.ok
+            && !response.redirected
+            && response.type === "basic"
+            && response.headers.get("content-type")?.includes("text/html")
+          ) {
             const copy = response.clone();
             void caches.open(CACHE_NAME).then((cache) => cache.put("/index.html", copy));
           }

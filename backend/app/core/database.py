@@ -18,8 +18,9 @@ REQUIRED_PRODUCTION_TABLES = (
     "message_templates",
     "public_access_credentials",
     "pwa_auth_handoffs",
+    "pwa_sessions",
 )
-REQUIRED_SCHEMA_VERSION = "038_pwa_workspace_performance"
+REQUIRED_SCHEMA_VERSION = "039_pwa_sessions"
 
 
 @lru_cache

@@ -34,7 +34,8 @@ def _pwa_cookie_path(settings: Settings) -> str:
 def _pwa_session_response(
     access_token: str,
     refresh_token: str,
-    expires_in: int,
+    access_expires_in: int,
+    refresh_expires_in: int,
     settings: Settings,
 ) -> JSONResponse:
     """Return the normal bearer response and a host-only PWA recovery cookie.
@@ -47,13 +48,13 @@ def _pwa_session_response(
     response = JSONResponse(
         content=GHLSessionResponse(
             access_token=access_token,
-            expires_in=expires_in,
+            expires_in=access_expires_in,
         ).model_dump(mode="json")
     )
     response.set_cookie(
         key=PWA_SESSION_COOKIE,
         value=refresh_token,
-        max_age=expires_in,
+        max_age=refresh_expires_in,
         httponly=True,
         secure=settings.environment.lower() == "production",
         samesite="lax",
@@ -89,13 +90,14 @@ def _new_pwa_session_response(
         settings,
         lifetime_minutes=settings.pwa_session_minutes,
     )
-    # Both session artifacts intentionally use the configured PWA lifetime.
-    # The different audiences prevent an API access token from being accepted
-    # as a refresh token even though both are signed by the Passport service.
+    # The API token remains short lived; the HTTP-only cookie is valid for the
+    # configured PWA lifetime. Different audiences prevent either token type
+    # from being accepted in the other role.
     return _pwa_session_response(
         access_token,
         refresh_token,
-        min(expires_in, refresh_expires_in),
+        expires_in,
+        refresh_expires_in,
         settings,
     )
 
@@ -140,10 +142,10 @@ def exchange_pwa_handoff(
     settings: AppSettings,
 ) -> JSONResponse:
     try:
-        token, expires_in = PWAAuthService(db, settings).exchange_handoff(request.code)
+        token, expires_in, principal = PWAAuthService(db, settings).exchange_handoff(request.code)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    return _new_pwa_session_response(decode_app_session(token, settings), token, expires_in, settings)
+    return _new_pwa_session_response(principal, token, expires_in, settings)
 
 
 @router.post("/refresh", response_model=GHLSessionResponse)
@@ -153,12 +155,24 @@ def pwa_refresh(
     settings: AppSettings,
 ) -> JSONResponse:
     try:
-        token, expires_in = PWAAuthService(db, settings).refresh_session(principal)
+        token, expires_in, refreshed_principal = PWAAuthService(db, settings).refresh_session(principal)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    return _new_pwa_session_response(principal, token, expires_in, settings)
+    return _new_pwa_session_response(refreshed_principal, token, expires_in, settings)
 
 
 @router.post("/logout", status_code=204)
-def pwa_logout(response: Response, settings: AppSettings) -> None:
+def pwa_logout(
+    response: Response,
+    db: DB,
+    settings: AppSettings,
+    pwa_session: Annotated[str | None, Cookie(alias=PWA_SESSION_COOKIE)] = None,
+) -> None:
+    if pwa_session:
+        try:
+            principal = decode_pwa_refresh_session(pwa_session, settings)
+            PWAAuthService(db, settings).revoke_session(principal)
+        except HTTPException:
+            # Logout must be safe to repeat even if its old cookie was already rotated or expired.
+            pass
     response.delete_cookie(PWA_SESSION_COOKIE, path=_pwa_cookie_path(settings))

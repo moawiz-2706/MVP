@@ -4,6 +4,7 @@ import {
   Bell,
   CalendarDays,
   Home,
+  LogOut,
   MapPin,
   Menu,
   Moon,
@@ -63,7 +64,7 @@ function OfflineStatus() {
 }
 
 export function AppShell() {
-  const { me } = useSession();
+  const { me, signOut } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(loadTheme);
@@ -125,6 +126,7 @@ export function AppShell() {
         <div className="sidebar-bottom">
           <NavLink to="/app/settings" onClick={() => setMobileOpen(false)} className={({ isActive }) => isActive ? "active" : ""}><Settings size={18} />Settings</NavLink>
           <div className="user-chip"><div className="avatar">{(me.user.name || me.user.email || "U").charAt(0).toUpperCase()}</div><div><strong>{me.user.name || "Passport user"}</strong><span>{me.user.role}</span></div></div>
+          {window.parent === window && <button className="sidebar-sign-out" type="button" onClick={() => { setMobileOpen(false); void signOut(); }}><LogOut size={17} />Sign out</button>}
         </div>
       </aside>
       <main className="app-main">

@@ -116,10 +116,12 @@ customer no longer selects a timezone. The public availability query refreshes
 while the page is open so calendar and inventory changes appear without a
 manual reload.
 
-If the frontend and backend are deployed as separate Vercel projects, set the
-frontend production variable `VITE_API_BASE_URL` to the backend URL ending in
-`/api/v1`. Leaving it unset makes the production frontend call its own Vercel
-site for `/api/v1`, which produces the same generic Booking-page request error.
+For the standalone Staff PWA, deploy the frontend and Passport API behind the
+same HTTPS origin using the root `vercel.json` `/api` rewrite. **Do not set
+`VITE_API_BASE_URL` in production**: an installed iPhone/Android PWA needs the
+same-origin API so its host-only, HTTP-only recovery cookie is sent after an
+app restart. A separately hosted API remains supported for the public web
+booking pages, but is intentionally rejected by the standalone Staff PWA.
 
 The detailed API contract and GHL integration boundary are documented in
 `docs/FAREHARBOR_REPLICA_IMPLEMENTATION_SPEC.md`.
@@ -139,12 +141,12 @@ install target. On iPhone, open that standalone Passport URL in Safari and use
 Share → Add to Home Screen. On Android, open that URL in Chrome and use Install
 app or Add to Home screen.
 
-The standalone PWA stores its Passport session in device local storage and
-receives a separate 31-day session token (`PWA_SESSION_MINUTES=44640`). It can
-be renewed while the app is used. The backend still checks the operator,
-installation, membership, and authorization version on every request, so an
-admin can invalidate access by disabling the operator, removing membership, or
-rotating authorization. Clearing site data or using a different browser/device
+The standalone PWA keeps a short-lived Passport API token only in memory. A
+separate host-only, HTTP-only recovery cookie keeps the device signed in for
+31 days (`PWA_SESSION_MINUTES=44640`) and rotates on every refresh. Passport
+stores only a one-way nonce digest server-side, so Sign out, disabling the
+operator, removing membership, or rotating authorization revokes the session
+immediately. Clearing Passport site data or using a different browser/device
 requires login again.
 
 Calendar editors can configure one or more independent staff pools for

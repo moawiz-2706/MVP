@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.app_session import SessionPrincipal, create_app_session
 from app.core.config import Settings
 from app.core.encryption import TokenCipher
-from app.models.entities import AppUser, GHLInstallation, Operator, OperatorUser, PWAAuthHandoff
+from app.models.entities import AppUser, GHLInstallation, Operator, OperatorUser, PWAAuthHandoff, PWASession
 
 logger = logging.getLogger("passport.pwa_auth")
 
@@ -115,7 +116,7 @@ class PWAAuthService:
         self.db.commit()
         return code
 
-    def exchange_handoff(self, code: str) -> tuple[str, int]:
+    def exchange_handoff(self, code: str) -> tuple[str, int, SessionPrincipal]:
         handoff = self.db.scalar(
             select(PWAAuthHandoff)
             .where(PWAAuthHandoff.code_digest == hashlib.sha256(code.encode()).hexdigest())
@@ -142,8 +143,7 @@ class PWAAuthService:
         if installation is None or membership is None or operator is None or not operator.is_active:
             raise ValueError("This Passport session is no longer valid")
         handoff.consumed_at = now
-        self.db.commit()
-        return create_app_session(
+        principal = self._create_device_session(
             SessionPrincipal(
                 app_user_id=handoff.app_user_id,
                 operator_id=handoff.operator_id,
@@ -151,12 +151,17 @@ class PWAAuthService:
                 role=membership.ghl_role or "user",
                 is_agency_owner=membership.is_agency_owner,
                 authz_version=installation.authz_version,
-            ),
-            self.settings,
-            lifetime_minutes=self.settings.pwa_session_minutes,
+            )
         )
+        self.db.commit()
+        token, expires_in = create_app_session(
+            principal,
+            self.settings,
+            lifetime_minutes=self.settings.app_session_minutes,
+        )
+        return token, expires_in, principal
 
-    def refresh_session(self, principal: SessionPrincipal) -> tuple[str, int]:
+    def refresh_session(self, principal: SessionPrincipal) -> tuple[str, int, SessionPrincipal]:
         installation = self.db.scalar(
             select(GHLInstallation).where(
                 GHLInstallation.operator_id == principal.operator_id,
@@ -174,19 +179,65 @@ class PWAAuthService:
         operator = self.db.get(Operator, principal.operator_id)
         if installation is None or membership is None or operator is None or not operator.is_active:
             raise ValueError("Passport session is no longer valid")
-        role = membership.ghl_role or principal.role
-        return create_app_session(
-            SessionPrincipal(
-                app_user_id=principal.app_user_id,
-                operator_id=principal.operator_id,
-                ghl_location_id=principal.ghl_location_id,
-                role=role,
+        if principal.pwa_session_id is None:
+            refreshed = self._create_device_session(replace(
+                principal,
+                role=membership.ghl_role or principal.role,
                 is_agency_owner=membership.is_agency_owner,
                 authz_version=installation.authz_version,
-            ),
-            self.settings,
-            lifetime_minutes=self.settings.pwa_session_minutes,
+            ))
+            self.db.commit()
+            token, expires_in = create_app_session(
+                refreshed, self.settings, lifetime_minutes=self.settings.app_session_minutes
+            )
+            return token, expires_in, refreshed
+        device_session = self.db.scalar(
+            select(PWASession).where(PWASession.id == principal.pwa_session_id).with_for_update()
         )
+        if device_session is None or device_session.revoked_at is not None or device_session.expires_at <= datetime.now(UTC):
+            raise ValueError("Passport PWA session is no longer valid")
+        refreshed = replace(
+            principal,
+            role=membership.ghl_role or principal.role,
+            is_agency_owner=membership.is_agency_owner,
+            authz_version=installation.authz_version,
+            refresh_nonce=secrets.token_urlsafe(32),
+        )
+        device_session.refresh_nonce_digest = hashlib.sha256(refreshed.refresh_nonce.encode()).hexdigest()
+        device_session.last_used_at = datetime.now(UTC)
+        device_session.expires_at = datetime.now(UTC) + timedelta(minutes=self.settings.pwa_session_minutes)
+        self.db.commit()
+        token, expires_in = create_app_session(
+            refreshed,
+            self.settings,
+            lifetime_minutes=self.settings.app_session_minutes,
+        )
+        return token, expires_in, refreshed
+
+    def revoke_session(self, principal: SessionPrincipal) -> None:
+        if principal.pwa_session_id is None:
+            return
+        device_session = self.db.scalar(
+            select(PWASession).where(PWASession.id == principal.pwa_session_id).with_for_update()
+        )
+        if device_session is not None:
+            device_session.revoked_at = datetime.now(UTC)
+            device_session.last_used_at = datetime.now(UTC)
+            self.db.commit()
+
+    def _create_device_session(self, principal: SessionPrincipal) -> SessionPrincipal:
+        nonce = secrets.token_urlsafe(32)
+        device_session = PWASession(
+            app_user_id=principal.app_user_id,
+            operator_id=principal.operator_id,
+            ghl_location_id=principal.ghl_location_id,
+            refresh_nonce_digest=hashlib.sha256(nonce.encode()).hexdigest(),
+            expires_at=datetime.now(UTC) + timedelta(minutes=self.settings.pwa_session_minutes),
+            last_used_at=datetime.now(UTC),
+        )
+        self.db.add(device_session)
+        self.db.flush()
+        return replace(principal, pwa_session_id=device_session.id, refresh_nonce=nonce)
 
     def _fetch_user(self, user_id: str, location_id: str, access_token: str) -> dict[str, Any]:
         response = httpx.get(

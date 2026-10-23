@@ -642,7 +642,7 @@ class OrderService:
             self._enqueue_appointment_jobs(operator.id, order.id)
             if not paid:
                 self._enqueue_confirmation_jobs(operator.id, order.id)
-        elif invoice_mode:
+        if invoice_mode:
             self.db.add(
                 OutboxJob(
                     operator_id=operator.id,

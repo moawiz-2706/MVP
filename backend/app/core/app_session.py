@@ -1,5 +1,6 @@
-import uuid
 import logging
+import hashlib
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
-from app.models.entities import GHLInstallation, Operator, OperatorUser
+from app.models.entities import GHLInstallation, Operator, OperatorUser, PWASession
 
 logger = logging.getLogger("passport.auth")
 
@@ -26,6 +27,8 @@ class SessionPrincipal:
     role: str
     is_agency_owner: bool
     authz_version: int = 1
+    pwa_session_id: uuid.UUID | None = None
+    refresh_nonce: str | None = None
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -51,6 +54,7 @@ def create_app_session(
             "role": principal.role,
             "is_agency_owner": principal.is_agency_owner,
             "authz_version": principal.authz_version,
+            "pwa_session_id": str(principal.pwa_session_id) if principal.pwa_session_id else None,
             "iat": now,
             "exp": now + lifetime,
             "aud": "passport",
@@ -79,6 +83,8 @@ def create_pwa_refresh_session(
             "role": principal.role,
             "is_agency_owner": principal.is_agency_owner,
             "authz_version": principal.authz_version,
+            "pwa_session_id": str(principal.pwa_session_id) if principal.pwa_session_id else None,
+            "refresh_nonce": principal.refresh_nonce,
             "session_type": "pwa_refresh",
             "iat": now,
             "exp": now + lifetime,
@@ -108,6 +114,8 @@ def decode_app_session(token: str, settings: Settings) -> SessionPrincipal:
             role=claims["role"],
             is_agency_owner=bool(claims.get("is_agency_owner", False)),
             authz_version=int(claims.get("authz_version", 1)),
+            pwa_session_id=uuid.UUID(claims["pwa_session_id"])
+            if claims.get("pwa_session_id") else None,
         )
     except (InvalidTokenError, ValueError, KeyError, TypeError) as exc:
         logger.warning("Application session token rejected reason=%s", type(exc).__name__)
@@ -123,7 +131,7 @@ def decode_pwa_refresh_session(token: str, settings: Settings) -> SessionPrincip
             algorithms=["HS256"],
             audience="passport-pwa-refresh",
             issuer="passport-api",
-            options={"require": ["sub", "operator_id", "ghl_location_id", "role", "session_type", "exp"]},
+            options={"require": ["sub", "operator_id", "ghl_location_id", "role", "session_type", "pwa_session_id", "refresh_nonce", "exp"]},
         )
         if claims["session_type"] != "pwa_refresh":
             raise ValueError("Unexpected PWA session type")
@@ -134,6 +142,8 @@ def decode_pwa_refresh_session(token: str, settings: Settings) -> SessionPrincip
             role=claims["role"],
             is_agency_owner=bool(claims.get("is_agency_owner", False)),
             authz_version=int(claims.get("authz_version", 1)),
+            pwa_session_id=uuid.UUID(claims["pwa_session_id"]),
+            refresh_nonce=str(claims["refresh_nonce"]),
         )
     except (InvalidTokenError, ValueError, KeyError, TypeError) as exc:
         logger.warning("PWA refresh token rejected reason=%s", type(exc).__name__)
@@ -175,6 +185,23 @@ def validate_session_principal(
             installation.authz_version,
         )
         raise HTTPException(status_code=401, detail="Application session requires refresh")
+    if principal.pwa_session_id is not None:
+        pwa_session = db.get(PWASession, principal.pwa_session_id)
+        expected_nonce = (
+            hashlib.sha256(principal.refresh_nonce.encode()).hexdigest()
+            if principal.refresh_nonce is not None else None
+        )
+        if (
+            pwa_session is None
+            or pwa_session.operator_id != principal.operator_id
+            or pwa_session.app_user_id != principal.app_user_id
+            or pwa_session.ghl_location_id != principal.ghl_location_id
+            or pwa_session.revoked_at is not None
+            or pwa_session.expires_at <= datetime.now(UTC)
+            or (expected_nonce is not None and pwa_session.refresh_nonce_digest != expected_nonce)
+        ):
+            logger.warning("Application session rejected reason=pwa_session_invalid")
+            raise HTTPException(status_code=401, detail="Passport PWA session is no longer valid")
     # The membership lookup is read-only. End its transaction before the route
     # handler starts so the one-process database connection is not held while the
     # handler performs external API work or additional application logic.
@@ -186,6 +213,8 @@ def validate_session_principal(
         role=membership.ghl_role or principal.role,
         is_agency_owner=membership.is_agency_owner,
         authz_version=installation.authz_version,
+        pwa_session_id=principal.pwa_session_id,
+        refresh_nonce=principal.refresh_nonce,
     )
 
 

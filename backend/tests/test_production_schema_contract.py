@@ -9,6 +9,7 @@ from app.models.entities import (
     MessageTemplate,
     OutboxJob,
     PWAAuthHandoff,
+    PWASession,
     PublicAccessCredential,
     Staff,
 )
@@ -27,6 +28,7 @@ WAIVER_RECONCILIATION_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / 
 GHL_SYNC_STATE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "036_ghl_sync_state.sql"
 PWA_AUTH_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "037_pwa_auth_handoffs.sql"
 PWA_WORKSPACE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "038_pwa_workspace_performance.sql"
+PWA_SESSIONS_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "039_pwa_sessions.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -149,3 +151,12 @@ def test_pwa_workspace_performance_migration_is_aligned() -> None:
     assert "ix_booking_waivers_operator_status_booking" in {
         index.name for index in BookingWaiver.__table__.indexes
     }
+
+
+def test_pwa_session_migration_and_model_are_aligned() -> None:
+    sql = PWA_SESSIONS_MIGRATION.read_text()
+    assert "CREATE TABLE IF NOT EXISTS public.pwa_sessions" in sql
+    assert "refresh_nonce_digest" in sql
+    assert "039_pwa_sessions" in sql
+    assert PWASession.__tablename__ == "pwa_sessions"
+    assert "revoked_at" in PWASession.__table__.columns

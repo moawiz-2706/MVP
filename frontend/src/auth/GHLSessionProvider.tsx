@@ -5,6 +5,7 @@ import type { UserContext } from "../api/types";
 interface SessionState {
   me: UserContext;
   refresh: () => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
@@ -121,12 +122,21 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
   // Keep callback mode stable after the one-time hash is removed on success.
   const [standalone] = useState(isStandalonePwa);
   const refreshTimer = useRef<number | null>(null);
+  const refreshDueAt = useRef<number | null>(null);
   const sessionActive = useRef(false);
 
   const scheduleRefresh = useCallback((expiresIn: number, refresh: () => Promise<void>) => {
     if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
-    const renewIn = Math.max(30_000, (expiresIn * 1000) - 60_000);
-    refreshTimer.current = window.setTimeout(() => void refresh(), renewIn);
+    if (refreshDueAt.current === null) refreshDueAt.current = Date.now() + Math.max(30_000, expiresIn * 1000 - 60_000);
+    const delay = Math.max(1_000, Math.min(12 * 60 * 60 * 1000, refreshDueAt.current - Date.now()));
+    refreshTimer.current = window.setTimeout(() => {
+      if (refreshDueAt.current !== null && Date.now() < refreshDueAt.current) {
+        scheduleRefresh(Math.ceil((refreshDueAt.current - Date.now() + 60_000) / 1000), refresh);
+        return;
+      }
+      refreshDueAt.current = null;
+      void refresh();
+    }, delay);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -174,6 +184,7 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
         }
         setError(null);
         setStandaloneNeedsLogin(false);
+        refreshDueAt.current = Date.now() + Math.max(30_000, expiresIn * 1000 - 60_000);
         scheduleRefresh(expiresIn, refresh);
         setMe(await api<UserContext>("/me", {}, { retryOnUnauthorized: false, notifySessionExpired: false }));
         sessionActive.current = true;
@@ -190,6 +201,8 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
           // Do not discard a month-long mobile login because a Vercel cold start,
           // temporary network loss, or provider outage interrupted one refresh.
           console.warn("Passport PWA session refresh will be retried later", reason);
+          refreshDueAt.current = Date.now() + 60_000;
+          scheduleRefresh(120, refresh);
         }
       }
       return;
@@ -211,14 +224,36 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
     }
   }, [scheduleRefresh, standalone]);
 
+  const signOut = useCallback(async () => {
+    if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
+    refreshDueAt.current = null;
+    try {
+      if (standalone) await api<void>("/pwa-auth/logout", json("POST", {}), { retryOnUnauthorized: false, notifySessionExpired: false });
+    } finally {
+      setSessionToken(null);
+      clearLegacyPwaSession();
+      sessionActive.current = false;
+      setMe(null);
+      setError(null);
+      setStandaloneNeedsLogin(standalone);
+    }
+  }, [standalone]);
+
   useEffect(() => {
     setSessionRefresher(refresh);
     void refresh();
     const expired = () => void refresh();
+    const recover = () => {
+      if (standalone && sessionActive.current && navigator.onLine && document.visibilityState === "visible") void refresh();
+    };
     window.addEventListener("passport:session-expired", expired);
+    window.addEventListener("online", recover);
+    document.addEventListener("visibilitychange", recover);
     return () => {
       setSessionRefresher(null);
       window.removeEventListener("passport:session-expired", expired);
+      window.removeEventListener("online", recover);
+      document.removeEventListener("visibilitychange", recover);
       if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
     };
   }, [refresh]);
@@ -247,7 +282,7 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  return <SessionContext.Provider value={{ me, refresh }}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={{ me, refresh, signOut }}>{children}</SessionContext.Provider>;
 }
 
 export function useSession() {

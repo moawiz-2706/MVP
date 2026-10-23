@@ -442,6 +442,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line); border-bottom-width: 2px;
 .mobile-calendar-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; color: var(--muted); font-size: 11px; }
 .mobile-calendar-meta strong { display: block; color: var(--ink); font-size: 11.5px; }
 .mobile-calendar-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 2px; }
+.sidebar-sign-out { width: 100%; min-height: 44px; display: inline-flex; align-items: center; gap: 9px; padding: 10px 12px; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 650; text-align: left; }
+.sidebar-sign-out:hover { color: var(--danger); border-color: #efc2c2; background: #fff7f7; }
 .mobile-customer-list, .mobile-staff-list, .mobile-resource-list, .mobile-location-list { display: none; }
 .mobile-resource-card, .mobile-location-card { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .mobile-resource-heading, .mobile-location-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
