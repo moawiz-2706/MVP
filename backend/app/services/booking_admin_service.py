@@ -25,6 +25,7 @@ from app.models.entities import (
     Calendar,
     CalendarCategory,
     CalendarPushedSlot,
+    CalendarRateResource,
     CalendarResource,
     GHLAppointmentMapping,
     OutboxJob,
@@ -431,6 +432,7 @@ class BookingAdminService:
         if (
             not allow_paid_reschedule
             and payment
+            and payment.payment_method != "none"
             and payment.customer_total_minor > 0
             and payment.status in {
             "requires_payment",
@@ -446,18 +448,36 @@ class BookingAdminService:
         units = data.units or booking.units
         from app.services.staffing_service import lock_calendar
         calendar = lock_calendar(self.db, self.operator_id, booking.calendar_id)
+        if booking.rate_id:
+            resource_mappings = list(
+                self.db.execute(
+                    select(Resource, CalendarRateResource.quantity_per_unit)
+                    .join(
+                        CalendarRateResource,
+                        CalendarRateResource.resource_id == Resource.id,
+                    )
+                    .where(CalendarRateResource.rate_id == booking.rate_id)
+                    .order_by(Resource.id)
+                ).all()
+            )
+        else:
+            resource_mappings = list(
+                self.db.execute(
+                    select(Resource, CalendarResource.default_quantity_per_unit)
+                    .join(
+                        CalendarResource,
+                        CalendarResource.resource_id == Resource.id,
+                    )
+                    .where(CalendarResource.calendar_id == calendar.id)
+                    .order_by(Resource.id)
+                ).all()
+            )
         resource_ids = set(
             self.db.scalars(
                 select(BookingResource.resource_id).where(BookingResource.booking_id == booking.id)
             )
         )
-        resource_ids.update(
-            self.db.scalars(
-                select(CalendarResource.resource_id).where(
-                    CalendarResource.calendar_id == calendar.id
-                )
-            )
-        )
+        resource_ids.update(resource.id for resource, _quantity_per_unit in resource_mappings)
         if resource_ids:
             list(
                 self.db.scalars(
@@ -473,6 +493,7 @@ class BookingAdminService:
             units,
             operator_id=self.operator_id,
             exclude_booking_ids={booking.id},
+            resource_mappings=resource_mappings,
         )
         if not result.available:
             raise ConflictError(result.reason or "Updated booking is unavailable")
@@ -486,14 +507,12 @@ class BookingAdminService:
             )
         ):
             self.db.delete(existing)
-        for mapping in self.db.scalars(
-            select(CalendarResource).where(CalendarResource.calendar_id == calendar.id)
-        ):
+        for resource, quantity_per_unit in resource_mappings:
             self.db.add(
                 BookingResource(
                     booking_id=booking.id,
-                    resource_id=mapping.resource_id,
-                    quantity=units * mapping.default_quantity_per_unit,
+                    resource_id=resource.id,
+                    quantity=units * quantity_per_unit,
                 )
             )
         self.db.flush()

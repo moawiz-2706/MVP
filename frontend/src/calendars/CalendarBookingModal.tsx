@@ -5,6 +5,7 @@ import { api, json } from "../api/client";
 import { useSession } from "../auth/GHLSessionProvider";
 import type { AvailabilityResponse, AvailabilitySlot, Calendar, CalendarRate } from "../api/types";
 import { formatTime, tomorrowInZone, zoneLabel } from "../lib/datetime";
+import { PaymentPanel } from "../public-booking/PaymentPanel";
 
 interface OrderCreateResponse {
   public_reference: string;
@@ -15,6 +16,7 @@ interface OrderCreateResponse {
   payment_method?: string;
   access_token?: string | null;
 }
+type PaymentMethod = "card" | "invoice" | "none";
 
 export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar; onDone: () => void }) {
   const client = useQueryClient();
@@ -28,7 +30,7 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
   const [last, setLast] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [paymentRequired, setPaymentRequired] = useState(true);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("invoice");
   const [created, setCreated] = useState<OrderCreateResponse | null>(null);
 
   useEffect(() => { if (timeZone && !day) setDay(tomorrowInZone(timeZone)); }, [timeZone, day]);
@@ -36,7 +38,7 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
   const availability = useQuery({ queryKey: ["calendar-availability", calendar.id, day], queryFn: () => api<AvailabilityResponse>(`/calendars/${calendar.id}/availability?date=${day}`), enabled: Boolean(day) });
   const selectedRate = rates.data?.find((rate) => rate.id === rateId) || rates.data?.[0];
   useEffect(() => { if (!rateId && selectedRate) setRateId(selectedRate.id); }, [rateId, selectedRate]);
-  const slotLimit = slot?.rates?.find((rate) => rate.rate_id === (selectedRate?.id || rateId))?.available_quantity || slot?.max_bookable_units || 0;
+  const slotLimit = slot?.rates?.find((rate) => rate.rate_id === (selectedRate?.id || rateId))?.available_quantity ?? slot?.max_bookable_units ?? 0;
 
   const create = useMutation({
     mutationFn: () => {
@@ -44,13 +46,16 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
       return api<OrderCreateResponse>("/bookings", json("POST", {
         items: [{ calendar_id: calendar.id, start_at: slot.start_at, units, rate_id: selectedRate?.id || null }],
         customer: { first_name: first.trim(), last_name: last.trim(), email: email.trim(), phone: phone.trim() || null },
-        payment_required: paymentRequired,
+        payment_method: paymentMethod,
       }));
     },
     onSuccess: async (result) => { setCreated(result); await client.invalidateQueries({ queryKey: ["bookings"] }); },
   });
 
   if (created) {
+    if (created.client_secret) {
+      return <div><p className="muted-note">Booking {created.public_reference} is reserved. Complete the card payment securely below.</p><PaymentPanel clientSecret={created.client_secret} publicReference={created.public_reference} accessToken={created.access_token} /></div>;
+    }
     return <div>
       {created.invoice_url ? <>
         <div className="success-banner">Booking {created.public_reference} is pending invoice payment.</div>
@@ -62,14 +67,16 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
   }
 
   const selectSlot = (value: AvailabilitySlot) => {
+    const firstAvailableRate = value.rates?.find((rate) => rate.available_quantity > 0);
+    if (firstAvailableRate && (!selectedRate || (value.rates?.find((rate) => rate.rate_id === selectedRate.id)?.available_quantity ?? 0) < 1)) setRateId(firstAvailableRate.rate_id);
     setSlot(value);
-    const limit = value.rates?.find((rate) => rate.rate_id === (selectedRate?.id || rateId))?.available_quantity || value.max_bookable_units;
+    const limit = firstAvailableRate?.available_quantity ?? value.rates?.find((rate) => rate.rate_id === (selectedRate?.id || rateId))?.available_quantity ?? value.max_bookable_units;
     setUnits(Math.min(1, limit));
   };
   const selectRate = (value: string) => {
     setRateId(value);
     if (slot) {
-      const limit = slot.rates?.find((rate) => rate.rate_id === value)?.available_quantity || slot.max_bookable_units;
+      const limit = slot.rates?.find((rate) => rate.rate_id === value)?.available_quantity ?? slot.max_bookable_units;
       setUnits(Math.min(units, limit || 1));
     }
   };
@@ -77,17 +84,17 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
   return <div>
     <p className="muted-note" style={{ marginTop: -5, marginBottom: 14 }}>Live availability for <strong>{calendar.name}</strong>. Select a date to see every valid slot in {zoneLabel(timeZone)} ({timeZone}).</p>
     <label className="field" style={{ maxWidth: 220, marginBottom: 17 }}><span>Date</span><input type="date" min={tomorrowInZone(timeZone)} value={day} onChange={(event) => { setDay(event.target.value); setSlot(null); }} /></label>
-    {availability.isLoading ? <div className="loading">Checking live availability…</div> : availability.error ? <div className="error-banner">{availability.error.message}</div> : <div className="slot-grid">{availability.data?.slots.map((item) => <button type="button" key={item.start_at} disabled={!item.available} className={`slot ${slot?.start_at === item.start_at ? "selected" : ""}`} onClick={() => selectSlot(item)}>{formatTime(item.start_at, timeZone)}<span>{item.available ? `${item.max_bookable_units} available` : "Unavailable"}</span></button>)}</div>}
+    {availability.isLoading ? <div className="loading">Checking live availability…</div> : availability.error ? <div className="error-banner">{availability.error.message}</div> : <div className="slot-grid">{availability.data?.slots.map((item) => <button type="button" key={item.start_at} disabled={!item.available} className={`slot ${slot?.start_at === item.start_at ? "selected" : ""}`} onClick={() => selectSlot(item)}>{formatTime(item.start_at, timeZone)}{item.available && item.rates?.length ? <span className="slot-rate-summary">{item.rates.map((rate) => <span key={rate.rate_id}>{rate.customer_type_name}: {rate.available_quantity} available</span>)}</span> : <span>{item.available ? `${item.max_bookable_units} available` : "Unavailable"}</span>}</button>)}</div>}
     {availability.data && !availability.data.slots.length && <div className="empty-state"><strong>No times on this date</strong><span>Choose another date to continue.</span></div>}
     {slot && <div style={{ marginTop: 20, paddingTop: 17, borderTop: "1px solid #e6e9e8" }}>
       <label className="field"><span>Customer type / rate</span><select value={selectedRate?.id || ""} onChange={(event) => selectRate(event.target.value)} disabled={!rates.data?.length}>{rates.data?.length ? rates.data.map((rate) => <option key={rate.id} value={rate.id}>{rate.customer_type_name} — {new Intl.NumberFormat(undefined, { style: "currency", currency: calendar.currency.toUpperCase() }).format(rate.price_minor / 100)}</option>) : <option value="">Base calendar price</option>}</select></label>
       <div className="summary-row"><span>Quantity</span><div className="quantity"><button type="button" onClick={() => setUnits(Math.max(1, units - 1))}><Minus size={14} /></button><strong>{units}</strong><button type="button" disabled={units >= slotLimit} onClick={() => setUnits(Math.min(slotLimit, units + 1))}><Plus size={14} /></button></div></div>
       <div className="summary-row"><span>Available for selected rate</span><strong>{slotLimit}</strong></div>
       <div className="summary-row"><span>Price</span><strong>{new Intl.NumberFormat(undefined, { style: "currency", currency: calendar.currency.toUpperCase() }).format(((selectedRate?.price_minor ?? calendar.base_price_minor) * units) / 100)}</strong></div>
-      <label className="check-field" style={{ marginTop: 15 }}><input type="checkbox" checked={paymentRequired} onChange={(event) => setPaymentRequired(event.target.checked)} /><span><strong>Payment required</strong><small>{paymentRequired ? "Send the client a secure hosted invoice. Do not collect card details." : "Book immediately without collecting payment or sending an invoice."}</small></span></label>
+      <label className="field full" style={{ marginTop: 15 }}><span>Payment method</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}><option value="card">Card — collect payment now</option><option value="invoice">Invoice — send payment request</option><option value="none">Free booking — no payment</option></select><small>{paymentMethod === "card" ? "Reserve the booking, then collect card payment securely with Stripe." : paymentMethod === "invoice" ? "Create the booking and send the client a hosted Stripe invoice." : "Confirm the booking immediately without collecting payment."}</small></label>
       <div className="form-grid" style={{ marginTop: 15 }}><label className="field"><span>First name</span><input required value={first} onChange={(event) => setFirst(event.target.value)} /></label><label className="field"><span>Last name</span><input required value={last} onChange={(event) => setLast(event.target.value)} /></label><label className="field full"><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field full"><span>Phone (optional)</span><input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></div>
       {create.error && <div className="error-banner" style={{ marginTop: 12 }}>{create.error.message}</div>}
-      <button type="button" className="button" style={{ width: "100%", marginTop: 15 }} disabled={create.isPending || !slotLimit} onClick={() => create.mutate()}><ShoppingBag size={15} />{create.isPending ? "Reserving inventory…" : paymentRequired ? "Create and invoice client" : "Create free booking"}</button>
+      <button type="button" className="button" style={{ width: "100%", marginTop: 15 }} disabled={create.isPending || !slotLimit} onClick={() => create.mutate()}><ShoppingBag size={15} />{create.isPending ? "Reserving inventory…" : paymentMethod === "card" ? "Reserve and collect card payment" : paymentMethod === "invoice" ? "Create booking and send invoice" : "Create free booking"}</button>
     </div>}
   </div>;
 }

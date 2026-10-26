@@ -560,13 +560,23 @@ class AvailabilityService:
             if candidate.astimezone(UTC) > now
         ]
         mappings = self._mappings(calendar.id) if candidates else []
+        rate_mappings = self._rate_mappings(calendar.id) if candidates else []
         reservations: dict[uuid.UUID, list[CapacityInterval]] = {}
         blocks: list[tuple[datetime, datetime]] = []
         if candidates:
             range_start = min(candidates)
             range_end = max(candidates) + timedelta(minutes=calendar.duration_minutes)
+            resource_ids = {
+                resource.id
+                for resource, _quantity_per_unit in mappings
+            }
+            resource_ids.update(
+                resource.id
+                for _rate, _customer_type, rate_resources in rate_mappings
+                for resource, _quantity_per_unit in rate_resources
+            )
             reservations = self._reservations(
-                [resource.id for resource, _ in mappings], range_start, range_end
+                list(resource_ids), range_start, range_end
             )
             blocks = list(
                 self.db.execute(
@@ -604,12 +614,51 @@ class AvailabilityService:
             elif calendar.max_units_per_booking is not None:
                 inventory_max = min(inventory_max, calendar.max_units_per_booking)
             available = not blocked and inventory_max > 0
+            rate_details: list[AvailabilityRate] = []
+            if rate_mappings:
+                rate_inventory_maxes: list[int] = []
+                for rate, customer_type, rate_resources in rate_mappings:
+                    rate_max: int | None = None
+                    for resource, per_unit in rate_resources:
+                        reserved = reserved_for_interval(
+                            reservations.get(resource.id, []), candidate, end_at
+                        )
+                        resource_available = (
+                            max(0, resource.quantity - reserved)
+                            if resource.is_active and resource.deleted_at is None
+                            else 0
+                        )
+                        resource_max = floor(resource_available / per_unit)
+                        rate_max = resource_max if rate_max is None else min(rate_max, resource_max)
+                    if rate_max is None:
+                        rate_max = calendar.max_units_per_booking or 1
+                    if calendar.max_units_per_booking is not None:
+                        rate_max = min(rate_max, calendar.max_units_per_booking)
+                    rate_inventory_maxes.append(rate_max)
+                    rate_details.append(
+                        AvailabilityRate(
+                            rate_id=rate.id,
+                            customer_type_name=customer_type.name,
+                            seat_count=customer_type.seat_count,
+                            available_quantity=max(0, rate_max) if not blocked else 0,
+                            available_seats=(max(0, rate_max * customer_type.seat_count)
+                                             if not blocked else 0),
+                        )
+                    )
+                # Calendars without legacy mappings derive their capacity from
+                # the largest configured customer-type pool, just like the
+                # public booking endpoint. The per-rate details above remain
+                # authoritative for the selected customer type.
+                if not mappings:
+                    inventory_max = max(rate_inventory_maxes, default=calendar.max_units_per_booking or 1)
+                    available = not blocked and inventory_max > 0
             slots.append(
                 AvailabilitySlot(
                     start_at=candidate,
                     end_at=end_at,
                     max_bookable_units=inventory_max if available else 0,
                     available=available,
+                    rates=rate_details,
                 )
             )
         return PublicAvailabilityResponse(

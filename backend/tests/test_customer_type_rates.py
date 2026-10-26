@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 
 import pytest
 from sqlalchemy import select
@@ -17,6 +17,7 @@ from app.models.entities import (
     Resource,
 )
 from app.schemas.order import OrderItemRequest, OrderQuoteRequest
+from app.services.availability_service import AvailabilityService
 from app.services.order_service import OrderService
 
 pytestmark = pytest.mark.skipif(
@@ -148,3 +149,18 @@ def test_rate_create_persists_line_item_and_separate_resource_use(db):
     assert result[0].tax_minor == 900
     assert result[0].seat_count == 1
     assert db.scalar(select(Booking.id)) is None
+
+
+def test_authenticated_calendar_day_uses_rate_specific_inventory(db):
+    operator, calendar, _single_rate, tandem_rate, single_resource, tandem_resource = _kayak_setup(db)
+    result = AvailabilityService(db).calendar_day(
+        calendar.id,
+        operator.id,
+        date(2027, 6, 18),
+    )
+
+    slot = next(item for item in result.slots if item.available)
+    rates = {item.rate_id: item for item in slot.rates}
+    assert slot.max_bookable_units == single_resource.quantity
+    assert rates[tandem_rate.id].available_quantity == tandem_resource.quantity
+    assert rates[tandem_rate.id].available_seats == tandem_resource.quantity * 2
