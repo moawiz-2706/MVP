@@ -51,7 +51,7 @@ export async function api<T>(
     // The deployed PWA uses the same Passport origin for /api. Keeping this
     // explicit preserves the HTTP-only PWA refresh cookie after an app reopen
     // without opting into unsafe cross-origin credential sharing.
-    credentials: init.credentials ?? "same-origin",
+    credentials: init.credentials ?? "include",
   });
   if (response.status === 401 && sessionToken && retryOnUnauthorized && refreshSession) {
     try {

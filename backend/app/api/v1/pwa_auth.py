@@ -28,7 +28,10 @@ PWA_SESSION_COOKIE = "passport_pwa_session"
 
 
 def _pwa_cookie_path(settings: Settings) -> str:
-    return f"{settings.api_prefix.rstrip('/')}/pwa-auth"
+    # The installed app can reopen on /app or another SPA route before it
+    # calls the refresh endpoint. A root path also avoids browser-specific
+    # surprises when Vercel rewrites /api requests to the backend.
+    return "/"
 
 
 def _pwa_session_response(
@@ -60,6 +63,8 @@ def _pwa_session_response(
         samesite="lax",
         path=_pwa_cookie_path(settings),
     )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
     return response
 
 

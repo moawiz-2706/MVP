@@ -19,7 +19,14 @@ class StripePaymentService:
         currency: str,
         receipt_email: str,
         idempotency_key: str | None = None,
+        metadata_extra: dict[str, str] | None = None,
     ) -> tuple[str, str]:
+        metadata = {
+            "booking_order_id": order_id,
+            "operator_id": operator_id,
+            "public_reference": public_reference,
+            **(metadata_extra or {}),
+        }
         intent = self.client.v1.payment_intents.create(
             {
                 "amount": amount_minor,
@@ -27,11 +34,7 @@ class StripePaymentService:
                 "payment_method_types": ["card"],
                 "receipt_email": receipt_email,
                 "transfer_group": f"booking_order_{public_reference}",
-                "metadata": {
-                    "booking_order_id": order_id,
-                    "operator_id": operator_id,
-                    "public_reference": public_reference,
-                },
+                "metadata": metadata,
             },
             {"idempotency_key": idempotency_key or f"booking_order:{order_id}:payment_intent"},
         )

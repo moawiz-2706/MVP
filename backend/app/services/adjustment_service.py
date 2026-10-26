@@ -253,11 +253,13 @@ class AdjustmentService:
         original_amount_minor: int,
         policy_version: int,
         idempotency_key: str,
+        metadata: dict[str, Any] | None = None,
     ) -> BookingAdjustment:
         return self._schedule_refund(
             booking, order, payment, amount_minor=amount_minor,
             original_amount_minor=original_amount_minor, reason="reschedule_price_decrease",
             policy_version=policy_version, idempotency_key=idempotency_key,
+            metadata=metadata,
         )
 
     def no_show(

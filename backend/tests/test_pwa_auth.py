@@ -61,7 +61,7 @@ def test_pwa_session_response_sets_a_host_only_month_long_recovery_cookie() -> N
     assert "short-lived-api-token" not in cookie
     assert "HttpOnly" in cookie
     assert "Max-Age=2678400" in cookie
-    assert "Path=/api/v1/pwa-auth" in cookie
+    assert "Path=/" in cookie
     assert "SameSite=lax" in cookie
     assert "Secure" in cookie
     assert "Domain=" not in cookie

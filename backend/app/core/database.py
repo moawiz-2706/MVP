@@ -20,7 +20,7 @@ REQUIRED_PRODUCTION_TABLES = (
     "pwa_auth_handoffs",
     "pwa_sessions",
 )
-REQUIRED_SCHEMA_VERSION = "039_pwa_sessions"
+REQUIRED_SCHEMA_VERSION = "040_booking_adjustment_refunds"
 
 
 @lru_cache

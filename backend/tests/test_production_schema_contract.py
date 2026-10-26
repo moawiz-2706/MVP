@@ -29,6 +29,7 @@ GHL_SYNC_STATE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "036_gh
 PWA_AUTH_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "037_pwa_auth_handoffs.sql"
 PWA_WORKSPACE_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "038_pwa_workspace_performance.sql"
 PWA_SESSIONS_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "039_pwa_sessions.sql"
+ADJUSTMENT_REFUND_MIGRATION = REPOSITORY_ROOT / "supabase" / "migrations" / "040_booking_adjustment_refunds.sql"
 
 
 def test_staff_user_migration_contains_model_columns_and_job_type() -> None:
@@ -160,3 +161,10 @@ def test_pwa_session_migration_and_model_are_aligned() -> None:
     assert "039_pwa_sessions" in sql
     assert PWASession.__tablename__ == "pwa_sessions"
     assert "revoked_at" in PWASession.__table__.columns
+
+
+def test_adjustment_refund_migration_and_outbox_model_are_aligned() -> None:
+    sql = ADJUSTMENT_REFUND_MIGRATION.read_text()
+    assert "stripe_create_adjustment_refund" in sql
+    assert "040_booking_adjustment_refunds" in sql
+    assert "stripe_create_adjustment_refund" in str(OutboxJob.__table_args__[1].sqltext)

@@ -60,6 +60,24 @@ function isDefinitiveSessionFailure(reason: unknown): boolean {
   return reason instanceof ApiError && reason.status === 401;
 }
 
+async function restorePwaSession(): Promise<{ access_token: string; expires_in: number }> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await api<{ access_token: string; expires_in: number }>(
+        "/pwa-auth/refresh",
+        json("POST", {}),
+        { retryOnUnauthorized: false, notifySessionExpired: false },
+      );
+    } catch (reason) {
+      lastError = reason;
+      if (isDefinitiveSessionFailure(reason) || attempt === 2) throw reason;
+      await new Promise((resolve) => window.setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 function requestEncryptedContext(): Promise<string> {
   const allowedOrigins = (import.meta.env.VITE_GHL_PARENT_ORIGINS || "")
     .split(",")
@@ -173,11 +191,7 @@ export function GHLSessionProvider({ children }: { children: ReactNode }) {
           // by the backend and migrated to that cookie on this response.
           const stored = readLegacyPwaSession();
           setSessionToken(stored);
-          const session = await api<{ access_token: string; expires_in: number }>(
-            "/pwa-auth/refresh",
-            json("POST", {}),
-            { retryOnUnauthorized: false, notifySessionExpired: false },
-          );
+          const session = await restorePwaSession();
           setSessionToken(session.access_token);
           clearLegacyPwaSession();
           expiresIn = session.expires_in;

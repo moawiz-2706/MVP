@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.models.entities import (
     Booking,
+    BookingAdjustment,
     BookingOrder,
     BookingResource,
     OutboxJob,
@@ -204,6 +205,17 @@ class StripeWebhookService:
 
     def _payment_succeeded(self, intent: dict[str, Any], event: dict[str, Any]) -> None:
         intent_id = str(intent["id"])
+        adjustment_id = (intent.get("metadata") or {}).get("booking_adjustment_id")
+        if adjustment_id:
+            adjustment = self.db.get(BookingAdjustment, uuid.UUID(str(adjustment_id)))
+            if adjustment is None:
+                raise RuntimeError("Adjustment PaymentIntent does not map to a local adjustment")
+            from app.services.booking_adjustment_service import BookingAdjustmentService
+
+            BookingAdjustmentService(self.db, adjustment.operator_id, self.settings).apply_paid_increase(
+                adjustment.id, intent
+            )
+            return
         payment = self.db.scalar(
             select(Payment)
             .where(Payment.stripe_payment_intent_id == intent_id)
@@ -453,6 +465,19 @@ class StripeWebhookService:
             )
 
     def _payment_failed(self, intent: dict[str, Any]) -> None:
+        adjustment_id = (intent.get("metadata") or {}).get("booking_adjustment_id")
+        if adjustment_id:
+            adjustment = self.db.get(BookingAdjustment, uuid.UUID(str(adjustment_id)))
+            if adjustment is not None and adjustment.status not in {"succeeded", "refunded"}:
+                adjustment.status = "failed"
+                adjustment.adjustment_metadata = {
+                    **(adjustment.adjustment_metadata or {}),
+                    "provider_status": intent.get("status"),
+                    "failure_message": (intent.get("last_payment_error") or {}).get("message")
+                    if isinstance(intent.get("last_payment_error"), dict)
+                    else None,
+                }
+            return
         payment = self.db.scalar(
             select(Payment)
             .where(Payment.stripe_payment_intent_id == str(intent["id"]))

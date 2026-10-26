@@ -148,6 +148,21 @@ class BookingUpdate(BaseModel):
         return self
 
 
+class BookingAdjustmentRequest(BookingUpdate):
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class BookingAdjustmentResponse(BaseModel):
+    adjustment_id: uuid.UUID
+    status: str
+    action: str
+    amount_minor: int
+    currency: str
+    stripe_payment_intent_id: str | None = None
+    client_secret: str | None = None
+    booking: BookingDetail | None = None
+
+
 class BookingNotificationItem(BaseModel):
     booking_id: uuid.UUID
     calendar_id: uuid.UUID

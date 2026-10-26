@@ -18,6 +18,7 @@ import { PageHeader } from "../components/PageHeader";
 import { useSession } from "../auth/GHLSessionProvider";
 import { formatLongDate, formatTime, isValidDateTime, tomorrowInZone, zoneLabel, zonedWallTimeToISO } from "../lib/datetime";
 import { PaymentPanel } from "../public-booking/PaymentPanel";
+import { AdjustmentPaymentPanel } from "./AdjustmentPaymentPanel";
 
 function money(value: number, currency = "usd") { return new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(value / 100); }
 function badge(status: string) { return status === "confirmed" || status === "succeeded" || status === "synced" || status === "sent" ? "success" : status.includes("fail") || status === "cancelled" ? "danger" : "warning"; }
@@ -127,17 +128,41 @@ function BookingDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const [editStart, setEditStart] = useState("");
   const [editUnits, setEditUnits] = useState(1);
   const [editing, setEditing] = useState(false);
+  const [pendingAdjustment, setPendingAdjustment] = useState<{ adjustment_id: string; client_secret: string } | null>(null);
   const [weatherOpen, setWeatherOpen] = useState(false);
   const [weatherReason, setWeatherReason] = useState("Weather closure");
   const [weatherMode, setWeatherMode] = useState("full_refund");
   const edit = useMutation({
-    mutationFn: () => api<BookingDetail>(`/bookings/${id}`, json("PATCH", { start_at: editStart ? zonedWallTimeToISO(editStart, tz) : undefined, units: editUnits })),
-    onSuccess: async () => { setEditing(false); await Promise.all([client.invalidateQueries({ queryKey: ["booking", id] }), client.invalidateQueries({ queryKey: ["bookings"] }), client.invalidateQueries({ queryKey: ["booking-notifications"] })]); },
+    mutationFn: () => api<{ adjustment_id: string; status: string; action: string; amount_minor: number; client_secret: string | null; booking: BookingDetail | null }>(
+      `/bookings/${id}/adjustment`,
+      json("POST", { start_at: editStart ? zonedWallTimeToISO(editStart, tz) : undefined, units: editUnits, idempotency_key: `pwa-${id}-${editStart}-${editUnits}` }),
+    ),
+    onSuccess: async (result) => {
+      if (result.client_secret) {
+        setPendingAdjustment({ adjustment_id: result.adjustment_id, client_secret: result.client_secret });
+        return;
+      }
+      setEditing(false);
+      await Promise.all([client.invalidateQueries({ queryKey: ["booking", id] }), client.invalidateQueries({ queryKey: ["bookings"] }), client.invalidateQueries({ queryKey: ["booking-notifications"] })]);
+    },
   });
   const cancel = useMutation({ mutationFn: () => api<void>(`/bookings/${id}/cancel`, { method: "POST" }), onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: ["bookings"] }), client.invalidateQueries({ queryKey: ["booking", id] }), client.invalidateQueries({ queryKey: ["booking-notifications"] })]); } });
   const statusMutation = useMutation({ mutationFn: (status: "completed" | "no_show") => api<BookingDetail>(`/bookings/${id}/status`, json("POST", { status, reason: status === "no_show" ? "Marked no-show by operator" : "Marked completed by operator" })), onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: ["bookings"] }), client.invalidateQueries({ queryKey: ["booking", id] })]); } });
   const weatherMutation = useMutation({ mutationFn: () => api(`/bookings/${id}/weather-cancel`, json("POST", { calendar_id: data!.calendar_id, start_at: data!.start_at, end_at: data!.end_at, reason: weatherReason, refund_mode: weatherMode })), onSuccess: async () => { setWeatherOpen(false); await Promise.all([client.invalidateQueries({ queryKey: ["bookings"] }), client.invalidateQueries({ queryKey: ["booking", id] }), client.invalidateQueries({ queryKey: ["booking-notifications"] })]); } });
   const retry = useMutation({ mutationFn: () => api<void>(`/orders/${data?.booking_order_id}/retry-ghl-sync`, { method: "POST" }), onSuccess: () => client.invalidateQueries({ queryKey: ["booking", id] }) });
+  const finishAdjustment = async () => {
+    const adjustmentId = pendingAdjustment?.adjustment_id;
+    if (adjustmentId) {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const result = await api<{ status: string }>(`/bookings/${id}/adjustments/${adjustmentId}`, {}, { notifySessionExpired: false });
+        if (["succeeded", "completed", "manual_review", "refunded"].includes(result.status)) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 750));
+      }
+    }
+    setPendingAdjustment(null);
+    setEditing(false);
+    await Promise.all([client.invalidateQueries({ queryKey: ["booking", id] }), client.invalidateQueries({ queryKey: ["bookings"] }), client.invalidateQueries({ queryKey: ["booking-notifications"] })]);
+  };
   return (
     <>
       <button className="drawer-overlay" onClick={onClose} aria-label="Close booking details" />
@@ -147,7 +172,7 @@ function BookingDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <div className="drawer-header"><div><h2>{data.customer_name}</h2><p>{data.public_reference}</p></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div>
             <div className="detail-section">
               <h3>Booking</h3>
-              {editing ? <form className="edit-booking-form" onSubmit={(event) => { event.preventDefault(); edit.mutate(); }}><label className="field"><span>Date and time ({zoneLabel(tz)})</span><input type="datetime-local" required value={editStart || localDateTime(data.start_at, tz)} onChange={(event) => setEditStart(event.target.value)} /></label><label className="field"><span>Quantity</span><input type="number" min={1} required value={editUnits} onChange={(event) => setEditUnits(Number(event.target.value))} /></label><div className="toolbar"><button type="button" className="button ghost small" onClick={() => setEditing(false)}>Cancel</button><button className="button small" disabled={edit.isPending}>{edit.isPending ? "Checking…" : "Save changes"}</button></div></form> : <div className="toolbar" style={{ marginBottom: 12 }}><button className="button secondary small" disabled={!(["pending_payment", "confirmed"].includes(data.status))} onClick={() => { setEditStart(localDateTime(data.start_at, tz)); setEditUnits(data.units); setEditing(true); }}>Edit time or quantity</button></div>}
+              {pendingAdjustment ? <AdjustmentPaymentPanel clientSecret={pendingAdjustment.client_secret} onComplete={finishAdjustment}/> : editing ? <form className="edit-booking-form" onSubmit={(event) => { event.preventDefault(); edit.mutate(); }}><label className="field"><span>Date and time ({zoneLabel(tz)})</span><input type="datetime-local" required value={editStart || localDateTime(data.start_at, tz)} onChange={(event) => setEditStart(event.target.value)} /></label><label className="field"><span>Quantity</span><input type="number" min={1} required value={editUnits} onChange={(event) => setEditUnits(Number(event.target.value))} /></label><div className="toolbar"><button type="button" className="button ghost small" onClick={() => setEditing(false)}>Cancel</button><button className="button small" disabled={edit.isPending}>{edit.isPending ? "Checking…" : "Save changes"}</button></div></form> : <div className="toolbar" style={{ marginBottom: 12 }}><button className="button secondary small" disabled={!(["pending_payment", "confirmed"].includes(data.status))} onClick={() => { setEditStart(localDateTime(data.start_at, tz)); setEditUnits(data.units); setEditing(true); }}>Edit time or quantity</button></div>}
               {edit.error && <div className="error-banner">{edit.error.message}</div>}
               <dl className="detail-list">
                 <dt>Status</dt><dd><span className={`badge ${badge(data.status)}`}>{data.status.replaceAll("_", " ")}</span></dd>

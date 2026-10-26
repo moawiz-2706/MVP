@@ -208,6 +208,12 @@ class OutboxService:
             StripeRefundService(self.db, self.settings).create_for_attempt(
                 uuid.UUID(payload["refund_attempt_id"])
             )
+        elif job.job_type == "stripe_create_adjustment_refund":
+            from app.services.stripe_adjustment_refund_service import StripeAdjustmentRefundService
+
+            StripeAdjustmentRefundService(self.db, self.settings).create_for_adjustment(
+                uuid.UUID(payload["adjustment_id"])
+            )
         elif job.job_type == "stripe_create_transfer_reversal":
             StripeTransferReversalService(self.db, self.settings).create_for_attempt(
                 uuid.UUID(payload["reversal_attempt_id"])

@@ -2,17 +2,20 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Header, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.app_session import CurrentPrincipal
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
+from app.core.exceptions import NotFoundError
 from app.core.permissions import Permission, is_admin, require_permission
-from app.models.entities import Operator
+from app.models.entities import BookingAdjustment, Operator
 from app.schemas.booking import (
     BookingDetail,
+    BookingAdjustmentRequest,
+    BookingAdjustmentResponse,
     BookingListItem,
     BookingNoteCreate,
     BookingNoteRead,
@@ -24,6 +27,7 @@ from app.schemas.booking import (
 )
 from app.schemas.order import OrderCreateRequest, OrderCreateResponse
 from app.services.booking_admin_service import BookingAdminService
+from app.services.booking_adjustment_service import BookingAdjustmentService
 from app.services.booking_notification_service import BookingNotificationService
 from app.services.ghl_sync_service import GHLSyncService
 from app.services.order_service import OrderService
@@ -129,6 +133,52 @@ def update_booking(
 ):
     require_permission(principal, Permission.OPERATE_BOOKINGS)
     return BookingAdminService(db, principal.operator_id).update(booking_id, data)
+
+
+@router.post(
+    "/bookings/{booking_id}/adjustment",
+    response_model=BookingAdjustmentResponse,
+)
+def adjust_booking(
+    data: BookingAdjustmentRequest,
+    booking_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    db: DB,
+    idempotency_key: Annotated[str | None, Header(alias="X-Idempotency-Key")] = None,
+):
+    require_permission(principal, Permission.OPERATE_BOOKINGS)
+    return BookingAdjustmentService(db, principal.operator_id).create(
+        booking_id,
+        data,
+        actor_id=principal.app_user_id,
+        idempotency_key=idempotency_key or data.idempotency_key,
+    )
+
+
+@router.get(
+    "/bookings/{booking_id}/adjustments/{adjustment_id}",
+    response_model=BookingAdjustmentResponse,
+)
+def adjustment_status(
+    booking_id: uuid.UUID,
+    adjustment_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    db: DB,
+):
+    require_permission(principal, Permission.OPERATE_BOOKINGS)
+    adjustment = db.scalar(
+        select(BookingAdjustment).where(
+            BookingAdjustment.id == adjustment_id,
+            BookingAdjustment.booking_id == booking_id,
+            BookingAdjustment.operator_id == principal.operator_id,
+        )
+    )
+    if adjustment is None:
+        raise NotFoundError("Booking adjustment not found")
+    booking = None
+    if adjustment.status in {"succeeded", "completed"}:
+        booking = BookingAdminService(db, principal.operator_id).detail(booking_id)
+    return BookingAdjustmentService(db, principal.operator_id)._response(adjustment, booking=booking)
 
 
 @router.post("/bookings/{booking_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
