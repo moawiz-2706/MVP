@@ -42,6 +42,13 @@ class StripePaymentService:
             raise RuntimeError("Stripe did not return a PaymentIntent client secret")
         return intent.id, intent.client_secret
 
+    def cancel_payment_intent(self, payment_intent_id: str, *, idempotency_key: str):
+        return self.client.v1.payment_intents.cancel(
+            payment_intent_id,
+            {"cancellation_reason": "abandoned"},
+            {"idempotency_key": idempotency_key},
+        )
+
     def retrieve_payment_intent(self, payment_intent_id: str):
         return self.client.v1.payment_intents.retrieve(payment_intent_id, {"expand": ["latest_charge"]})
 

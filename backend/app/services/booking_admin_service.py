@@ -229,6 +229,17 @@ class BookingAdminService:
             "status": booking.status,
         }
 
+    def _creator_name(self, order: BookingOrder) -> str | None:
+        if order.created_by_staff_id:
+            name = self.db.scalar(select(Staff.name).where(Staff.id == order.created_by_staff_id))
+            if name:
+                return name
+        if order.created_by_user_id:
+            user = self.db.get(AppUser, order.created_by_user_id)
+            if user:
+                return user.name or user.email
+        return None
+
     def detail(self, booking_id: uuid.UUID) -> dict:
         row = self.db.execute(
             select(Booking, BookingOrder, Payment, CalendarCategory, GHLAppointmentMapping)
@@ -250,6 +261,8 @@ class BookingAdminService:
         )
         return {
             **self._list_dict(booking, order, category),
+            "booking_source": order.booking_source,
+            "created_by_name": self._creator_name(order),
             "customer_phone": order.customer_phone,
             "marketing_opt_in": order.marketing_opt_in,
             "location_name": booking.departure_location_name_snapshot,

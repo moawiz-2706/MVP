@@ -46,7 +46,7 @@ def test_pwa_handoff_stores_only_a_digest_and_short_expiry() -> None:
 
 
 def test_pwa_session_response_sets_a_host_only_month_long_recovery_cookie() -> None:
-    settings = SimpleNamespace(api_prefix="/api/v1", environment="production")
+    settings = SimpleNamespace(api_prefix="/api/v1", environment="production", secure_cookies=True)
 
     response = pwa_auth._pwa_session_response(
         "short-lived-api-token",

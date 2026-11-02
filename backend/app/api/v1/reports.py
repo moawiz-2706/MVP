@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from app.core.app_session import CurrentPrincipal
 from app.core.database import get_db
 from app.core.permissions import Permission, require_permission
-from app.models.entities import Booking, BookingOrder, OutboxJob
-from app.schemas.reports import ReportSummary
+from app.models.entities import AppUser, Booking, BookingOrder, OutboxJob, Payment, Staff
+from app.schemas.reports import CreatorReport, CreatorReportRow, ReportSummary
 
 router = APIRouter(tags=["reports"])
 DB = Annotated[Session, Depends(get_db)]
@@ -114,3 +114,101 @@ def booking_export(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="passport-bookings-{start}-{end}.csv"'},
     )
+
+
+CONFIRMED_ORDER_STATUSES = ("confirmed", "paid", "partially_refunded")
+SOURCE_LABELS = {
+    "public": "Public booking page",
+    "staff_link": "Staff booking link",
+    "pwa": "Staff app",
+    "desktop": "Passport desktop",
+}
+
+
+@router.get("/reports/bookings-by-creator", response_model=CreatorReport)
+def bookings_by_creator(
+    principal: CurrentPrincipal,
+    db: DB,
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+) -> CreatorReport:
+    """Orders created in the range, grouped by who created them and how.
+
+    Admin only: per-staff sales totals are the input to commission and must
+    not be visible to other staff. Amounts are order totals, not commission.
+    """
+
+    require_permission(principal, Permission.MANAGE_PAYMENTS)
+    today = datetime.now(UTC).date()
+    end = end_date or today
+    start = start_date or (end - timedelta(days=30))
+    if end < start:
+        raise ValueError("end_date must be on or after start_date")
+    start_at = datetime.combine(start, time.min, tzinfo=UTC)
+    end_at = datetime.combine(end + timedelta(days=1), time.min, tzinfo=UTC)
+    rows = db.execute(
+        select(
+            BookingOrder.booking_source,
+            BookingOrder.created_by_staff_id,
+            BookingOrder.created_by_user_id,
+            BookingOrder.currency,
+            func.count(BookingOrder.id),
+            func.count(BookingOrder.id).filter(BookingOrder.status.in_(CONFIRMED_ORDER_STATUSES)),
+            func.count(BookingOrder.id).filter(BookingOrder.status.in_(("cancelled", "expired", "refunded"))),
+            func.coalesce(
+                func.sum(BookingOrder.customer_total_minor).filter(
+                    BookingOrder.status.in_(CONFIRMED_ORDER_STATUSES)
+                ),
+                0,
+            ),
+            func.coalesce(func.sum(Payment.refunded_minor), 0),
+        )
+        .outerjoin(Payment, Payment.booking_order_id == BookingOrder.id)
+        .where(
+            BookingOrder.operator_id == principal.operator_id,
+            BookingOrder.created_at >= start_at,
+            BookingOrder.created_at < end_at,
+        )
+        .group_by(
+            BookingOrder.booking_source,
+            BookingOrder.created_by_staff_id,
+            BookingOrder.created_by_user_id,
+            BookingOrder.currency,
+        )
+    ).all()
+    staff_names = dict(
+        db.execute(
+            select(Staff.id, Staff.name).where(
+                Staff.id.in_([row[1] for row in rows if row[1] is not None])
+            )
+        ).all()
+    )
+    user_names = {
+        user_id: name or email
+        for user_id, name, email in db.execute(
+            select(AppUser.id, AppUser.name, AppUser.email).where(
+                AppUser.id.in_([row[2] for row in rows if row[2] is not None])
+            )
+        ).all()
+    }
+    result = []
+    for source, staff_id, user_id, currency, orders, confirmed, cancelled, gross, refunded in rows:
+        name = staff_names.get(staff_id) or user_names.get(user_id)
+        if name is None:
+            name = SOURCE_LABELS.get(source or "", "Created before attribution")
+        result.append(
+            CreatorReportRow(
+                booking_source=source,
+                staff_id=str(staff_id) if staff_id else None,
+                user_id=str(user_id) if user_id else None,
+                creator_name=name,
+                orders=orders,
+                confirmed_orders=confirmed,
+                cancelled_orders=cancelled,
+                gross_minor=int(gross),
+                refunded_minor=int(refunded),
+                currency=currency,
+            )
+        )
+    result.sort(key=lambda row: (-row.gross_minor, row.creator_name.lower()))
+    return CreatorReport(start_date=start, end_date=end, rows=result)

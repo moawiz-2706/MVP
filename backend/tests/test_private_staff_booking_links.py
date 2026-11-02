@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import timedelta
 
@@ -6,6 +7,11 @@ import pytest
 from app.models.entities import Operator, Staff
 from app.services.public_access_service import PublicAccessService
 from app.api.v1.staff_booking import _staff_for_token
+
+pytestmark = pytest.mark.skipif(
+    not os.getenv("TEST_DATABASE_URL"),
+    reason="Set TEST_DATABASE_URL to a disposable Postgres database to run DB integration tests",
+)
 
 
 @pytest.mark.usefixtures("engine")

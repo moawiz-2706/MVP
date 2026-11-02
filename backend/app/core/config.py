@@ -67,6 +67,32 @@ class Settings(BaseSettings):
     # an always-on worker host for near-real-time synchronization.
     ghl_staff_sync_interval_seconds: int = Field(default=15, ge=10, le=60)
     cron_secret: str = ""
+    # Set by Vercel on every deployment ("production", "preview", "development").
+    vercel_env: str = ""
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() == "production"
+
+    @property
+    def secure_cookies(self) -> bool:
+        """Mark cookies Secure for production or any HTTPS-served deployment.
+
+        Tying this only to ENVIRONMENT let a production deployment with the
+        variable unset issue the PWA refresh cookie over plain HTTP.
+        """
+        return (
+            self.is_production
+            or self.vercel_env.lower() == "production"
+            or self.frontend_url.lower().startswith("https://")
+            or self.api_url.lower().startswith("https://")
+        )
+
+    @property
+    def environment_warnings(self) -> list[str]:
+        if self.vercel_env.lower() == "production" and not self.is_production:
+            return ["ENVIRONMENT is not 'production' on a Vercel production deployment"]
+        return []
 
     @field_validator("cors_origins", mode="before")
     @classmethod

@@ -28,7 +28,7 @@ from app.schemas.order import OrderCreateRequest, OrderCreateResponse
 from app.schemas.public import PublicCustomField, PublicRate, PublicRateResource
 from app.schemas.staff_booking import StaffBookingContext
 from app.services.availability_service import AvailabilityService
-from app.services.order_service import OrderService
+from app.services.order_service import BookingAttribution, OrderService
 from app.services.public_access_service import PublicAccessService
 from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.core.config import Settings, get_settings
@@ -208,6 +208,7 @@ def create_staff_booking(
         checkout_key=checkout_key or f"staff:{staff.id}:{uuid.uuid4()}",
         allow_payment_override=True,
         allow_private_operator=True,
+        attribution=BookingAttribution(source="staff_link", created_by_staff_id=staff.id),
     )
 
 

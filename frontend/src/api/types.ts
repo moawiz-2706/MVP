@@ -132,6 +132,8 @@ export interface SlotCalendar { calendar_id: Id; calendar_name: string; category
 export interface DashboardSlot { start_at: string; calendars: SlotCalendar[] }
 
 export interface BookingDetail extends Booking {
+  booking_source?: string | null;
+  created_by_name?: string | null;
   customer_phone: string | null;
   marketing_opt_in: boolean;
   location_name: string | null;
@@ -279,4 +281,122 @@ export interface MessageTemplate {
   available_variables: string[];
   preview_subject: string;
   preview_body: string;
+}
+
+export interface PwaDepartureResource {
+  resource_id: string;
+  name: string;
+  total: number;
+  confirmed: number;
+  held: number;
+  remaining: number;
+}
+
+export interface PwaDepartureBooking {
+  id: string;
+  public_reference: string;
+  lead_name: string;
+  status: string;
+  payment_status: string | null;
+  payment_method: string | null;
+  units: number;
+}
+
+export interface PwaDepartureStaff {
+  assignment_id: string;
+  staff_id: string;
+  staff_name: string;
+  role: string | null;
+}
+
+export interface PwaDeparture {
+  calendar_id: string;
+  calendar_name: string;
+  category_color: string | null;
+  start_at: string;
+  end_at: string;
+  source: "scheduled" | "pushed" | "unscheduled";
+  blocked: boolean;
+  resources: PwaDepartureResource[];
+  bookings: PwaDepartureBooking[];
+  staff: PwaDepartureStaff[];
+  booked_units: number;
+}
+
+export interface PwaDeparturesResponse {
+  date: string;
+  time_zone: string;
+  departures: PwaDeparture[];
+}
+
+export interface PwaManifestParticipant {
+  id: string;
+  sequence: number;
+  name: string;
+  is_minor: boolean;
+  guardian_name: string | null;
+  phone: string | null;
+  email: string | null;
+  checked_in_at: string | null;
+}
+
+export interface PwaManifestBooking {
+  id: string;
+  public_reference: string;
+  lead_name: string;
+  lead_phone: string | null;
+  lead_email: string;
+  status: string;
+  payment_status: string | null;
+  payment_method: string | null;
+  units: number;
+  waiver_status: "signed" | "pending" | "none";
+  participants: PwaManifestParticipant[];
+}
+
+export interface PwaManifestResponse {
+  calendar_id: string;
+  calendar_name: string;
+  start_at: string;
+  end_at: string;
+  time_zone: string;
+  expected_units: number;
+  named_participants: number;
+  checked_in: number;
+  staff: PwaDepartureStaff[];
+  bookings: PwaManifestBooking[];
+}
+
+export type WeatherRefundMode = "full_refund" | "credit" | "manual_review" | "no_refund";
+
+export interface PwaClosurePreview {
+  manifest: PwaManifestResponse;
+  default_refund_mode: WeatherRefundMode;
+  already_closed: boolean;
+}
+
+export interface PwaCloseDepartureResponse {
+  closure_id: string;
+  cancelled_bookings: number;
+  refund_mode: string;
+  failed: { booking_id: string; error: string }[];
+}
+
+export interface CreatorReportRow {
+  booking_source: string | null;
+  staff_id: string | null;
+  user_id: string | null;
+  creator_name: string;
+  orders: number;
+  confirmed_orders: number;
+  cancelled_orders: number;
+  gross_minor: number;
+  refunded_minor: number;
+  currency: string;
+}
+
+export interface CreatorReport {
+  start_date: string;
+  end_date: string;
+  rows: CreatorReportRow[];
 }

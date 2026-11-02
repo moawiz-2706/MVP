@@ -55,6 +55,7 @@ app.add_middleware(
         "X-GHL-Signature",
         "X-Checkout-Key",
         "X-Staff-Booking-Key",
+        "X-Passport-Client",
     ],
 )
 app.add_exception_handler(DomainError, domain_error_handler)
@@ -94,10 +95,14 @@ def health() -> dict[str, str]:
 def readiness() -> JSONResponse:
     try:
         settings.validate_runtime()
-        if settings.environment.lower() == "production":
+        if settings.is_production:
             payload = check_database_readiness()
         else:
             payload = {"status": "ready", "schema_version": "development"}
+        payload["environment"] = "production" if settings.is_production else "non-production"
+        warnings = settings.environment_warnings + list(payload.get("warnings", []))
+        if warnings:
+            payload["warnings"] = warnings
         return JSONResponse(status_code=200, content=payload)
     except Exception as exc:
         return JSONResponse(

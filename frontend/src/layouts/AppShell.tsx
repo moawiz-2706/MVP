@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import {
   BarChart3,
   Bell,
@@ -8,6 +7,8 @@ import {
   MapPin,
   Menu,
   Moon,
+  Plus,
+  Ship,
   Search,
   Settings,
   Shapes,
@@ -18,17 +19,18 @@ import {
   X,
 } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
-import { api } from "../api/client";
-import type { PwaBootstrapResponse } from "../api/types";
+import { Link, NavLink, Outlet } from "react-router-dom";
+import { usePwaBootstrap } from "../api/bootstrap";
 import { useSession } from "../auth/GHLSessionProvider";
 import { GlobalSearch } from "../components/GlobalSearch";
 import { OperationNotice } from "../components/OperationNotice";
 import { PwaInstallPrompt } from "../components/PwaInstallPrompt";
+import { isEmbeddedInHighLevel } from "../pwa";
 
 const links = [
   { to: "/app", label: "Home", icon: Home, end: true },
   { to: "/app/bookings", label: "Bookings", icon: CalendarDays },
+  { to: "/app/departures", label: "Departures", icon: Ship, standaloneOnly: true },
   { to: "/app/notifications", label: "Notifications", icon: Bell },
   { to: "/app/resources", label: "Resources", icon: Warehouse, feature: "calendar_management" },
   { to: "/app/locations", label: "Locations", icon: MapPin, feature: "calendar_management" },
@@ -68,14 +70,11 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(loadTheme);
-  const bootstrap = useQuery({
-    queryKey: ["pwa-bootstrap"],
-    queryFn: () => api<PwaBootstrapResponse>("/pwa/bootstrap"),
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
-    refetchIntervalInBackground: false,
-  });
+  const bootstrap = usePwaBootstrap();
   const features = bootstrap.data?.features;
+  // The departure board and bottom bar belong to the standalone Staff PWA;
+  // the embedded HighLevel desktop keeps its existing navigation.
+  const standalone = !isEmbeddedInHighLevel();
   const notificationCount = bootstrap.data?.badge_counts.notifications || 0;
   const staffMissingRoles = bootstrap.data?.badge_counts.staff_missing_roles || 0;
 
@@ -105,7 +104,7 @@ export function AppShell() {
   }, [mobileOpen]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${standalone ? "has-bottom-nav" : ""}`}>
       <button className={`mobile-menu ${mobileOpen ? "menu-hidden" : ""}`} onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu /></button>
       {mobileOpen && <button className="mobile-scrim" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
       <aside className={`app-sidebar ${mobileOpen ? "open" : ""}`}>
@@ -115,7 +114,7 @@ export function AppShell() {
           <button className="icon-button sidebar-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={18} /></button>
         </div>
         <nav>
-          {links.filter((item) => !item.feature || features?.[item.feature] !== false).map(({ to, label, icon: Icon, end }) => (
+          {links.filter((item) => (!item.feature || features?.[item.feature] !== false) && (!item.standaloneOnly || standalone)).map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} onClick={() => setMobileOpen(false)} className={({ isActive }) => isActive ? "active" : ""}>
               <Icon size={18} />{label}
               {label === "Staff" && staffMissingRoles > 0 && <span className="nav-count" aria-label={`${staffMissingRoles} staff need a custom role`}>{staffMissingRoles > 99 ? "99+" : staffMissingRoles}</span>}
@@ -145,6 +144,13 @@ export function AppShell() {
           <Outlet />
         </Suspense>
       </main>
+      {standalone && (
+        <nav className="pwa-bottom-nav" aria-label="Quick navigation">
+          <Link to="/app/bookings?new=1"><Plus size={20} aria-hidden="true" />New booking</Link>
+          <NavLink to="/app/bookings" className={({ isActive }) => isActive ? "active" : ""}><CalendarDays size={20} aria-hidden="true" />Bookings</NavLink>
+          <NavLink to="/app/departures" className={({ isActive }) => isActive ? "active" : ""}><Ship size={20} aria-hidden="true" />Departures</NavLink>
+        </nav>
+      )}
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );

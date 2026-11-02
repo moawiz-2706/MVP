@@ -59,7 +59,7 @@ def _pwa_session_response(
         value=refresh_token,
         max_age=refresh_expires_in,
         httponly=True,
-        secure=settings.environment.lower() == "production",
+        secure=settings.secure_cookies,
         samesite="lax",
         path=_pwa_cookie_path(settings),
     )
@@ -133,7 +133,7 @@ def pwa_highlevel_start(
         state,
         max_age=600,
         httponly=True,
-        secure=settings.environment.lower() == "production",
+        secure=settings.secure_cookies,
         samesite="lax",
         path=STATE_COOKIE_PATH,
     )
@@ -160,9 +160,19 @@ def pwa_refresh(
     settings: AppSettings,
 ) -> JSONResponse:
     try:
-        token, expires_in, refreshed_principal = PWAAuthService(db, settings).refresh_session(principal)
+        token, expires_in, refreshed_principal, rotated = PWAAuthService(db, settings).refresh_session(
+            principal
+        )
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    if not rotated:
+        # Leave the browser's newer cookie from the racing refresh in place.
+        response = JSONResponse(
+            content=GHLSessionResponse(access_token=token, expires_in=expires_in).model_dump(mode="json")
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        return response
     return _new_pwa_session_response(refreshed_principal, token, expires_in, settings)
 
 
@@ -180,4 +190,10 @@ def pwa_logout(
         except HTTPException:
             # Logout must be safe to repeat even if its old cookie was already rotated or expired.
             pass
-    response.delete_cookie(PWA_SESSION_COOKIE, path=_pwa_cookie_path(settings))
+    response.delete_cookie(
+        PWA_SESSION_COOKIE,
+        path=_pwa_cookie_path(settings),
+        secure=settings.secure_cookies,
+        httponly=True,
+        samesite="lax",
+    )

@@ -1,5 +1,6 @@
 import logging
 import hashlib
+import hmac
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -150,6 +151,38 @@ def decode_pwa_refresh_session(token: str, settings: Settings) -> SessionPrincip
         raise HTTPException(status_code=401, detail="Invalid or expired Passport PWA session") from exc
 
 
+# Window after a rotation in which the replaced nonce is treated as a racing
+# request from the same device: it gets an access token but no new cookie.
+PWA_REFRESH_GRACE = timedelta(seconds=30)
+
+
+def is_previous_refresh_nonce(pwa_session: PWASession, nonce_digest: str) -> bool:
+    return pwa_session.previous_refresh_nonce_digest is not None and hmac.compare_digest(
+        pwa_session.previous_refresh_nonce_digest, nonce_digest
+    )
+
+
+def refresh_nonce_in_grace(pwa_session: PWASession, nonce_digest: str) -> bool:
+    return (
+        is_previous_refresh_nonce(pwa_session, nonce_digest)
+        and pwa_session.refresh_rotated_at is not None
+        and pwa_session.refresh_rotated_at > datetime.now(UTC) - PWA_REFRESH_GRACE
+    )
+
+
+def refresh_nonce_accepted(pwa_session: PWASession, nonce_digest: str) -> bool:
+    """Accept the current nonce, or the one it replaced.
+
+    The replaced nonce stays usable until its successor is presented, because
+    a phone that loses the rotation response (app closed, network drop) never
+    receives the new cookie. Presenting the successor rotates again and retires
+    the older nonce, so a cookie two rotations old is always rejected.
+    """
+    return hmac.compare_digest(pwa_session.refresh_nonce_digest, nonce_digest) or is_previous_refresh_nonce(
+        pwa_session, nonce_digest
+    )
+
+
 def validate_session_principal(
     principal: SessionPrincipal,
     db: Session,
@@ -198,7 +231,7 @@ def validate_session_principal(
             or pwa_session.ghl_location_id != principal.ghl_location_id
             or pwa_session.revoked_at is not None
             or pwa_session.expires_at <= datetime.now(UTC)
-            or (expected_nonce is not None and pwa_session.refresh_nonce_digest != expected_nonce)
+            or (expected_nonce is not None and not refresh_nonce_accepted(pwa_session, expected_nonce))
         ):
             logger.warning("Application session rejected reason=pwa_session_invalid")
             raise HTTPException(status_code=401, detail="Passport PWA session is no longer valid")

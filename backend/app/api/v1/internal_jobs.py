@@ -40,7 +40,10 @@ def process_outbox(
     x_cron_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, int]:
     _authorize(settings, authorization, x_cron_secret)
-    return OutboxService(db, settings).process(limit=20)
+    # Expire holds first so the frequent runner, not only the daily cron,
+    # releases abandoned checkouts and queues their HighLevel cancellations.
+    expired = ReservationLifecycleService(db).expire_pending_holds()
+    return {**expired, **OutboxService(db, settings).process(limit=20)}
 
 
 @router.get("/cron/daily")

@@ -97,6 +97,16 @@ class PreparedItem:
         )
 
 
+
+@dataclass(frozen=True)
+class BookingAttribution:
+    """Who created a booking and through which path; never who operates it."""
+
+    source: str = "public"
+    created_by_user_id: uuid.UUID | None = None
+    created_by_staff_id: uuid.UUID | None = None
+
+
 class OrderService:
     def __init__(self, db: Session, settings: Settings) -> None:
         self.db = db
@@ -416,7 +426,9 @@ class OrderService:
         checkout_key: str | None = None,
         allow_payment_override: bool = False,
         allow_private_operator: bool = False,
+        attribution: BookingAttribution | None = None,
     ) -> OrderCreateResponse:
+        attribution = attribution or BookingAttribution()
         operator = self._operator(operator_slug, require_public=not allow_private_operator)
         checkout_key = checkout_key or f"legacy:{uuid.uuid4()}"
         if len(checkout_key) > 160:
@@ -491,6 +503,9 @@ class OrderService:
             platform_gross_retained_minor=money.platform_gross_retained_minor,
             checkout_key=checkout_key,
             checkout_request_hash=request_hash,
+            created_by_user_id=attribution.created_by_user_id,
+            created_by_staff_id=attribution.created_by_staff_id,
+            booking_source=attribution.source,
             status="pending_payment" if paid else "confirmed",
             ghl_confirmation_email_status=(
                 "pending"
