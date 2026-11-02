@@ -532,7 +532,16 @@ class ConfigurationService:
         return entity
 
     def get_calendar(self, entity_id: uuid.UUID, *, active: bool = False) -> Calendar:
-        return self._owned(Calendar, entity_id, active=True)
+        """A calendar the operator can configure.
+
+        Deleted calendars are never returned. Inactive ones are, unless `active`
+        is requested: an inactive calendar must stay editable, or it could
+        never be set up and switched back on.
+        """
+        calendar = self._owned(Calendar, entity_id, active=active)
+        if calendar.deleted_at is not None:
+            raise NotFoundError()
+        return calendar
 
     def _commit_calendar(self) -> None:
         try:
