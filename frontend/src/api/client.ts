@@ -45,9 +45,6 @@ export async function api<T>(
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
-  // Lets the API attribute staff-created bookings to the standalone PWA or the
-  // embedded desktop. Reporting only; it grants nothing.
-  headers.set("X-Passport-Client", window.parent === window ? "pwa" : "embedded");
   const response = await fetch(apiUrl(path), {
     ...init,
     headers,

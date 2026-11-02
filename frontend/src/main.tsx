@@ -8,8 +8,6 @@ import { registerPwaServiceWorker } from "./pwa";
 import "./styles.css";
 
 const DashboardPage = lazy(() => import("./home/DashboardPage").then((module) => ({ default: module.DashboardPage })));
-const DeparturesPage = lazy(() => import("./departures/DeparturesPage").then((module) => ({ default: module.DeparturesPage })));
-const ManifestPage = lazy(() => import("./departures/ManifestPage").then((module) => ({ default: module.ManifestPage })));
 const BookingsPage = lazy(() => import("./bookings/BookingsPage").then((module) => ({ default: module.BookingsPage })));
 const ResourcesPage = lazy(() => import("./resources/ResourcesPage").then((module) => ({ default: module.ResourcesPage })));
 const LocationsPage = lazy(() => import("./locations/LocationsPage").then((module) => ({ default: module.LocationsPage })));
@@ -49,8 +47,6 @@ const router = createBrowserRouter([
   { path: "/app", element: embedded, errorElement: <AppErrorBoundary />, children: [
     { index: true, element: <DashboardPage /> },
     { path: "bookings", element: <BookingsPage /> },
-    { path: "departures", element: <DeparturesPage /> },
-    { path: "manifest", element: <ManifestPage /> },
     { path: "notifications", element: <NotificationsPage /> },
     { path: "resources", element: <ResourcesPage /> },
     { path: "locations", element: <LocationsPage /> },

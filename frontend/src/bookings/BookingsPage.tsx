@@ -19,7 +19,6 @@ import { useSession } from "../auth/GHLSessionProvider";
 import { formatLongDate, formatTime, isValidDateTime, tomorrowInZone, zoneLabel, zonedWallTimeToISO } from "../lib/datetime";
 import { PaymentPanel } from "../public-booking/PaymentPanel";
 import { AdjustmentPaymentPanel } from "./AdjustmentPaymentPanel";
-import { isEmbeddedInHighLevel } from "../pwa";
 
 function money(value: number, currency = "usd") { return new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(value / 100); }
 function badge(status: string) { return status === "confirmed" || status === "succeeded" || status === "synced" || status === "sent" ? "success" : status.includes("fail") || status === "cancelled" ? "danger" : "warning"; }
@@ -121,8 +120,6 @@ function ParticipantsSection({ bookingId, participants, units }: { bookingId: st
 }
 
 function BookingDrawer({ id, onClose }: { id: string; onClose: () => void }) {
-  // The standalone Staff PWA drops the desktop-only rate wording; embedded HighLevel is unchanged.
-  const standalone = !isEmbeddedInHighLevel();
   const { me } = useSession();
   const tz = me.operator.time_zone;
   const client = useQueryClient();
@@ -172,7 +169,7 @@ function BookingDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       <aside className="drawer" aria-label="Booking details">
         {isLoading || !data ? <div className="loading">Loading booking...</div> : (
           <>
-            <div className="drawer-header"><div><h2>{data.customer_name}</h2><p>{standalone ? `Lead booker · ${data.public_reference}` : data.public_reference}</p>{standalone && data.created_by_name && <p>Created by {data.created_by_name}</p>}</div><button className="icon-button" onClick={onClose}><X size={18} /></button></div>
+            <div className="drawer-header"><div><h2>{data.customer_name}</h2><p>{data.public_reference}</p></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div>
             <div className="detail-section">
               <h3>Booking</h3>
               {pendingAdjustment ? <AdjustmentPaymentPanel clientSecret={pendingAdjustment.client_secret} onComplete={finishAdjustment}/> : editing ? <form className="edit-booking-form" onSubmit={(event) => { event.preventDefault(); edit.mutate(); }}><label className="field"><span>Date and time ({zoneLabel(tz)})</span><input type="datetime-local" required value={editStart || localDateTime(data.start_at, tz)} onChange={(event) => setEditStart(event.target.value)} /></label><label className="field"><span>Quantity</span><input type="number" min={1} required value={editUnits} onChange={(event) => setEditUnits(Number(event.target.value))} /></label><div className="toolbar"><button type="button" className="button ghost small" onClick={() => setEditing(false)}>Cancel</button><button className="button small" disabled={edit.isPending}>{edit.isPending ? "Checking…" : "Save changes"}</button></div></form> : <div className="toolbar" style={{ marginBottom: 12 }}><button className="button secondary small" disabled={!(["pending_payment", "confirmed"].includes(data.status))} onClick={() => { setEditStart(localDateTime(data.start_at, tz)); setEditUnits(data.units); setEditing(true); }}>Edit time or quantity</button></div>}
@@ -191,7 +188,7 @@ function BookingDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <ParticipantsSection bookingId={data.id} participants={data.participants} units={data.units} />
             <div className="detail-section"><h3>Customer</h3><dl className="detail-list"><dt>Email</dt><dd>{data.customer_email}</dd><dt>Phone</dt><dd>{data.customer_phone || "—"}</dd></dl></div>
             <div className="detail-section"><h3>Resources</h3><dl className="detail-list">{data.resources.length ? data.resources.map((resource) => <span style={{ display: "contents" }} key={resource.resource_id}><dt>{resource.name}</dt><dd>{resource.quantity}</dd></span>) : <><dt>Inventory</dt><dd>No mapped resources</dd></>}</dl></div>
-            {!standalone && <div className="detail-section"><h3>FareHarbor-style rate line</h3><dl className="detail-list"><dt>Customer type</dt><dd>{data.customer_type_name || "Legacy calendar unit"}</dd><dt>Seats</dt><dd>{data.seat_count}</dd><dt>Policy version</dt><dd>{data.booking_policy_version ?? "Default"}</dd><dt>Resources</dt><dd>{data.resources.length ? data.resources.map(resource => `${resource.name} × ${resource.quantity}`).join(", ") : "No mapped resources"}</dd></dl></div>}
+            <div className="detail-section"><h3>FareHarbor-style rate line</h3><dl className="detail-list"><dt>Customer type</dt><dd>{data.customer_type_name || "Legacy calendar unit"}</dd><dt>Seats</dt><dd>{data.seat_count}</dd><dt>Policy version</dt><dd>{data.booking_policy_version ?? "Default"}</dd><dt>Resources</dt><dd>{data.resources.length ? data.resources.map(resource => `${resource.name} × ${resource.quantity}`).join(", ") : "No mapped resources"}</dd></dl></div>
             <div className="detail-section"><h3>Payment</h3><dl className="detail-list"><dt>Method</dt><dd>{data.payment_method === "invoice" ? "Hosted client invoice" : data.payment_method === "none" ? "No payment required" : "Card checkout"}</dd><dt>Status</dt><dd><span className={`badge ${badge(data.payment_status)}`}>{data.payment_status}</span></dd>{data.invoice_status && <><dt>Invoice</dt><dd>{data.invoice_status}{data.invoice_url && <><br /><a href={data.invoice_url} target="_blank" rel="noreferrer">Open hosted invoice</a></>}</dd></>}<dt>Subtotal</dt><dd>{money(data.subtotal_minor)}</dd><dt>Booking fees</dt><dd>{money(data.booking_fee_minor)}</dd><dt>Taxes</dt><dd>{money(data.tax_minor)}</dd><dt>Platform total</dt><dd>{money(data.platform_fee_and_taxes_minor)}</dd><dt>Total</dt><dd>{money(data.customer_total_minor)}</dd></dl></div>
             <div className="detail-section"><h3>GoHighLevel</h3><dl className="detail-list"><dt>Contact sync</dt><dd>{data.ghl_contact_sync_status}</dd><dt>Confirmation</dt><dd>{data.ghl_confirmation_email_status}</dd><dt>Appointment sync</dt><dd>{data.ghl_appointment_sync_status}{data.ghl_appointment_event_id && <><br /><span style={{ color: "#697386", fontWeight: 400 }}>Event: {data.ghl_appointment_event_id}</span></>}{data.ghl_appointment_last_error && <><br /><span style={{ color: "#9b2822", fontWeight: 400 }}>{data.ghl_appointment_last_error}</span></>}</dd></dl></div>
             {retry.error && <div className="error-banner">{retry.error.message}</div>}

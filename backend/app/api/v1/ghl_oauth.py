@@ -96,7 +96,7 @@ def oauth_start(
         state,
         max_age=600,
         httponly=True,
-        secure=settings.secure_cookies,
+        secure=settings.environment.lower() == "production",
         samesite="lax",
         path=OAUTH_STATE_COOKIE_PATH,
     )

@@ -31,7 +31,6 @@ from app.services.booking_adjustment_service import BookingAdjustmentService
 from app.services.booking_notification_service import BookingNotificationService
 from app.services.ghl_sync_service import GHLSyncService
 from app.services.order_service import OrderService
-from app.services.attribution import staff_attribution
 
 router = APIRouter(tags=["bookings"])
 DB = Annotated[Session, Depends(get_db)]
@@ -122,16 +121,10 @@ def create_booking(
     principal: CurrentPrincipal,
     db: DB,
     settings: Annotated[Settings, Depends(get_settings)],
-    client: Annotated[str | None, Header(alias="X-Passport-Client")] = None,
 ):
     require_permission(principal, Permission.OPERATE_BOOKINGS)
     operator_slug = db.scalar(select(Operator.slug).where(Operator.id == principal.operator_id))
-    return OrderService(db, settings).create(
-        operator_slug,
-        data,
-        allow_payment_override=True,
-        attribution=staff_attribution(db, principal, client),
-    )
+    return OrderService(db, settings).create(operator_slug, data, allow_payment_override=True)
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingDetail)

@@ -1,20 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.entities import Booking, BookingEvent, BookingOrder, OutboxJob, Payment
 from app.services.public_access_service import PublicAccessService
-
-
-# A card checkout may still be finishing (3-D Secure, slow bank) just after its
-# hold lapses. Its hold no longer reserves inventory, but the booking is only
-# released and the PaymentIntent cancelled once this grace has also passed.
-ABANDONED_CARD_GRACE = timedelta(minutes=30)
-PAID_PAYMENT_STATUSES = frozenset({"succeeded", "partially_refunded", "refunded"})
-PAID_ORDER_STATUSES = frozenset({"confirmed", "partially_refunded", "refunded"})
 
 
 class ReservationLifecycleService:
@@ -40,11 +32,7 @@ class ReservationLifecycleService:
             .with_for_update(of=(Booking, BookingOrder, Payment), skip_locked=True)
         ).all()
         for booking, order, payment in rows:
-            if payment.status in PAID_PAYMENT_STATUSES or order.status in PAID_ORDER_STATUSES:
-                skipped_paid += 1
-                continue
-            awaiting_card = payment.status == "processing"
-            if awaiting_card and booking.hold_expires_at > now - ABANDONED_CARD_GRACE:
+            if payment.status in {"succeeded", "processing", "partially_refunded", "refunded"} or order.status in {"confirmed", "partially_refunded", "refunded"}:
                 skipped_paid += 1
                 continue
             before = booking.status
@@ -83,17 +71,6 @@ class ReservationLifecycleService:
             if remaining is None:
                 order.status = "expired"
                 PublicAccessService(self.db).revoke(order_id=order.id)
-                if awaiting_card and payment.stripe_payment_intent_id:
-                    self.db.add(
-                        OutboxJob(
-                            operator_id=booking.operator_id,
-                            booking_order_id=order.id,
-                            job_type="stripe_cancel_payment_intent",
-                            idempotency_key=f"payment:{payment.id}:abandoned-cancel",
-                            payload={"payment_id": str(payment.id)},
-                            status="pending",
-                        )
-                    )
             expired += 1
             cancelled += 1
         self.db.commit()

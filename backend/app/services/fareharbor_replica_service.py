@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -18,7 +17,6 @@ from app.models.entities import (
     BookingCustomFieldValue,
     BookingOrder,
     Calendar,
-    CalendarBlock,
     CalendarBookingPolicy,
     Customer,
     CustomerNote,
@@ -41,8 +39,6 @@ from app.schemas.fareharbor_replica import (
 )
 from app.services.booking_admin_service import BookingAdminService
 from app.services.configuration_service import ConfigurationService
-
-logger = logging.getLogger("passport.weather_closure")
 
 
 class FareHarborReplicaService:
@@ -357,15 +353,8 @@ class FareHarborReplicaService:
         return BookingAdminService(self.db, self.operator_id).detail(booking_id)
 
     def weather_closure(self, data: WeatherClosureRequest, user_id: uuid.UUID) -> dict[str, Any]:
-        """Close a calendar interval for weather and cancel every booking in it.
-
-        Safe to repeat: the closure row is reused, each booking's cancellation,
-        refund and customer message are keyed by closure and booking, and a
-        retry only acts on bookings that are still active. One booking failing
-        does not undo the others; failures are returned for a later retry.
-        """
         self._calendar(data.calendar_id)
-        closure = self.db.scalar(
+        existing = self.db.scalar(
             select(WeatherClosureEvent).where(
                 WeatherClosureEvent.operator_id == self.operator_id,
                 WeatherClosureEvent.calendar_id == data.calendar_id,
@@ -373,37 +362,18 @@ class FareHarborReplicaService:
                 WeatherClosureEvent.end_at == data.end_at,
             )
         )
-        repeated = closure is not None
-        if closure is None:
-            closure = WeatherClosureEvent(
-                operator_id=self.operator_id,
-                created_by_user_id=user_id,
-                **data.model_dump(),
-            )
-            self.db.add(closure)
-            self.db.flush()
-        block_exists = self.db.scalar(
-            select(CalendarBlock.id).where(
-                CalendarBlock.calendar_id == data.calendar_id,
-                CalendarBlock.start_at <= data.start_at,
-                CalendarBlock.end_at >= data.end_at,
-            )
+        if existing is not None:
+            return {"closure_id": existing.id, "affected_bookings": 0, "refund_mode": existing.refund_mode, "idempotent": True}
+        closure = WeatherClosureEvent(
+            operator_id=self.operator_id,
+            created_by_user_id=user_id,
+            **data.model_dump(),
         )
-        if block_exists is None:
-            # Stop new sales for the closed interval.
-            self.db.add(
-                CalendarBlock(
-                    calendar_id=data.calendar_id,
-                    start_at=data.start_at,
-                    end_at=data.end_at,
-                    reason=f"Weather closure: {data.reason}"[:500],
-                )
-            )
-        closure_id, refund_mode = closure.id, closure.refund_mode
-        self.db.commit()
-        booking_ids = list(
+        self.db.add(closure)
+        self.db.flush()
+        bookings = list(
             self.db.scalars(
-                select(Booking.id)
+                select(Booking)
                 .where(
                     Booking.operator_id == self.operator_id,
                     Booking.calendar_id == data.calendar_id,
@@ -411,35 +381,24 @@ class FareHarborReplicaService:
                     Booking.end_at > data.start_at,
                     Booking.status.in_(("pending_payment", "confirmed")),
                 )
-                .order_by(Booking.start_at, Booking.id)
+                .with_for_update()
             )
         )
         from app.services.booking_lifecycle_service import BookingLifecycleService
 
         lifecycle = BookingLifecycleService(self.db, self.operator_id)
         cancelled = 0
-        failed: list[dict[str, str]] = []
-        for booking_id in booking_ids:
-            try:
-                lifecycle.weather_cancel(
-                    booking_id,
-                    closure_id=closure_id,
-                    mode=refund_mode,
-                    reason=data.reason,
-                    actor_id=user_id,
-                )
-                cancelled += 1
-            except Exception as exc:  # each booking commits on its own
-                self.db.rollback()
-                logger.warning("Weather closure booking failed closure_id=%s booking_id=%s", closure_id, booking_id)
-                failed.append({"booking_id": str(booking_id), "error": str(exc)[:300]})
-        return {
-            "closure_id": closure_id,
-            "affected_bookings": cancelled,
-            "refund_mode": refund_mode,
-            "idempotent": repeated and not booking_ids,
-            "failed": failed,
-        }
+        for booking in bookings:
+            lifecycle.weather_cancel(
+                booking.id,
+                closure_id=closure.id,
+                mode=data.refund_mode,
+                reason=data.reason,
+                actor_id=user_id,
+            )
+            cancelled += 1
+        self.db.commit()
+        return {"closure_id": closure.id, "affected_bookings": cancelled, "refund_mode": data.refund_mode, "idempotent": False}
 
     def stage_import(self, data: MigrationImportCreate) -> dict[str, Any]:
         errors = 0

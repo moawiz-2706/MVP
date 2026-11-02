@@ -105,8 +105,6 @@ class BookingParticipantWrite(BaseModel):
 
 
 class BookingDetail(BookingListItem):
-    booking_source: str | None = None
-    created_by_name: str | None = None
     customer_phone: str | None
     marketing_opt_in: bool
     location_name: str | None

@@ -12,12 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.app_session import (
-    SessionPrincipal,
-    create_app_session,
-    is_previous_refresh_nonce,
-    refresh_nonce_in_grace,
-)
+from app.core.app_session import SessionPrincipal, create_app_session
 from app.core.config import Settings
 from app.core.encryption import TokenCipher
 from app.models.entities import AppUser, GHLInstallation, Operator, OperatorUser, PWAAuthHandoff, PWASession
@@ -166,8 +161,7 @@ class PWAAuthService:
         )
         return token, expires_in, principal
 
-    def refresh_session(self, principal: SessionPrincipal) -> tuple[str, int, SessionPrincipal, bool]:
-        """Issue an access token; the final flag says whether the refresh cookie rotated."""
+    def refresh_session(self, principal: SessionPrincipal) -> tuple[str, int, SessionPrincipal]:
         installation = self.db.scalar(
             select(GHLInstallation).where(
                 GHLInstallation.operator_id == principal.operator_id,
@@ -196,49 +190,29 @@ class PWAAuthService:
             token, expires_in = create_app_session(
                 refreshed, self.settings, lifetime_minutes=self.settings.app_session_minutes
             )
-            return token, expires_in, refreshed, True
+            return token, expires_in, refreshed
         device_session = self.db.scalar(
             select(PWASession).where(PWASession.id == principal.pwa_session_id).with_for_update()
         )
         if device_session is None or device_session.revoked_at is not None or device_session.expires_at <= datetime.now(UTC):
             raise ValueError("Passport PWA session is no longer valid")
-        current = replace(
+        refreshed = replace(
             principal,
             role=membership.ghl_role or principal.role,
             is_agency_owner=membership.is_agency_owner,
             authz_version=installation.authz_version,
+            refresh_nonce=secrets.token_urlsafe(32),
         )
-        presented = hashlib.sha256((principal.refresh_nonce or "").encode()).hexdigest()
-        if principal.refresh_nonce is not None and refresh_nonce_in_grace(device_session, presented):
-            # A racing refresh already rotated this cookie and set its successor
-            # in the browser. Answer with an access token only; rotating again
-            # could leave the browser holding whichever cookie arrived last.
-            self.db.commit()
-            token, expires_in = create_app_session(
-                current, self.settings, lifetime_minutes=self.settings.app_session_minutes
-            )
-            return token, expires_in, current, False
-        refreshed = replace(current, refresh_nonce=secrets.token_urlsafe(32))
-        now = datetime.now(UTC)
-        # A previous nonce presented after the grace window means the device
-        # never received its successor; keep the nonce it actually holds as
-        # the fallback and drop the undelivered one.
-        device_session.previous_refresh_nonce_digest = (
-            presented
-            if is_previous_refresh_nonce(device_session, presented)
-            else device_session.refresh_nonce_digest
-        )
-        device_session.refresh_rotated_at = now
         device_session.refresh_nonce_digest = hashlib.sha256(refreshed.refresh_nonce.encode()).hexdigest()
-        device_session.last_used_at = now
-        device_session.expires_at = now + timedelta(minutes=self.settings.pwa_session_minutes)
+        device_session.last_used_at = datetime.now(UTC)
+        device_session.expires_at = datetime.now(UTC) + timedelta(minutes=self.settings.pwa_session_minutes)
         self.db.commit()
         token, expires_in = create_app_session(
             refreshed,
             self.settings,
             lifetime_minutes=self.settings.app_session_minutes,
         )
-        return token, expires_in, refreshed, True
+        return token, expires_in, refreshed
 
     def revoke_session(self, principal: SessionPrincipal) -> None:
         if principal.pwa_session_id is None:

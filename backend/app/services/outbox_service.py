@@ -222,10 +222,6 @@ class OutboxService:
             StripePaymentReconciliationService(self.db, self.settings).reconcile(
                 uuid.UUID(payload["payment_id"])
             )
-        elif job.job_type == "stripe_cancel_payment_intent":
-            from app.services.abandoned_checkout_service import AbandonedCheckoutService
-
-            AbandonedCheckoutService(self.db, self.settings).cancel_intent(uuid.UUID(payload["payment_id"]))
         elif job.job_type == "ghl_upsert_contact":
             GHLContactService(self.db, job.operator_id).sync(job.booking_order_id)
         elif job.job_type == "ghl_send_confirmation_email":
