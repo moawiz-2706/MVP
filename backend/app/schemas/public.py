@@ -58,6 +58,9 @@ class PublicRate(BaseModel):
     booking_fee_bps: int
     tax_bps: int
     resources: list[PublicRateResource]
+    duration_minutes: int | None = None
+    min_units_per_booking: int | None = None
+    max_units_per_booking: int | None = None
 
 
 class PublicCustomField(BaseModel):

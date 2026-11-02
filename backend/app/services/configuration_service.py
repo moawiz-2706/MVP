@@ -30,6 +30,7 @@ from app.models.entities import (
     StaffAssignment,
 )
 from app.schemas.configuration import (
+    RATE_RULE_FIELDS,
     CalendarBlocksReplace,
     CalendarBlockWrite,
     CalendarCreate,
@@ -351,6 +352,11 @@ class ConfigurationService:
                 raise NotFoundError("Customer type not found")
             rate = old_by_type.get(item.customer_type_id)
             values = item.model_dump(exclude={"resources", "note"})
+            if rate is not None:
+                # A client that does not send a booking rule keeps the saved one.
+                for field in RATE_RULE_FIELDS:
+                    if field not in item.model_fields_set:
+                        values.pop(field)
             values.update(
                 operator_id=self.operator_id,
                 calendar_id=calendar.id,

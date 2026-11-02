@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta
 from math import floor
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
@@ -222,6 +222,105 @@ class AvailabilityService:
             )
         return grouped
 
+    @staticmethod
+    def _longest_minutes(calendar: Calendar, rate_mappings) -> int:
+        """Longest hold any booking on this calendar can have (rates may run longer)."""
+        return max(
+            [calendar.duration_minutes]
+            + [rate.booking_minutes(calendar) for rate, _type, _resources in rate_mappings]
+        )
+
+    def _rate_bookings(
+        self,
+        calendar_id: uuid.UUID,
+        rate_ids: list[uuid.UUID],
+        range_start: datetime,
+        range_end: datetime,
+        *,
+        exclude_booking_ids: set[uuid.UUID] | None = None,
+    ) -> dict[tuple[uuid.UUID, datetime], int]:
+        """Units already held per (rate, departure start), for per-departure caps."""
+        if not rate_ids:
+            return {}
+        now = datetime.now(UTC)
+        statement = (
+            select(Booking.rate_id, Booking.start_at, func.sum(Booking.units))
+            .where(
+                Booking.calendar_id == calendar_id,
+                Booking.rate_id.in_(rate_ids),
+                Booking.start_at >= range_start,
+                Booking.start_at <= range_end,
+                or_(
+                    Booking.status == "confirmed",
+                    and_(Booking.status == "pending_payment", Booking.hold_expires_at > now),
+                ),
+            )
+            .group_by(Booking.rate_id, Booking.start_at)
+        )
+        if exclude_booking_ids:
+            statement = statement.where(Booking.id.not_in(exclude_booking_ids))
+        return {
+            (rate_id, start_at.astimezone(UTC)): int(units)
+            for rate_id, start_at, units in self.db.execute(statement)
+        }
+
+    @staticmethod
+    def _rate_limit(
+        calendar: Calendar,
+        rate: CalendarRate,
+        rate_resources: list[tuple[Resource, int]],
+        candidate: datetime,
+        reservations: dict[uuid.UUID, list[CapacityInterval]],
+        blocks: list[tuple[datetime, datetime]],
+        booked: dict[tuple[uuid.UUID, datetime], int],
+    ) -> int:
+        """Units of one rate still bookable at one departure.
+
+        The rate's own duration decides how long its resources are held and
+        which closures it runs into; its per-booking range and per-departure
+        cap then narrow the result. A rate whose minimum cannot be met is 0.
+        """
+        end_at = candidate + timedelta(minutes=rate.booking_minutes(calendar))
+        if any(block_start < end_at and block_end > candidate for block_start, block_end in blocks):
+            return 0
+        rate_max: int | None = None
+        for resource, per_unit in rate_resources:
+            reserved = reserved_for_interval(reservations.get(resource.id, []), candidate, end_at)
+            available = (
+                max(0, resource.quantity - reserved)
+                if resource.is_active and resource.deleted_at is None
+                else 0
+            )
+            resource_max = floor(available / per_unit)
+            rate_max = resource_max if rate_max is None else min(rate_max, resource_max)
+        if rate_max is None:
+            rate_max = rate.max_units_per_booking or calendar.max_units_per_booking or 1
+        if calendar.max_units_per_booking is not None:
+            rate_max = min(rate_max, calendar.max_units_per_booking)
+        if rate.max_units_per_booking is not None:
+            rate_max = min(rate_max, rate.max_units_per_booking)
+        if rate.max_units_per_departure is not None:
+            taken = booked.get((rate.id, candidate.astimezone(UTC)), 0)
+            rate_max = min(rate_max, rate.max_units_per_departure - taken)
+        if rate.min_units_per_booking is not None and rate_max < rate.min_units_per_booking:
+            return 0
+        return max(0, rate_max)
+
+    @staticmethod
+    def _rate_detail(
+        calendar: Calendar, rate: CalendarRate, customer_type: CustomerType, available: int
+    ) -> AvailabilityRate:
+        return AvailabilityRate(
+            rate_id=rate.id,
+            customer_type_name=customer_type.name,
+            seat_count=customer_type.seat_count,
+            available_quantity=available,
+            available_seats=available * customer_type.seat_count,
+            duration_minutes=rate.booking_minutes(calendar),
+            min_units_per_booking=rate.min_units_per_booking,
+            max_units_per_booking=rate.max_units_per_booking,
+        )
+
     def check(
         self,
         calendar_id: uuid.UUID,
@@ -232,14 +331,19 @@ class AvailabilityService:
         public: bool = False,
         exclude_booking_ids: set[uuid.UUID] | None = None,
         resource_mappings: list[tuple[Resource, int]] | None = None,
+        duration_minutes: int | None = None,
+        rate_max_units: int | None = None,
     ) -> AvailabilityCheckResponse:
         if start_at.tzinfo is None:
             raise ValueError("start_at must include an offset")
         calendar, operator = self._calendar(
             calendar_id, operator_id=operator_id, public=public
         )
-        end_at = start_at + timedelta(minutes=calendar.duration_minutes)
-        within_hours = self._within_hours(calendar, operator, start_at, end_at)
+        # The departure must be one the calendar offers (its own slot length);
+        # a longer rate (e.g. an 8-hour charter) then holds inventory longer.
+        slot_end = start_at + timedelta(minutes=calendar.duration_minutes)
+        end_at = start_at + timedelta(minutes=duration_minutes or calendar.duration_minutes)
+        within_hours = self._within_hours(calendar, operator, start_at, slot_end)
         blocked = self._is_blocked(calendar.id, start_at, end_at)
         policy_reason = None
         if public and calendar.public_booking_mode == "closed":
@@ -293,7 +397,9 @@ class AvailabilityService:
             )
 
         if inventory_max is None:
-            inventory_max = calendar.max_units_per_booking or 1
+            # No inventory to count (e.g. an outdoor game): the rate's own
+            # per-booking maximum is the limit, as on the availability view.
+            inventory_max = rate_max_units or calendar.max_units_per_booking or 1
         elif calendar.max_units_per_booking is not None:
             inventory_max = min(inventory_max, calendar.max_units_per_booking)
         resource_sufficient = all(detail.sufficient for detail in details)
@@ -391,10 +497,13 @@ class AvailabilityService:
             and candidate.astimezone(display_zone).date() == day
         ]
         if candidates:
-            range_start = min(candidates)
-            range_end = max(candidates) + timedelta(minutes=calendar.duration_minutes)
             mappings = self._mappings(calendar.id)
             rate_mappings = self._rate_mappings(calendar.id)
+            range_start = min(candidates)
+            range_end = max(candidates) + timedelta(minutes=self._longest_minutes(calendar, rate_mappings))
+            booked = self._rate_bookings(
+                calendar.id, [rate.id for rate, _t, _r in rate_mappings], range_start, range_end
+            )
             rate_resources = {
                 resource.id
                 for _rate, _customer_type, mapped_resources in rate_mappings
@@ -436,24 +545,17 @@ class AvailabilityService:
                         if inventory_max is None
                         else min(inventory_max, resource_max)
                     )
+                rate_limits = [
+                    (rate, customer_type, self._rate_limit(
+                        calendar, rate, rate_resources, candidate, reservations, blocks, booked
+                    ))
+                    for rate, customer_type, rate_resources in rate_mappings
+                ]
                 if inventory_max is None:
-                    rate_inventory_maxes: list[int] = []
-                    for _rate, _customer_type, rate_resources in rate_mappings:
-                        rate_max: int | None = None
-                        for resource, per_unit in rate_resources:
-                            reserved = reserved_for_interval(
-                                reservations.get(resource.id, []), candidate, end_at
-                            )
-                            resource_available = (
-                                max(0, resource.quantity - reserved)
-                                if resource.is_active and resource.deleted_at is None
-                                else 0
-                            )
-                            resource_max = floor(resource_available / per_unit)
-                            rate_max = resource_max if rate_max is None else min(rate_max, resource_max)
-                        if rate_max is not None:
-                            rate_inventory_maxes.append(rate_max)
-                    inventory_max = max(rate_inventory_maxes, default=calendar.max_units_per_booking or 1)
+                    inventory_max = max(
+                        (limit for _rate, _type, limit in rate_limits),
+                        default=calendar.max_units_per_booking or 1,
+                    )
                 elif calendar.max_units_per_booking is not None:
                     inventory_max = min(inventory_max, calendar.max_units_per_booking)
                 inventory_available = not blocked and inventory_max > 0
@@ -475,35 +577,10 @@ class AvailabilityService:
                 else:
                     slot_status = "sold_out"
                 available = slot_status == "bookable_online"
-                rate_details: list[AvailabilityRate] = []
-                for rate, customer_type, rate_resources in rate_mappings:
-                    rate_max: int | None = None
-                    for resource, per_unit in rate_resources:
-                        reserved = reserved_for_interval(
-                            reservations.get(resource.id, []), candidate, end_at
-                        )
-                        resource_available = (
-                            max(0, resource.quantity - reserved)
-                            if resource.is_active and resource.deleted_at is None
-                            else 0
-                        )
-                        resource_max = floor(resource_available / per_unit)
-                        rate_max = resource_max if rate_max is None else min(rate_max, resource_max)
-                    if rate_max is None:
-                        rate_max = calendar.max_units_per_booking or 1
-                    if calendar.max_units_per_booking is not None:
-                        rate_max = min(rate_max, calendar.max_units_per_booking)
-                    rate_details.append(
-                        AvailabilityRate(
-                            rate_id=rate.id,
-                            customer_type_name=customer_type.name,
-                            seat_count=customer_type.seat_count,
-                            available_quantity=max(0, rate_max) if not blocked else 0,
-                            available_seats=max(0, rate_max * customer_type.seat_count)
-                            if not blocked
-                            else 0,
-                        )
-                    )
+                rate_details = [
+                    self._rate_detail(calendar, rate, customer_type, limit if not blocked else 0)
+                    for rate, customer_type, limit in rate_limits
+                ]
                 slots.append(
                     AvailabilitySlot(
                         start_at=candidate,
@@ -534,6 +611,27 @@ class AvailabilityService:
             slots=slots,
         )
 
+    def public_month(self, operator_slug: str, calendar_slug: str, year: int, month: int) -> dict:
+        """Day-by-day bookability for one month, using the same rules as a single day."""
+        first = date(year, month, 1)
+        following = date(year + (month == 12), month % 12 + 1, 1)
+        days: list[dict] = []
+        time_zone = "UTC"
+        today = datetime.now(UTC).date()
+        current = first
+        while current < following:
+            status = "none"
+            if current >= today - timedelta(days=1):
+                result = self.public_day(operator_slug, calendar_slug, current)
+                time_zone = result.time_zone
+                if any(slot.available for slot in result.slots):
+                    status = "available"
+                elif result.slots:
+                    status = "sold_out"
+            days.append({"date": current, "status": status})
+            current += timedelta(days=1)
+        return {"month": f"{year:04d}-{month:02d}", "time_zone": time_zone, "days": days}
+
     def calendar_day(
         self, calendar_id: uuid.UUID, operator_id: uuid.UUID, day: date
     ) -> PublicAvailabilityResponse:
@@ -563,9 +661,13 @@ class AvailabilityService:
         rate_mappings = self._rate_mappings(calendar.id) if candidates else []
         reservations: dict[uuid.UUID, list[CapacityInterval]] = {}
         blocks: list[tuple[datetime, datetime]] = []
+        booked: dict[tuple[uuid.UUID, datetime], int] = {}
         if candidates:
             range_start = min(candidates)
-            range_end = max(candidates) + timedelta(minutes=calendar.duration_minutes)
+            range_end = max(candidates) + timedelta(minutes=self._longest_minutes(calendar, rate_mappings))
+            booked = self._rate_bookings(
+                calendar.id, [rate.id for rate, _t, _r in rate_mappings], range_start, range_end
+            )
             resource_ids = {
                 resource.id
                 for resource, _quantity_per_unit in mappings
@@ -618,32 +720,12 @@ class AvailabilityService:
             if rate_mappings:
                 rate_inventory_maxes: list[int] = []
                 for rate, customer_type, rate_resources in rate_mappings:
-                    rate_max: int | None = None
-                    for resource, per_unit in rate_resources:
-                        reserved = reserved_for_interval(
-                            reservations.get(resource.id, []), candidate, end_at
-                        )
-                        resource_available = (
-                            max(0, resource.quantity - reserved)
-                            if resource.is_active and resource.deleted_at is None
-                            else 0
-                        )
-                        resource_max = floor(resource_available / per_unit)
-                        rate_max = resource_max if rate_max is None else min(rate_max, resource_max)
-                    if rate_max is None:
-                        rate_max = calendar.max_units_per_booking or 1
-                    if calendar.max_units_per_booking is not None:
-                        rate_max = min(rate_max, calendar.max_units_per_booking)
+                    rate_max = self._rate_limit(
+                        calendar, rate, rate_resources, candidate, reservations, blocks, booked
+                    )
                     rate_inventory_maxes.append(rate_max)
                     rate_details.append(
-                        AvailabilityRate(
-                            rate_id=rate.id,
-                            customer_type_name=customer_type.name,
-                            seat_count=customer_type.seat_count,
-                            available_quantity=max(0, rate_max) if not blocked else 0,
-                            available_seats=(max(0, rate_max * customer_type.seat_count)
-                                             if not blocked else 0),
-                        )
+                        self._rate_detail(calendar, rate, customer_type, rate_max if not blocked else 0)
                     )
                 # Calendars without legacy mappings derive their capacity from
                 # the largest configured customer-type pool, just like the

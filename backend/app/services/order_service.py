@@ -159,6 +159,8 @@ class OrderService:
         availability = AvailabilityService(self.db)
         seats_by_calendar: dict[uuid.UUID, int] = defaultdict(int)
         calendars_by_id: dict[uuid.UUID, Calendar] = {}
+        # Units of each rate requested per departure within this order.
+        requested_by_departure: dict[tuple[uuid.UUID, datetime], int] = defaultdict(int)
         for item in items:
             quantity = item.requested_quantity
             calendar_conditions = [
@@ -212,6 +214,7 @@ class OrderService:
                 tax_bps = rate.tax_bps
                 fee_inclusive = rate.is_fee_inclusive
                 tax_inclusive = rate.is_tax_inclusive
+                self._enforce_rate_rules(calendar, rate, customer_name, item.start_at, quantity, requested_by_departure)
             else:
                 mappings = list(
                     self.db.execute(
@@ -233,6 +236,8 @@ class OrderService:
                 calendar.id,
                 item.start_at,
                 quantity,
+                duration_minutes=rate.booking_minutes(calendar) if rate else None,
+                rate_max_units=rate.max_units_per_booking if rate else None,
                 operator_id=operator.id,
                 public=True,
                 resource_mappings=mappings,
@@ -276,6 +281,31 @@ class OrderService:
             raise ConflictError("All items in an order must use the same currency")
         self._validate_requested_batch(prepared)
         return prepared
+
+    def _enforce_rate_rules(
+        self,
+        calendar: Calendar,
+        rate: CalendarRate,
+        label: str,
+        start_at: datetime,
+        quantity: int,
+        requested_by_departure: dict[tuple[uuid.UUID, datetime], int],
+    ) -> None:
+        """Per-booking range and per-departure cap configured on a rate."""
+        if rate.min_units_per_booking is not None and quantity < rate.min_units_per_booking:
+            raise ConflictError(f"{label} requires at least {rate.min_units_per_booking} per booking")
+        if rate.max_units_per_booking is not None and quantity > rate.max_units_per_booking:
+            raise ConflictError(f"{label} allows at most {rate.max_units_per_booking} per booking")
+        if rate.max_units_per_departure is None:
+            return
+        key = (rate.id, start_at.astimezone(UTC))
+        requested_by_departure[key] += quantity
+        taken = AvailabilityService(self.db)._rate_bookings(
+            calendar.id, [rate.id], key[1], key[1]
+        ).get(key, 0)
+        if taken + requested_by_departure[key] > rate.max_units_per_departure:
+            left = max(0, rate.max_units_per_departure - taken)
+            raise ConflictError(f"Only {left} {label} place(s) are left on this departure")
 
     def _validate_requested_batch(self, prepared: list[PreparedItem]) -> None:
         requested: dict[uuid.UUID, list[CapacityInterval]] = defaultdict(list)

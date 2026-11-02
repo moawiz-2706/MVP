@@ -1,3 +1,6 @@
+-- SUPERSEDED by 2026-11-03_fareharbor_catalog_import_v2.sql (run that instead; it
+-- also upgrades databases where this batch already ran).
+--
 -- FareHarbor → Passport catalogue import, batch 1 (2026-11-03)
 --
 -- Source: MVP_FAREHARBOR_VISIBLE_INVENTORY_2026-11-03.csv, mapped in

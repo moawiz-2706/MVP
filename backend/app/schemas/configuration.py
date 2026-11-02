@@ -380,6 +380,29 @@ class CalendarRateWrite(BaseModel):
     external_id: str | None = Field(default=None, max_length=160)
     is_active: bool = True
     resources: list[RateResourceWrite] = Field(default_factory=list, max_length=100)
+    # Optional booking rules (FareHarbor-style); omit to keep the current value.
+    duration_minutes: int | None = Field(default=None, ge=1, le=1440)
+    min_units_per_booking: int | None = Field(default=None, ge=1, le=10_000)
+    max_units_per_booking: int | None = Field(default=None, ge=1, le=10_000)
+    max_units_per_departure: int | None = Field(default=None, ge=1, le=10_000)
+
+    @model_validator(mode="after")
+    def ordered_limits(self) -> "CalendarRateWrite":
+        if (
+            self.min_units_per_booking is not None
+            and self.max_units_per_booking is not None
+            and self.min_units_per_booking > self.max_units_per_booking
+        ):
+            raise ValueError("The per-booking minimum cannot exceed the maximum")
+        return self
+
+
+RATE_RULE_FIELDS = (
+    "duration_minutes",
+    "min_units_per_booking",
+    "max_units_per_booking",
+    "max_units_per_departure",
+)
 
 
 class CalendarRatesReplace(BaseModel):
@@ -416,6 +439,10 @@ class CalendarRateRead(EntityModel):
     external_id: str | None
     is_active: bool
     resources: list[RateResourceRead] = Field(default_factory=list)
+    duration_minutes: int | None = None
+    min_units_per_booking: int | None = None
+    max_units_per_booking: int | None = None
+    max_units_per_departure: int | None = None
 
 
 class OperatorUpdate(BaseModel):

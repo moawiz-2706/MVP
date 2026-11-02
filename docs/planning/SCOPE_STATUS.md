@@ -26,3 +26,13 @@ Legend: **Done** = built and tested locally against PostgreSQL and deployed.
 - 2026-11-02: the two September test payments were voided, not refunded.
 - 2026-11-03: a calendar with bookings is archived (history kept); one with
   upcoming bookings cannot be removed.
+
+## FareHarbor parity added 2026-11-03
+
+- Per-rate length, per-booking range and per-departure cap (migration 044),
+  so 2–8 hour charters, group-size tiers and the children cap work like
+  FareHarbor.
+- Public booking page redesigned on FareHarbor's layout (listing + month
+  calendar + time list + per-customer-type counters).
+- Import v2 recreates every currently sold FareHarbor item with its real
+  schedule through 2027 (calendars arrive inactive for review).

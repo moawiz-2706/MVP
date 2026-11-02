@@ -248,6 +248,9 @@ def public_rates(
                 price_minor=rate.price_minor,
                 booking_fee_bps=rate.booking_fee_bps,
                 tax_bps=rate.tax_bps,
+                duration_minutes=rate.booking_minutes(calendar),
+                min_units_per_booking=rate.min_units_per_booking,
+                max_units_per_booking=rate.max_units_per_booking,
                 resources=[
                     PublicRateResource(
                         resource_id=resource_id,

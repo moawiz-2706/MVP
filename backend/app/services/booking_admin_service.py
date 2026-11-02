@@ -25,6 +25,7 @@ from app.models.entities import (
     Calendar,
     CalendarCategory,
     CalendarPushedSlot,
+    CalendarRate,
     CalendarRateResource,
     CalendarResource,
     GHLAppointmentMapping,
@@ -500,6 +501,19 @@ class BookingAdminService:
                     .with_for_update()
                 )
             )
+        rate = self.db.get(CalendarRate, booking.rate_id) if booking.rate_id else None
+        if rate is not None:
+            if rate.min_units_per_booking is not None and units < rate.min_units_per_booking:
+                raise ConflictError(f"This rate requires at least {rate.min_units_per_booking} per booking")
+            if rate.max_units_per_booking is not None and units > rate.max_units_per_booking:
+                raise ConflictError(f"This rate allows at most {rate.max_units_per_booking} per booking")
+            if rate.max_units_per_departure is not None:
+                key = (rate.id, start_at.astimezone(UTC))
+                taken = AvailabilityService(self.db)._rate_bookings(
+                    calendar.id, [rate.id], key[1], key[1], exclude_booking_ids={booking.id}
+                ).get(key, 0)
+                if taken + units > rate.max_units_per_departure:
+                    raise ConflictError("Not enough places of this rate are left on that departure")
         result = AvailabilityService(self.db).check(
             calendar.id,
             start_at,
@@ -507,6 +521,9 @@ class BookingAdminService:
             operator_id=self.operator_id,
             exclude_booking_ids={booking.id},
             resource_mappings=resource_mappings,
+            # Keep the booked rate's own length (e.g. a 6-hour charter).
+            duration_minutes=rate.booking_minutes(calendar) if rate else None,
+            rate_max_units=rate.max_units_per_booking if rate else None,
         )
         if not result.available:
             raise ConflictError(result.reason or "Updated booking is unavailable")

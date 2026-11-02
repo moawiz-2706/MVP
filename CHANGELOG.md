@@ -5,6 +5,20 @@ Notable changes to Passport. Dates are deployment dates (UTC).
 ## Unreleased
 
 ### Added
+- **Per-rate booking rules** (migration 044): a rate can hold its resources
+  for its own length (e.g. 2–8 hour private charters on one calendar), have a
+  per-booking minimum/maximum (group-size price tiers like the escape room),
+  and a per-departure cap (e.g. at most 10 children). Enforced by the
+  availability engine, order creation and booking edits; editable in the
+  Calendars rate editor.
+- **FareHarbor-style public booking page**: listing with photo gallery, prices
+  per customer type and overview; sticky booking widget with a month calendar
+  of bookable days, time list and a counter per customer type. New endpoint
+  `GET /public/{operator}/calendars/{calendar}/availability/month`.
+- FareHarbor catalogue import v2 for every currently sold item, with the
+  exact FareHarbor schedules through 2027.
+
+### Added (earlier in this release)
 - Staff PWA: "Book this departure" on the Departures board opens New Booking
   with the activity, date and time preselected (same-day allowed) and returns
   to the board when closed or finished.

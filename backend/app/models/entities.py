@@ -262,6 +262,15 @@ class CalendarRate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("price_minor >= 0", name="price_nonnegative"),
         CheckConstraint("booking_fee_bps BETWEEN 0 AND 10000", name="fee_bps_valid"),
         CheckConstraint("tax_bps BETWEEN 0 AND 10000", name="tax_bps_valid"),
+        CheckConstraint(
+            "(duration_minutes IS NULL OR duration_minutes BETWEEN 1 AND 1440)"
+            " AND (min_units_per_booking IS NULL OR min_units_per_booking > 0)"
+            " AND (max_units_per_booking IS NULL OR max_units_per_booking > 0)"
+            " AND (max_units_per_departure IS NULL OR max_units_per_departure > 0)"
+            " AND (min_units_per_booking IS NULL OR max_units_per_booking IS NULL"
+            " OR min_units_per_booking <= max_units_per_booking)",
+            name="booking_rules_check",
+        ),
     )
 
     operator_id: Mapped[uuid.UUID] = mapped_column(
@@ -284,6 +293,14 @@ class CalendarRate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     external_id: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Booking rules per rate (migration 044); NULL keeps the calendar default.
+    duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    min_units_per_booking: Mapped[int | None] = mapped_column(Integer)
+    max_units_per_booking: Mapped[int | None] = mapped_column(Integer)
+    max_units_per_departure: Mapped[int | None] = mapped_column(Integer)
+
+    def booking_minutes(self, calendar: "Calendar") -> int:
+        return self.duration_minutes or calendar.duration_minutes
 
 
 class CalendarHour(UUIDPrimaryKeyMixin, TimestampMixin, Base):

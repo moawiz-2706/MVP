@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -52,6 +53,22 @@ class AvailabilityRate(BaseModel):
     seat_count: int
     available_quantity: int
     available_seats: int
+    duration_minutes: int | None = None
+    min_units_per_booking: int | None = None
+    max_units_per_booking: int | None = None
+
+
+class AvailabilityMonthDay(BaseModel):
+    date: date
+    status: Literal["available", "sold_out", "none"]
+
+
+class AvailabilityMonthResponse(BaseModel):
+    """Which days of a month can be booked, for the month calendar picker."""
+
+    month: str
+    time_zone: str
+    days: list[AvailabilityMonthDay]
 
 
 class PublicCalendarSummary(BaseModel):

@@ -37,7 +37,11 @@ function ResourceEditor({calendar,allResources}:{calendar:Calendar;allResources:
 }
 
 type RateResourceDraft={resource_id:string;quantity_per_unit:number};
-type RateDraft={price_dollars:string;booking_fee_bps:number;tax_bps:number;resources:RateResourceDraft[]};
+// Optional rate rules are kept as text so an empty box means "no rule".
+type RateDraft={price_dollars:string;booking_fee_bps:number;tax_bps:number;resources:RateResourceDraft[];duration_minutes:string;min_units_per_booking:string;max_units_per_booking:string;max_units_per_departure:string};
+const emptyDraft=():RateDraft=>({price_dollars:"0.00",booking_fee_bps:0,tax_bps:0,resources:[],duration_minutes:"",min_units_per_booking:"",max_units_per_booking:"",max_units_per_departure:""});
+const ruleText=(value:number|null|undefined)=>value?String(value):"";
+const ruleValue=(value:string)=>{const parsed=Number.parseInt(value,10);return Number.isFinite(parsed)&&parsed>0?parsed:null;};
 function RateEditor({calendar,allResources}:{calendar:Calendar;allResources:Resource[]}) {
   const client=useQueryClient();
   const types=useQuery({queryKey:["customer-types"],queryFn:()=>api<CustomerType[]>("/customer-types")});
@@ -56,16 +60,20 @@ function RateEditor({calendar,allResources}:{calendar:Calendar;allResources:Reso
       booking_fee_bps:rate.booking_fee_bps,
       tax_bps:rate.tax_bps,
       resources:rate.resources.map(resource=>({resource_id:resource.resource_id,quantity_per_unit:resource.quantity_per_unit})),
+      duration_minutes:ruleText(rate.duration_minutes),
+      min_units_per_booking:ruleText(rate.min_units_per_booking),
+      max_units_per_booking:ruleText(rate.max_units_per_booking),
+      max_units_per_departure:ruleText(rate.max_units_per_departure),
     }]));
-    setDrafts(current=>Object.fromEntries(types.data!.map(type=>[type.id,current[type.id]||existing[type.id]||{price_dollars:"0.00",booking_fee_bps:0,tax_bps:0,resources:[]}])));
+    setDrafts(current=>Object.fromEntries(types.data!.map(type=>[type.id,current[type.id]||existing[type.id]||emptyDraft()])));
     setEnabled(current=>Object.fromEntries(types.data!.map(type=>[type.id,current[type.id]??Boolean(existing[type.id])] )));
   },[types.data,rates.data]);
 
   const save=useMutation({
     mutationFn:()=>api<CalendarRate[]>(`/calendars/${calendar.id}/rates`,json("PUT",{
       rates:(types.data||[]).filter(type=>type.is_active&&enabled[type.id]).map(type=>{
-        const draft=drafts[type.id]||{price_dollars:"0.00",booking_fee_bps:0,tax_bps:0,resources:[]};
-        return {customer_type_id:type.id,price_minor:dollarsToMinor(draft.price_dollars),booking_fee_bps:draft.booking_fee_bps,tax_bps:draft.tax_bps,resources:draft.resources};
+        const draft=drafts[type.id]||emptyDraft();
+        return {customer_type_id:type.id,price_minor:dollarsToMinor(draft.price_dollars),booking_fee_bps:draft.booking_fee_bps,tax_bps:draft.tax_bps,resources:draft.resources,duration_minutes:ruleValue(draft.duration_minutes),min_units_per_booking:ruleValue(draft.min_units_per_booking),max_units_per_booking:ruleValue(draft.max_units_per_booking),max_units_per_departure:ruleValue(draft.max_units_per_departure)};
       }),
     })),
     onSuccess:()=>{setSuccess("Rate plans and resource requirements saved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});},
@@ -78,33 +86,35 @@ function RateEditor({calendar,allResources}:{calendar:Calendar;allResources:Reso
     mutationFn:(customerTypeId:string)=>api<void>(`/calendars/${calendar.id}/rates/${customerTypeId}`,{method:"DELETE"}),
     onSuccess:(_,customerTypeId)=>{setEnabled(current=>({...current,[customerTypeId]:false}));setSuccess("Rate removed from this calendar. Historical bookings were preserved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});},
   });
-  const updateDraft=(typeId:string,patch:Partial<RateDraft>)=>setDrafts(current=>({...current,[typeId]:{...(current[typeId]||{price_dollars:"0.00",booking_fee_bps:0,tax_bps:0,resources:[]}),...patch}}));
+  const updateDraft=(typeId:string,patch:Partial<RateDraft>)=>setDrafts(current=>({...current,[typeId]:{...(current[typeId]||emptyDraft()),...patch}}));
   const addResource=(typeId:string)=>{
-    const draft=drafts[typeId]||{price_dollars:"0.00",booking_fee_bps:0,tax_bps:0,resources:[]};
+    const draft=drafts[typeId]||emptyDraft();
     const used=new Set(draft.resources.map(item=>item.resource_id));
     const next=allResources.find(resource=>!used.has(resource.id));
     if(!next)return;
     updateDraft(typeId,{resources:[...draft.resources,{resource_id:next.id,quantity_per_unit:1}]});
   };
   const updateResource=(typeId:string,index:number,patch:Partial<RateResourceDraft>)=>{
-    const draft=drafts[typeId]||{price_dollars:"0.00",booking_fee_bps:0,tax_bps:0,resources:[]};
+    const draft=drafts[typeId]||emptyDraft();
     updateDraft(typeId,{resources:draft.resources.map((item,itemIndex)=>itemIndex===index?{...item,...patch}:item)});
   };
   const removeResource=(typeId:string,index:number)=>{
-    const draft=drafts[typeId]||{price_dollars:"0.00",booking_fee_bps:0,tax_bps:0,resources:[]};
+    const draft=drafts[typeId]||emptyDraft();
     updateDraft(typeId,{resources:draft.resources.filter((_,itemIndex)=>itemIndex!==index)});
   };
   return <div className="rate-editor">
     <div className="rate-editor-intro"><strong>Customer types, prices & resource requirements</strong><p>Rates are customer-facing options. Select the resource pool each option consumes and the quantity used per booking unit, just like FareHarbor.</p></div>
     <div className="rate-create-row"><label className="field"><span>New customer type</span><input value={newName} placeholder="Single Kayak" onChange={e=>setNewName(e.target.value)}/></label><label className="field"><span>Plural label</span><input value={newPlural} placeholder="Single Kayaks" onChange={e=>setNewPlural(e.target.value)}/></label><label className="field compact-field"><span>Seats</span><input type="number" min={1} value={newSeats} onChange={e=>setNewSeats(Number(e.target.value))}/></label><div className="field rate-create-action"><span>&nbsp;</span><button type="button" className="button secondary" disabled={!newName.trim()||createType.isPending} onClick={()=>createType.mutate()}>{createType.isPending?"Creating…":"Add customer type"}</button></div></div>
     {types.isLoading||rates.isLoading?<div className="loading">Loading rate plans…</div>:!types.data?.length?<EmptyState title="No customer types" copy="Add a customer type above to create the first bookable rate."/>:<div className="rate-card-list">{types.data.filter(type=>type.is_active).map(type=>{
-      const draft=drafts[type.id]||{price_dollars:"0.00",booking_fee_bps:0,tax_bps:0,resources:[]};
+      const draft=drafts[type.id]||emptyDraft();
       const isEnabled=Boolean(enabled[type.id]);
       const availableResources=allResources.filter(resource=>!draft.resources.some(item=>item.resource_id===resource.id));
       return <fieldset className={`rate-card ${isEnabled?"rate-card-active":"rate-card-disabled"}`} key={type.id}>
         <legend><span><strong>{type.name}</strong><small>{type.seat_count} seat{type.seat_count===1?"":"s"}{type.note?` · ${type.note}`:""}</small></span><span className={`badge ${isEnabled?"success":""}`}>{isEnabled?"On this calendar":"Not configured"}</span></legend>
         {!isEnabled?<div className="rate-disabled-row"><span>Add this customer type as a rate to make it bookable on this calendar.</span><button type="button" className="button secondary small" onClick={()=>setEnabled(current=>({...current,[type.id]:true}))}>Add rate</button></div>:<>
           <div className="rate-fields"><label className="field"><span>Price (dollars)</span><input type="number" min={0} step="0.01" value={draft.price_dollars} onChange={e=>updateDraft(type.id,{price_dollars:e.target.value})}/></label><label className="field"><span>Booking fee (basis points)</span><input type="number" min={0} value={draft.booking_fee_bps} onChange={e=>updateDraft(type.id,{booking_fee_bps:Number(e.target.value)})}/></label><label className="field"><span>Tax (basis points)</span><input type="number" min={0} value={draft.tax_bps} onChange={e=>updateDraft(type.id,{tax_bps:Number(e.target.value)})}/></label></div>
+          <div className="rate-section-heading"><div><strong>Booking rules</strong><small>Leave blank for no limit. Length overrides the calendar duration for this option (e.g. a 6-hour charter).</small></div></div>
+          <div className="rate-fields rate-rules"><label className="field"><span>Length (minutes)</span><input type="number" min={1} max={1440} placeholder={`${calendar.duration_minutes}`} value={draft.duration_minutes} onChange={e=>updateDraft(type.id,{duration_minutes:e.target.value})}/></label><label className="field"><span>Min per booking</span><input type="number" min={1} value={draft.min_units_per_booking} onChange={e=>updateDraft(type.id,{min_units_per_booking:e.target.value})}/></label><label className="field"><span>Max per booking</span><input type="number" min={1} value={draft.max_units_per_booking} onChange={e=>updateDraft(type.id,{max_units_per_booking:e.target.value})}/></label><label className="field"><span>Max per departure</span><input type="number" min={1} value={draft.max_units_per_departure} onChange={e=>updateDraft(type.id,{max_units_per_departure:e.target.value})}/></label></div>
           <div className="rate-requirements"><div className="rate-section-heading"><div><strong>Resource requirements</strong><small>Choose the inventory pool and units consumed by one booking unit.</small></div><button type="button" className="button secondary small" disabled={!availableResources.length} onClick={()=>addResource(type.id)}><Plus size={14}/>Add resource</button></div>{!allResources.length?<div className="inline-warning">Create resources first, then attach them to this rate.</div>:!draft.resources.length?<div className="empty-inline">No resources attached. Add a resource requirement to make inventory-aware availability work.</div>:draft.resources.map((mapping,index)=><div className="rate-resource-row" key={`${type.id}-${index}`}><label className="field"><span>Resource</span><select value={mapping.resource_id} onChange={e=>updateResource(type.id,index,{resource_id:e.target.value})}>{allResources.filter(resource=>resource.id===mapping.resource_id||!draft.resources.some((item,itemIndex)=>itemIndex!==index&&item.resource_id===resource.id)).map(resource=><option key={resource.id} value={resource.id}>{resource.name} · {resource.quantity} total</option>)}</select></label><label className="field"><span>Units required</span><input type="number" min={1} value={mapping.quantity_per_unit} onChange={e=>updateResource(type.id,index,{quantity_per_unit:Number(e.target.value)})}/></label><button type="button" className="icon-button danger-icon" title="Remove resource requirement" onClick={()=>removeResource(type.id,index)}>×</button></div>)}</div>
           <div className="rate-card-actions"><button type="button" className="button link-danger" disabled={deleteRate.isPending} onClick={()=>deleteRate.mutate(type.id)}><Trash2 size={14}/>Remove rate from calendar</button></div>
         </>}
