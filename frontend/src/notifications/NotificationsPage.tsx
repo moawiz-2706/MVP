@@ -9,7 +9,7 @@ import { AvailabilityEditor } from "../calendars/AvailabilityEditor";
 import { formatLongDate, formatTime, zoneLabel } from "../lib/datetime";
 
 const iconFor = (type: NotificationItem["type"]) => {
-  if (type === "ghl_sync_failed") return AlertTriangle;
+  if (type === "ghl_sync_failed" || type === "ghl_workflow_trigger_failed") return AlertTriangle;
   if (type === "booking_staff") return UserPlus;
   if (type === "calendar_resources") return Package;
   return CalendarClock;
@@ -105,11 +105,24 @@ function GHLResyncAction({ item, onSaved }: { item: NotificationItem; onSaved: (
   </div>;
 }
 
+function WorkflowTriggerRetryAction({ item, onSaved }: { item: NotificationItem; onSaved: () => void }) {
+  const retry = useMutation({
+    mutationFn: () => api(`/orders/${item.order_id}/workflow-trigger/retry`, { method: "POST" }),
+    onSuccess: onSaved,
+  });
+  return <div className="drawer-action-content">
+    <div className="warning-box"><AlertTriangle size={17} /><p>{item.description}</p></div>
+    <p className="muted-note">This is the HighLevel workflow trigger, not the contact or appointment sync. Workflows that already received it are not sent it again.</p>
+    {retry.error && <div className="error-banner">{retry.error.message}</div>}
+    <button className="button" disabled={retry.isPending || !item.order_id} onClick={() => retry.mutate()}><RefreshCw size={16} />{retry.isPending ? "Retrying…" : "Retry workflow trigger"}</button>
+  </div>;
+}
+
 function NotificationDrawer({ item, onClose, onResolved }: { item: NotificationItem; onClose: () => void; onResolved: () => void }) {
   const client = useQueryClient();
-  const calendar = useQuery({ queryKey: ["calendar", item.calendar_id], queryFn: () => api<Calendar>(`/calendars/${item.calendar_id}`), enabled: item.type !== "booking_staff" && item.type !== "ghl_sync_failed" });
-  const title = item.type === "booking_staff" ? "Assign booking staff" : item.type === "calendar_resources" ? "Configure calendar resources" : item.type === "calendar_availability" ? "Configure calendar availability" : "HighLevel synchronization";
-  return <><button className="drawer-overlay" onClick={onClose} aria-label="Close notification details" /><aside className="drawer notification-drawer" aria-label="Notification details"><div className="drawer-header"><div><h2>{title}</h2><p>{item.calendar_name}</p></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button></div><div className="notification-drawer-summary"><strong>{item.title}</strong><p>{item.description}</p></div>{item.type === "booking_staff" && <BookingStaffAction item={item} onSaved={onResolved} />}{item.type === "ghl_sync_failed" && <GHLResyncAction item={item} onSaved={onResolved} />}{item.type === "calendar_resources" && (calendar.isLoading || !calendar.data ? <div className="loading">Loading calendar…</div> : <ResourceAction calendar={calendar.data} onSaved={onResolved} />)}{item.type === "calendar_availability" && (calendar.isLoading || !calendar.data ? <div className="loading">Loading calendar…</div> : <AvailabilityEditor calendar={calendar.data} onCalendarChange={(updated) => { client.setQueryData(["calendar", item.calendar_id], updated); void client.invalidateQueries({ queryKey: ["notifications"] }); }} onSaved={() => void client.invalidateQueries({ queryKey: ["notifications"] })} />)}</aside></>;
+  const calendar = useQuery({ queryKey: ["calendar", item.calendar_id], queryFn: () => api<Calendar>(`/calendars/${item.calendar_id}`), enabled: item.type !== "booking_staff" && item.type !== "ghl_sync_failed" && item.type !== "ghl_workflow_trigger_failed" });
+  const title = item.type === "booking_staff" ? "Assign booking staff" : item.type === "calendar_resources" ? "Configure calendar resources" : item.type === "calendar_availability" ? "Configure calendar availability" : item.type === "ghl_workflow_trigger_failed" ? "HighLevel workflow trigger" : "HighLevel synchronization";
+  return <><button className="drawer-overlay" onClick={onClose} aria-label="Close notification details" /><aside className="drawer notification-drawer" aria-label="Notification details"><div className="drawer-header"><div><h2>{title}</h2><p>{item.calendar_name}</p></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button></div><div className="notification-drawer-summary"><strong>{item.title}</strong><p>{item.description}</p></div>{item.type === "booking_staff" && <BookingStaffAction item={item} onSaved={onResolved} />}{item.type === "ghl_sync_failed" && <GHLResyncAction item={item} onSaved={onResolved} />}{item.type === "ghl_workflow_trigger_failed" && <WorkflowTriggerRetryAction item={item} onSaved={onResolved} />}{item.type === "calendar_resources" && (calendar.isLoading || !calendar.data ? <div className="loading">Loading calendar…</div> : <ResourceAction calendar={calendar.data} onSaved={onResolved} />)}{item.type === "calendar_availability" && (calendar.isLoading || !calendar.data ? <div className="loading">Loading calendar…</div> : <AvailabilityEditor calendar={calendar.data} onCalendarChange={(updated) => { client.setQueryData(["calendar", item.calendar_id], updated); void client.invalidateQueries({ queryKey: ["notifications"] }); }} onSaved={() => void client.invalidateQueries({ queryKey: ["notifications"] })} />)}</aside></>;
 }
 
 export function NotificationsPage() {

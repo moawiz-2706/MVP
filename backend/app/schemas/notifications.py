@@ -11,6 +11,7 @@ NotificationType = Literal[
     "calendar_availability",
     "calendar_resources",
     "ghl_sync_failed",
+    "ghl_workflow_trigger_failed",
 ]
 
 

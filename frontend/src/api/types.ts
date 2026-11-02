@@ -184,7 +184,31 @@ export interface BookingNotificationsResponse {
   pending_count: number;
 }
 
-export type NotificationType = "booking_staff" | "calendar_availability" | "calendar_resources" | "ghl_sync_failed";
+export type NotificationType = "booking_staff" | "calendar_availability" | "calendar_resources" | "ghl_sync_failed" | "ghl_workflow_trigger_failed";
+export interface WorkflowTriggerDelivery {
+  ghl_workflow_id: string;
+  status: string;
+  attempt_count: number;
+  last_http_status: number | null;
+  last_error: string | null;
+  last_attempt_at: string | null;
+  delivered_at: string | null;
+}
+export interface WorkflowTriggerEvent {
+  id: Id;
+  event_type: string;
+  event_id: string;
+  status: string;
+  occurred_at: string;
+  delivered_at: string | null;
+  last_error: string | null;
+  deliveries: WorkflowTriggerDelivery[];
+}
+export interface WorkflowTriggerOrderStatus {
+  booking_order_id: Id;
+  enabled: boolean;
+  events: WorkflowTriggerEvent[];
+}
 export interface NotificationItem {
   id: string;
   type: NotificationType;

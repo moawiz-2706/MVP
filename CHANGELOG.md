@@ -5,6 +5,13 @@ Notable changes to Passport. Dates are deployment dates (UTC).
 ## Unreleased
 
 ### Added
+- HighLevel Marketplace Custom Trigger `passport_booking_created` runtime
+  (off until `GHL_WORKFLOW_TRIGGER_ENABLED=true`, after migration 045): the
+  Subscription URL callback, durable `booking_created` / `payment_confirmed` /
+  `booking_updated` / `booking_cancelled` events from all booking entry
+  points, per-workflow delivery with retry, and status plus retry in the
+  booking drawer and Notifications. See
+  `docs/integrations/highlevel/MARKETPLACE_TRIGGER_RUNTIME.md`.
 - **Per-rate booking rules** (migration 044): a rate can hold its resources
   for its own length (e.g. 2–8 hour private charters on one calendar), have a
   per-booking minimum/maximum (group-size price tiers like the escape room),

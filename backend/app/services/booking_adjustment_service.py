@@ -22,6 +22,7 @@ from app.models.entities import (
 from app.schemas.booking import BookingUpdate
 from app.services.adjustment_service import AdjustmentService
 from app.services.booking_admin_service import BookingAdminService
+from app.services.ghl_workflow_trigger_service import enqueue_workflow_event
 from app.services.policy_service import PolicyService
 from app.services.stripe_payment_service import StripePaymentService
 
@@ -167,6 +168,7 @@ class BookingAdjustmentService:
             booking.id,
             BookingUpdate(start_at=target_start, units=target_units),
             allow_paid_reschedule=True,
+            emit_workflow_event=False,
         )
         self.db.expire_all()
         booking, order, payment = self._locked_bundle(booking_id)
@@ -232,6 +234,14 @@ class BookingAdjustmentService:
                 payload={"adjustment_id": str(adjustment.id), **metadata},
             )
         )
+        enqueue_workflow_event(
+            self.db,
+            self.settings,
+            order,
+            "booking_updated",
+            f"{booking.id}:{booking.updated_at.isoformat()}",
+            focus_booking_id=booking.id,
+        )
         self.db.commit()
         return self._response(adjustment, booking=BookingAdminService(self.db, self.operator_id).detail(booking.id))
 
@@ -268,6 +278,7 @@ class BookingAdjustmentService:
                 booking_id,
                 BookingUpdate(start_at=target_start, units=target_units),
                 allow_paid_reschedule=True,
+                emit_workflow_event=False,
             )
         except Exception as exc:
             adjustment.status = "manual_review"
@@ -312,6 +323,17 @@ class BookingAdjustmentService:
                     payload={"adjustment_id": str(adjustment.id), "amount_minor": adjustment.amount_minor},
                 )
             )
+            order = self.db.get(BookingOrder, booking.booking_order_id)
+            if order is not None:
+                # After the verified extra charge succeeded and was applied.
+                enqueue_workflow_event(
+                    self.db,
+                    self.settings,
+                    order,
+                    "booking_updated",
+                    f"{booking.id}:{booking.updated_at.isoformat()}",
+                    focus_booking_id=booking.id,
+                )
         self.db.commit()
 
     @staticmethod

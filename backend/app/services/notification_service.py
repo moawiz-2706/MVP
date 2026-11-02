@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.entities import (
     Booking,
     BookingOrder,
@@ -15,6 +16,7 @@ from app.models.entities import (
     CalendarPushedSlot,
     CalendarResource,
     GHLSyncRun,
+    GHLWorkflowTriggerEvent,
 )
 from app.schemas.notifications import NotificationItem, NotificationsResponse
 
@@ -44,6 +46,9 @@ class NotificationService:
         if calendar_ids:
             items.extend(self._calendar_items(calendars))
         items.extend(self._ghl_sync_items())
+        if get_settings().ghl_workflow_trigger_enabled:
+            # Only then can migration 045's tables be assumed to exist.
+            items.extend(self._workflow_trigger_items())
         items.sort(key=self._sort_key)
         return NotificationsResponse(
             items=items,
@@ -103,6 +108,68 @@ class NotificationService:
                     sync_run_id=run.id,
                     sync_attempts=run.attempt_count,
                     error_code=run.last_error_code,
+                )
+            )
+        return result
+
+    def _workflow_trigger_items(self) -> list[NotificationItem]:
+        """Marketplace Custom Trigger deliveries that failed or are being retried.
+
+        Kept apart from `ghl_sync_failed` (contact/appointment projection): the
+        booking itself is fine, only the HighLevel workflow did not start.
+        """
+        events = list(
+            self.db.scalars(
+                select(GHLWorkflowTriggerEvent)
+                .where(
+                    GHLWorkflowTriggerEvent.operator_id == self.operator_id,
+                    or_(
+                        GHLWorkflowTriggerEvent.status.in_(("failed", "partially_delivered")),
+                        (GHLWorkflowTriggerEvent.status == "pending")
+                        & GHLWorkflowTriggerEvent.last_error.is_not(None),
+                    ),
+                )
+                .order_by(GHLWorkflowTriggerEvent.created_at.desc())
+                .limit(100)
+            )
+        )
+        result: list[NotificationItem] = []
+        for event in events:
+            row = self.db.execute(
+                select(Booking, BookingOrder)
+                .join(BookingOrder, BookingOrder.id == Booking.booking_order_id)
+                .where(
+                    Booking.booking_order_id == event.booking_order_id,
+                    Booking.operator_id == self.operator_id,
+                )
+                .order_by(Booking.start_at, Booking.id)
+                .limit(1)
+            ).one_or_none()
+            if row is None:
+                continue
+            booking, order = row
+            customer = f"{order.customer_first_name} {order.customer_last_name}".strip()
+            retrying = event.status == "pending"
+            result.append(
+                NotificationItem(
+                    id=f"ghl-workflow-trigger:{event.id}",
+                    type="ghl_workflow_trigger_failed",
+                    title=f"HighLevel workflow not started for {customer or 'booking'}",
+                    description=(
+                        f"The {event.event_type.replace('_', ' ')} trigger "
+                        + ("is being retried" if retrying else "was not delivered")
+                        + f": {event.last_error or 'Unknown provider error'}. "
+                        "The booking itself is saved."
+                    ),
+                    action_label="Retry workflow trigger",
+                    calendar_id=booking.calendar_id,
+                    calendar_name=booking.calendar_name_snapshot,
+                    booking_id=booking.id,
+                    customer_name=customer,
+                    start_at=booking.start_at,
+                    end_at=booking.end_at,
+                    order_id=order.id,
+                    error_code=event.status,
                 )
             )
         return result
@@ -192,6 +259,7 @@ class NotificationService:
     def _sort_key(item: NotificationItem) -> tuple[int, datetime, str]:
         priority = {
             "ghl_sync_failed": 0,
+            "ghl_workflow_trigger_failed": 1,
             "calendar_availability": 2,
             "calendar_resources": 3,
         }
