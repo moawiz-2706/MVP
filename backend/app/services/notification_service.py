@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.entities import (
@@ -15,10 +15,8 @@ from app.models.entities import (
     CalendarPushedSlot,
     CalendarResource,
     GHLSyncRun,
-    StaffAssignment,
 )
 from app.schemas.notifications import NotificationItem, NotificationsResponse
-from app.services.staffing_service import readiness_for_booking
 
 
 class NotificationService:
@@ -45,7 +43,6 @@ class NotificationService:
         calendar_ids = [calendar.id for calendar in calendars]
         if calendar_ids:
             items.extend(self._calendar_items(calendars))
-            items.extend(self._booking_items(now, calendar_ids))
         items.extend(self._ghl_sync_items())
         items.sort(key=self._sort_key)
         return NotificationsResponse(
@@ -191,77 +188,10 @@ class NotificationService:
                 )
         return result
 
-    def _booking_items(
-        self, now: datetime, calendar_ids: list[uuid.UUID]
-    ) -> list[NotificationItem]:
-        conditions = [
-            Booking.operator_id == self.operator_id,
-            Booking.calendar_id.in_(calendar_ids),
-            Booking.status.in_(("confirmed", "pending_payment")),
-            or_(
-                Booking.status == "confirmed",
-                (Booking.status == "pending_payment") & (Booking.hold_expires_at > now),
-            ),
-            Booking.start_at >= now - timedelta(days=30),
-        ]
-        rows = self.db.execute(
-            select(Booking, BookingOrder, Calendar)
-            .join(BookingOrder, BookingOrder.id == Booking.booking_order_id)
-            .join(Calendar, Calendar.id == Booking.calendar_id)
-            .where(*conditions)
-            .order_by(Booking.start_at, Booking.id)
-            .limit(200)
-        )
-        result: list[NotificationItem] = []
-        for booking, order, calendar in rows:
-            readiness = readiness_for_booking(self.db, booking)
-            if readiness.ready:
-                continue
-            roles = [
-                str(role)
-                for role in (calendar.required_staff_roles or ["Captain"])
-                if str(role).strip()
-            ]
-            assignments = list(
-                self.db.scalars(
-                    select(StaffAssignment).where(
-                        StaffAssignment.operator_id == self.operator_id,
-                        StaffAssignment.calendar_id == calendar.id,
-                        StaffAssignment.start_at <= booking.start_at,
-                        StaffAssignment.end_at >= booking.end_at,
-                    )
-                )
-            )
-            assigned_roles = {str(assignment.role or "").casefold() for assignment in assignments}
-            missing_roles = [role for role in roles if role.casefold() not in assigned_roles]
-            customer = f"{order.customer_first_name} {order.customer_last_name}".strip()
-            result.append(
-                NotificationItem(
-                    id=f"booking-staff:{booking.id}",
-                    type="booking_staff",
-                    title=f"Assign staff to {customer or 'booking'}",
-                    description=(
-                        readiness.reason
-                        or "Assign the required staff before this booking is fully configured."
-                    ),
-                    action_label="Assign staff",
-                    calendar_id=calendar.id,
-                    calendar_name=booking.calendar_name_snapshot or calendar.name,
-                    booking_id=booking.id,
-                    customer_name=customer,
-                    start_at=booking.start_at,
-                    end_at=booking.end_at,
-                    required_roles=roles,
-                    missing_roles=missing_roles,
-                )
-            )
-        return result
-
     @staticmethod
     def _sort_key(item: NotificationItem) -> tuple[int, datetime, str]:
         priority = {
             "ghl_sync_failed": 0,
-            "booking_staff": 1,
             "calendar_availability": 2,
             "calendar_resources": 3,
         }

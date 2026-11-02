@@ -1,0 +1,10 @@
+# Store text with LF endings regardless of the contributor's OS.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary

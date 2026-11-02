@@ -153,7 +153,6 @@ class GHLCalendarService:
             .where(
                 Calendar.id == calendar_id,
                 Calendar.operator_id == self.operator_id,
-                Calendar.deleted_at.is_(None),
             )
         ).one_or_none()
         if row is None:
@@ -165,6 +164,11 @@ class GHLCalendarService:
                 GHLCalendarMapping.calendar_id == calendar.id,
             ).with_for_update()
         )
+        archived = calendar.deleted_at is not None
+        if archived and (mapping is None or not mapping.ghl_calendar_id):
+            # An archived calendar is only ever deactivated in HighLevel,
+            # never created there.
+            return None
         if mapping is None:
             mapping = GHLCalendarMapping(
                 operator_id=self.operator_id,
@@ -176,7 +180,7 @@ class GHLCalendarService:
             self.db.flush()
         common_body = {
             "name": calendar.name,
-            "isActive": calendar.is_active,
+            "isActive": calendar.is_active and not archived,
             "description": self._calendar_description(calendar),
             "locationConfigurations": (
                 [

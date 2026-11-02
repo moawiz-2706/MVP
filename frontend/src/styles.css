@@ -775,7 +775,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line); border-bottom-width: 2px;
 .closure-list li:last-child { border-bottom: 0; }
 .closure-list span { color: var(--muted); font-size: 11px; }
 .closure-preview .notice { padding: 10px 12px; border-radius: 8px; background: #fff8e8; color: #8a5314; border: 1px solid #f3dfb0; font-size: 12px; }
-.departure-card-actions { display: flex; justify-content: flex-end; }
+.departure-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .departure-card-actions a { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 12.5px; font-weight: 650; color: var(--accent); }
 .creator-report { margin-top: 16px; }
 .creator-report table { width: 100%; border-collapse: collapse; font-size: 12.5px; }

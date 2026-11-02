@@ -130,14 +130,14 @@ function SignForm({ waiver, token }: { waiver: PublicWaiver; token: string }) {
   });
   const [address, setAddress] = useState<WaiverAddress>({ street: "", city: "", state: "", postal_code: "", country: "" });
   const [others, setOthers] = useState<WaiverPerson[]>(() =>
-    Array.from({ length: Math.max(0, waiver.participants_total - 1) }, () => ({ first_name: "", last_name: "", date_of_birth: "" })),
+    Array.from({ length: Math.max(0, waiver.participants_total - 1) }, () => ({ first_name: "", last_name: "", date_of_birth: "", email: "", phone: "" })),
   );
   const [optIn, setOptIn] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [signature, setSignature] = useState<string | null>(null);
 
   const sign = useMutation({
-    mutationFn: () => api<PublicWaiver>(`/public/waivers/${token}/sign`, json("POST", { signer, address, participants: others, opt_in: optIn, agreed, signature_png: signature })),
+    mutationFn: () => api<PublicWaiver>(`/public/waivers/${token}/sign`, json("POST", { signer, address, participants: others.map((person) => (isMinor(person) ? { ...person, email: undefined, phone: undefined } : person)), opt_in: optIn, agreed, signature_png: signature })),
     onSuccess: (result) => { client.setQueryData(["waiver", token], result); window.scrollTo({ top: 0, behavior: "smooth" }); },
   });
 
@@ -146,6 +146,9 @@ function SignForm({ waiver, token }: { waiver: PublicWaiver; token: string }) {
   const updateOther = (index: number, key: keyof WaiverPerson) => (event: ChangeEvent<HTMLInputElement>) =>
     setOthers(others.map((person, i) => (i === index ? { ...person, [key]: event.target.value } : person)));
   const signerTooYoung = !!signer.date_of_birth && ageOn(signer.date_of_birth, today) < ADULT_AGE;
+  // Adults taking part must give contact details; the signer covers minors.
+  const isMinor = (person: WaiverPerson) => !!person.date_of_birth && ageOn(person.date_of_birth, activityDay) < ADULT_AGE;
+  const adultMissingContact = others.some((person) => !isMinor(person) && (!person.email?.trim() || !person.phone?.trim()));
   const submit = (event: FormEvent) => { event.preventDefault(); if (signature && agreed && !signerTooYoung) sign.mutate(); };
 
   return (
@@ -187,6 +190,14 @@ function SignForm({ waiver, token }: { waiver: PublicWaiver; token: string }) {
                 <Field label="First name" value={person.first_name} onChange={updateOther(index, "first_name")} maxLength={120} />
                 <Field label="Last name" value={person.last_name} onChange={updateOther(index, "last_name")} maxLength={120} />
                 <Field label="Date of birth" type="date" max={today} value={person.date_of_birth} onChange={updateOther(index, "date_of_birth")} />
+                {isMinor(person) ? (
+                  <p className="muted-note">You are signing for this participant as their parent or guardian.</p>
+                ) : (
+                  <>
+                    <Field label="Email" type="email" value={person.email || ""} onChange={updateOther(index, "email")} maxLength={200} />
+                    <Field label="Phone" type="tel" value={person.phone || ""} onChange={updateOther(index, "phone")} maxLength={40} />
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -202,7 +213,7 @@ function SignForm({ waiver, token }: { waiver: PublicWaiver; token: string }) {
 
       <label className="check-field waiver-agree"><input type="checkbox" required checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />I have read this waiver, understand it, and agree to it on behalf of everyone listed.</label>
       {sign.error && <div className="error-banner" style={{ marginTop: 12 }}>{sign.error.message}</div>}
-      <button className="button waiver-submit" disabled={sign.isPending || !signature || !agreed || signerTooYoung}>
+      <button className="button waiver-submit" disabled={sign.isPending || !signature || !agreed || signerTooYoung || adultMissingContact}>
         {sign.isPending ? "Signing..." : signature ? "Sign waiver" : "Add your signature to continue"}
       </button>
     </form>

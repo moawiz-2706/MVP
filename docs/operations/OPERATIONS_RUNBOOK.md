@@ -17,7 +17,7 @@ Customer confirmations, HighLevel contact and appointment sync, Stripe transfers
 **Fix (pick one):**
 
 1. **Resolve the GitHub billing lock.** The existing workflow resumes with no code change. Vercel and GitHub do not guarantee exact 5-minute timing.
-2. **Supabase pg_cron + pg_net (no extra hosting, free on all plans; chosen 2026-11-02).** The ready-to-run script is `supabase/manual_schedule_outbox_pg_cron.sql`. In outline:
+2. **Supabase pg_cron + pg_net (no extra hosting, free on all plans; chosen 2026-11-02).** The ready-to-run script is `supabase/manual/schedule_outbox_pg_cron.sql`. In outline:
 
    ```sql
    create extension if not exists pg_cron;
@@ -57,7 +57,7 @@ As of 2026-11-02, production has markers through `039_pwa_sessions`, **except `0
 
 5. `043_attribution_checkin_intent_cancel.sql`: booking creator and source columns, participant check-in columns, and the `stripe_cancel_payment_intent` job type. **Apply it before deploying the code that needs it** (readiness marker `043`). Run the file as-is in the SQL editor; it is idempotent.
 
-`038`–`042` were combined, with the owner-approved voiding of two test payments, in `supabase/manual_2026-11-02_production_apply.sql`. That script was tested on a local copy in production's exact migration state, and is idempotent.
+`038`–`042` were combined, with the owner-approved voiding of two test payments, in `supabase/manual/2026-11-02_production_apply.sql`. That script was tested on a local copy in production's exact migration state, and is idempotent.
 
 **Before applying:** take a backup (Supabase dashboard → Database → Backups, or `pg_dump`). Run each file against a staging copy first.
 

@@ -11,10 +11,7 @@ from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
     Booking,
-    BookingFinancialAllocation,
-    BookingNote,
     BookingResource,
-    BookingWaiver,
     Calendar,
     CalendarBlock,
     CalendarCategory,
@@ -26,7 +23,6 @@ from app.models.entities import (
     CalendarResource,
     CustomerType,
     DepartureLocation,
-    GHLAppointmentMapping,
     GHLCalendarMapping,
     Operator,
     OutboxJob,
@@ -467,6 +463,23 @@ class ConfigurationService:
     def delete_category(self, entity_id: uuid.UUID) -> None:
         entity = self.get_category(entity_id)
         now = datetime.now(UTC)
+        upcoming = self.db.scalar(
+            select(func.count(Booking.id))
+            .join(Calendar, Calendar.id == Booking.calendar_id)
+            .where(
+                Calendar.operator_id == self.operator_id,
+                Calendar.calendar_category_id == entity_id,
+                Calendar.deleted_at.is_(None),
+                Booking.status.in_(("pending_payment", "confirmed")),
+                Booking.end_at > now,
+            )
+        ) or 0
+        if upcoming:
+            raise ConflictError(
+                f"Calendars in this category have {upcoming} upcoming booking(s). Cancel or "
+                "move them before removing the category."
+            )
+        # Calendars are archived, never erased; their bookings are untouched.
         self.db.execute(
             update(Calendar)
             .where(
@@ -594,62 +607,40 @@ class ConfigurationService:
         except Exception:
             logger.exception("Inline outbox processing failed after calendar mutation")
 
-    def delete_calendar(self, entity_id: uuid.UUID) -> None:
+    def delete_calendar(self, entity_id: uuid.UUID) -> str:
+        """Remove a calendar from use without destroying booking history.
+
+        Returns ``"archived"`` when the calendar has bookings and ``"deleted"``
+        when it has none. Bookings, notes, waivers, payments and HighLevel
+        appointment links are never deleted here. A calendar with upcoming
+        live bookings is refused: hiding it would strand real customers.
+        """
         entity = self.get_calendar(entity_id)
         if entity.deleted_at is not None:
             raise NotFoundError("Calendar not found")
+        now = datetime.now(UTC)
+        upcoming = self.db.scalar(
+            select(func.count(Booking.id)).where(
+                Booking.calendar_id == entity.id,
+                Booking.status.in_(("pending_payment", "confirmed")),
+                Booking.end_at > now,
+            )
+        ) or 0
+        if upcoming:
+            raise ConflictError(
+                f"This calendar has {upcoming} upcoming booking(s). Cancel or move them "
+                "before removing the calendar."
+            )
+        has_history = self.db.scalar(
+            select(Booking.id).where(Booking.calendar_id == entity.id).limit(1)
+        ) is not None
         calendar_mapping = self.db.scalar(
             select(GHLCalendarMapping).where(
                 GHLCalendarMapping.operator_id == self.operator_id,
                 GHLCalendarMapping.calendar_id == entity.id,
             )
         )
-        booking_rows = self.db.execute(
-            select(Booking.id, Booking.booking_order_id).where(Booking.calendar_id == entity.id)
-        ).all()
-        booking_ids = [booking_id for booking_id, _ in booking_rows]
-        booking_order_ids = [order_id for _, order_id in booking_rows]
-        signed_waiver = self.db.scalar(
-            select(BookingWaiver.booking_id).where(
-                BookingWaiver.booking_id.in_(booking_ids), BookingWaiver.status == "signed"
-            )
-        ) if booking_ids else None
-        if signed_waiver is not None:
-            raise ConflictError(
-                "This calendar has a signed waiver and cannot be physically deleted. "
-                "Preserve the booking record or remove the signed waiver under your "
-                "legal-retention policy."
-            )
-        if booking_ids:
-            self.db.execute(
-                delete(GHLAppointmentMapping).where(
-                    GHLAppointmentMapping.booking_id.in_(booking_ids)
-                )
-            )
-            self.db.execute(
-                delete(BookingResource).where(BookingResource.booking_id.in_(booking_ids))
-            )
-            self.db.execute(
-                delete(BookingWaiver).where(BookingWaiver.booking_id.in_(booking_ids))
-            )
-            self.db.execute(
-                delete(BookingNote).where(BookingNote.booking_id.in_(booking_ids))
-            )
-            self.db.execute(
-                delete(BookingFinancialAllocation).where(
-                    BookingFinancialAllocation.booking_id.in_(booking_ids)
-                )
-            )
-            self.db.execute(delete(Booking).where(Booking.id.in_(booking_ids)))
-            if booking_order_ids:
-                self.db.execute(
-                    delete(OutboxJob).where(
-                        OutboxJob.booking_order_id.in_(booking_order_ids),
-                        OutboxJob.job_type.in_(
-                            ("ghl_sync_appointment", "ghl_cancel_appointment")
-                        ),
-                    )
-                )
+        # Drop queued configuration syncs; an archive queues its own below.
         self.db.execute(
             delete(OutboxJob).where(
                 OutboxJob.operator_id == self.operator_id,
@@ -658,33 +649,47 @@ class ConfigurationService:
                 OutboxJob.status.in_(("pending", "failed")),
             )
         )
-        entity.deleted_at = datetime.now(UTC)
+        entity.deleted_at = now
         entity.is_active = False
         entity.public_booking_enabled = False
         self.db.execute(
             delete(StaffAssignment).where(
                 StaffAssignment.calendar_id == entity.id,
-                StaffAssignment.end_at > datetime.now(UTC),
+                StaffAssignment.end_at > now,
             )
         )
         if calendar_mapping is not None and calendar_mapping.ghl_calendar_id:
-            self.db.add(
-                OutboxJob(
-                    operator_id=self.operator_id,
-                    job_type="ghl_delete_calendar",
-                    idempotency_key=f"calendar:{entity.id}:delete",
-                    payload={
-                        "calendar_id": str(entity.id),
-                        "ghl_calendar_id": calendar_mapping.ghl_calendar_id,
-                    },
-                    status="pending",
+            if has_history:
+                # Keep the HighLevel calendar so past appointments stay on
+                # contacts; only mark it inactive.
+                self.db.add(
+                    OutboxJob(
+                        operator_id=self.operator_id,
+                        job_type="ghl_sync_calendar",
+                        idempotency_key=f"calendar:{entity.id}:archive",
+                        payload={"calendar_id": str(entity.id)},
+                        status="pending",
+                    )
                 )
-            )
+            else:
+                self.db.add(
+                    OutboxJob(
+                        operator_id=self.operator_id,
+                        job_type="ghl_delete_calendar",
+                        idempotency_key=f"calendar:{entity.id}:delete",
+                        payload={
+                            "calendar_id": str(entity.id),
+                            "ghl_calendar_id": calendar_mapping.ghl_calendar_id,
+                        },
+                        status="pending",
+                    )
+                )
         self.db.commit()
         try:
             OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)
         except Exception:
-            logger.exception("Inline outbox processing failed after calendar deletion")
+            logger.exception("Inline outbox processing failed after calendar removal")
+        return "archived" if has_history else "deleted"
 
     def list_hours(self, calendar_id: uuid.UUID) -> list[CalendarHour]:
         self.get_calendar(calendar_id)

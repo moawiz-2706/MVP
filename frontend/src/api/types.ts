@@ -247,7 +247,7 @@ export interface BookingNote { id: Id; author_user_id: Id | null; author_name: s
 export interface BookingParticipant { id: Id; sequence: number; first_name: string; last_name: string; email: string | null; phone: string | null; date_of_birth: string | null; is_minor: boolean; guardian_name: string | null; emergency_contact: Record<string, unknown> | null; operational_notes: string | null; status: string; source: string }
 export interface ReportSummary { start_date: string; end_date: string; total_bookings: number; confirmed_bookings: number; pending_payment_bookings: number; cancelled_bookings: number; completed_bookings: number; units_booked: number; gross_sales_minor: number; booking_fees_minor: number; taxes_minor: number; upcoming_bookings: number; failed_sync_jobs: number }
 
-export interface WaiverPerson { first_name: string; last_name: string; date_of_birth: string }
+export interface WaiverPerson { first_name: string; last_name: string; date_of_birth: string; email?: string; phone?: string }
 export interface WaiverSigner extends WaiverPerson { email: string; phone: string }
 export interface WaiverAddress { street: string; city: string; state: string; postal_code: string; country: string }
 export interface SignedWaiverDetails { signer: WaiverSigner; address: WaiverAddress; participants: (WaiverPerson & { minor: boolean })[]; opt_in: boolean; opt_in_label: string | null }

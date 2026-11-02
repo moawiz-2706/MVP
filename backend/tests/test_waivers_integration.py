@@ -147,7 +147,16 @@ def _sign_request(others: list[tuple[str, date]], *, signer_dob: date = date(199
             "date_of_birth": signer_dob,
         },
         address={"street": "4824 Fairway Dr S", "city": "Punta Gorda", "state": "FL", "postal_code": "33982", "country": "USA"},
-        participants=[{"first_name": name, "last_name": "Hart", "date_of_birth": dob} for name, dob in others],
+        participants=[
+            {
+                "first_name": name,
+                "last_name": "Hart",
+                "date_of_birth": dob,
+                # Adults must give contact details; minors need none.
+                **({"email": f"{name.lower()}@example.com", "phone": "+19415550111"} if dob.year < 2000 else {}),
+            }
+            for name, dob in others
+        ],
         opt_in=True,
         agreed=True,
         signature_png=PNG,
@@ -315,3 +324,41 @@ def test_removing_staff_without_email_sends_nothing(db) -> None:
     assignment = service.assign(StaffAssignmentCreate(staff_id=staff["id"], calendar_id=cal.id, start_at=_tomorrow(9)))
     service.unassign(assignment["id"])
     assert list(db.scalars(select(OutboxJob).where(OutboxJob.job_type == "ghl_staff_unassigned_email"))) == []
+
+
+def test_every_adult_in_the_party_must_give_contact_details(db) -> None:
+    op = _operator(db)
+    booking = _booking(db, op, _calendar(db, op), units=2)
+    db.commit()
+    token = WaiverService(db).ensure(booking).token
+    request = _sign_request([("Jordan", date(1990, 1, 1))])
+    request.participants[0].email = None
+
+    with pytest.raises(ConflictError, match="email and phone number for Jordan Hart"):
+        WaiverService(db).sign(token, request, ip=None, user_agent=None)
+
+
+def test_signed_waiver_puts_the_party_on_the_manifest_without_duplicates(db) -> None:
+    from app.models.entities import BookingParticipant
+
+    op = _operator(db)
+    booking = _booking(db, op, _calendar(db, op), units=3)
+    # Staff already entered the adult guest by hand.
+    db.add(BookingParticipant(operator_id=op.id, booking_id=booking.id, sequence=1, first_name="Jordan",
+                              last_name="Hart", source="operator"))
+    db.commit()
+    token = WaiverService(db).ensure(booking).token
+
+    WaiverService(db).sign(
+        token, _sign_request([("Jordan", date(1990, 1, 1)), ("Azaria", date(2015, 2, 10))]), ip=None, user_agent=None
+    )
+
+    people = {
+        (row.first_name, row.last_name): row
+        for row in db.scalars(select(BookingParticipant).where(BookingParticipant.booking_id == booking.id))
+    }
+    assert set(people) == {("Jordan", "Hart"), ("Calvin", "Schofield"), ("Azaria", "Hart")}
+    signer, child = people[("Calvin", "Schofield")], people[("Azaria", "Hart")]
+    assert signer.email == "calvin@example.com" and signer.phone and not signer.is_minor
+    assert child.is_minor and child.guardian_name == "Calvin Schofield" and child.source == "waiver"
+    assert people[("Jordan", "Hart")].source == "operator"  # the staff entry is kept, not duplicated

@@ -287,16 +287,9 @@ class PWAWorkspaceService:
                     severity="danger",
                 )
             )
-        if counts.unassigned_bookings:
-            alerts.append(
-                PWADashboardAlert(
-                    id="unassigned-bookings",
-                    title="Bookings have no staff assignment",
-                    description=f"{counts.unassigned_bookings} upcoming booking(s) do not yet have any staff assigned.",
-                    href="/app/notifications",
-                    severity="warning",
-                )
-            )
+        # Staff are assigned after a departure is sold (owner decision,
+        # 2026-11-02), so an unstaffed booking is not an alert; the dashboard
+        # still shows the unassigned count as information.
         if counts.waivers_pending:
             alerts.append(
                 PWADashboardAlert(

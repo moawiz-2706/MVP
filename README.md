@@ -1,195 +1,101 @@
 # Passport
 
-Passport is a multi-tenant rental scheduling platform embedded in a
-GoHighLevel Marketplace Custom Page. PostgreSQL is authoritative for calendars,
-inventory, customer-type rates, bookings, payments, waivers, and booking
-policies. GoHighLevel is used only for installation, embedded-user identity,
-the contacts required by appointments, calendar/appointment synchronization,
-and staff identity synchronization.
+Passport is the booking and staff-operations platform for tour and charter
+operators, embedded in HighLevel (GoHighLevel) and available to staff as a
+standalone mobile PWA.
 
-The repository is split into independently deployable applications:
+Passport's PostgreSQL database is the source of truth for calendars, inventory,
+rates, bookings, payments, waivers, manifests and staff assignment. HighLevel
+supplies installation identity and staff, and receives contacts, calendars and
+appointments as a one-way projection. Stripe Connect handles card payments,
+invoices, refunds and operator payouts.
 
-- `backend/` — FastAPI on Vercel, SQLAlchemy 2, Supabase PostgreSQL
-- `frontend/` — Vite, React, TypeScript, Tailwind, FullCalendar, Stripe.js
-- `supabase/migrations/` — the only authoritative database schema history
-- `docs/` — architecture, integration, deployment, and operational guidance
+## Repository layout
 
-## Implementation sequence
+```text
+backend/            FastAPI API, SQLAlchemy models, services, background worker
+  app/api/v1/       HTTP routes (thin: auth, validation, delegation)
+  app/services/     Business logic (booking, payments, availability, sync)
+  app/models/       SQLAlchemy entities (mirror the migrations)
+  tests/            pytest suite (unit + PostgreSQL integration)
+frontend/           React + TypeScript (Vite) app: embedded desktop, staff PWA,
+                    public booking pages
+supabase/
+  migrations/       The authoritative, numbered schema history (apply in order)
+  manual/           One-off SQL for the Supabase SQL editor (not migrations)
+docs/               Architecture, operations, planning, integrations, history
+vercel.json         Single-origin deployment: frontend at /, API at /api
+```
 
-1. Foundation: schema, models, validation, configuration, crypto, and database.
-2. GHL Marketplace trust chain: OAuth, encrypted user context, local sessions.
-3. Tenant-scoped configuration CRUD and transactional soft-deletion.
-4. Availability and shared-resource capacity calculation.
-5. Concurrency-safe order holds and booking administration.
-6. Embedded administration interface.
-7. Public booking and multi-occurrence checkout.
-8. Stripe Connect onboarding.
-9. Payments, verified webhooks, transfers, and refund foundation.
-10. Reliable Passport-owned booking and payment workflows with minimal GHL projection.
-11. Deployment hardening and QA.
+## Local development
 
-See [Architecture](docs/architecture.md) for the entity graph, trust boundaries,
-and specification decisions.
+Requirements: Python 3.12+, Node 20+, PostgreSQL 15+.
 
-## Production rollout: staff users and booking notifications
+```bash
+# Backend
+cd backend
+python -m venv .venv
+.venv/Scripts/pip install -r requirements.txt   # macOS/Linux: .venv/bin/pip
+cp .env.example .env                            # fill in local values
+.venv/Scripts/python -m uvicorn app.main:app --reload --port 8000
 
-Migration `supabase/migrations/012_staff_ghl_users.sql` is mandatory before
-deploying the staff-user and Booking Notifications backend code. It adds the
-GHL-user columns selected by the `Staff` model and registers the
-`ghl_sync_staff_user` outbox job type. Apply it to the production Supabase
-database first, then deploy the backend and frontend. If the application is
-deployed before this migration is applied, `GET /api/v1/booking-notifications`
-and `POST /api/v1/staff` can fail with HTTP 500 because PostgreSQL cannot find
-the new `staff.ghl_user_*` columns.
+# Frontend
+cd frontend
+npm ci
+cp .env.example .env.local
+npm run dev                                      # http://localhost:5173/app
+```
 
-Keep `GHL_STAFF_USER_SYNC_ENABLED=true` after the migration is applied and the
-HighLevel Marketplace app has `users.readonly`. Reinstall or reauthorize the
-app in each sub-account so the installation stores that scope. The Staff page
-then imports existing account users from the sub-account and stores their GHL
-user IDs locally; Passport does not create duplicate GHL users. Roles are
-assigned per booking time slot, so the same person can have different roles on
-different bookings and multiple staff members can share a role. If the scope
-is missing, the local roster remains visible and shows a sync error instead of
-silently failing.
+## Tests
 
-Migration `supabase/migrations/013_staff_custom_roles.sql` is also mandatory
-for the Passport-owned role layer. Apply migration 012 first, then 013, before
-deploying this version. The Staff page does not edit GHL names, email, phone,
-permissions, or account status. It only stores `staff.custom_role` in Passport.
-The Staff sidebar badge and highlighted rows identify synced GHL staff without
-a custom role. Booking staff selectors use that Passport role as their source
-of truth and show only matching staff.
+```bash
+cd backend
+# Unit and contract tests (no database needed)
+.venv/Scripts/python -m pytest
 
-Migration `supabase/migrations/014_staff_ghl_availability.sql` is required for
-the GHL availability cache, and `supabase/migrations/015_staff_pool_two_week_availability.sql`
-adds calendar staff pools plus concrete rolling availability windows. Apply both
-after 013 and before deploying this version. The Staff page requests the
-`calendars.readonly` schedule APIs on every directory refresh, stores the weekly
-schedule for display, and expands each linked GHL user's schedule into the next
-14 days of UTC intervals. The protected daily cron refreshes those windows
-automatically; the Staff page and assignment tools use them for operational
-staffing information, but they do not block public booking slots.
-Passport cannot edit GHL-managed staff details or availability.
+# Full suite: point at disposable databases. Integration tests drop and
+# recreate tables in TEST_DATABASE_URL; TEST_MIGRATED_DATABASE_URL must be a
+# database built by applying supabase/migrations in order (tests roll back).
+TEST_DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/passport_test \
+TEST_MIGRATED_DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/passport_migrations \
+  .venv/Scripts/python -m pytest
 
-Migration `supabase/migrations/018_customer_type_rates_and_line_items.sql` is
-required for customer-type pricing and resource-aware bookings. It adds
-customer types, calendar rates, rate-to-resource mappings, booking line-item
-snapshots, and configurable party-size and rate-level fee/tax fields. Apply it
-after migration 017 before enabling the Kayak rate editor or public rate-aware
-checkout.
+cd ../frontend
+npm run typecheck && npm run test:money && npm run test:booking-notifications && npm run build
+```
 
-Migration `supabase/migrations/019_calendar_bookability_policy.sql` adds
-Passport-owned `online`, `call_to_book`, and `closed` calendar modes plus an
-optional booking cutoff. Apply it after migration 018. GHL calendar hours and
-staff schedules do not replace these Passport booking rules.
+Never point a test URL at a shared or production database.
 
-Migration `supabase/migrations/020_fareharbor_replica_core.sql` adds Passport
-customer records, immutable booking-policy versions, booking adjustments,
-custom booking fields, weather closure records, staged migration imports, and
-reconciliation runs. The operator workspace exposes Customers and Migration &
-reconciliation sections. Validate an export before committing it; no live
-FareHarbor cutover should happen while blocking errors remain.
+## Database migrations
 
-Migration `supabase/migrations/021_production_booking_hardening.sql` is required
-before paid production bookings. It adds participant manifests, append-only
-booking and payment event ledgers, hold-expiry and lookup indexes, credential
-invariants, booking-total checks, staff-assignment overlap protection, and
-append-only database triggers. Apply it after 020 and verify it on a staging
-PostgreSQL clone before production.
+- Every schema change is a new, numbered, idempotent file in
+  `supabase/migrations/` that writes its marker to `passport_schema_version`.
+- Keep `backend/app/models/entities.py` in sync; `backend/app/core/database.py`
+  `REQUIRED_SCHEMA_VERSION` names the migration the code requires.
+- Apply migrations to production **before** deploying code that needs them.
+  `/api/readiness` reports `not_ready` if the marker is missing.
 
-Migration `supabase/migrations/024_resource_metadata_repair.sql` repairs older
-databases whose `resources` table still lacks `resource_type`, `capacity_limit`,
-or `notes`. It is idempotent and should be applied before opening the Resources
-page.
+## Deployment and operations
 
-Migration `supabase/migrations/025_booking_page_schema_repair.sql` repairs
-databases that skipped the customer-rate and checkout migrations. It adds the
-calendar party/fee/tax columns, customer types, calendar rates, rate-resource
-mappings, booking line items, booking financial snapshot columns, and the
-booking-order marketing flag. Apply it before opening the Booking page.
+Pushing to `main` deploys to Vercel production. The API serves `/api/health`
+(liveness) and `/api/readiness` (configuration, schema and job-runner health).
+A misconfigured deployment stays up but returns 503 for business routes and
+names the missing setting in `/api/readiness`.
 
-Migration `supabase/migrations/026_calendar_public_content.sql` adds the
-FareHarbor-style public listing fields: headline, booking instructions, hero
-image URL, and gallery image URLs. Apply it before adding images or copy to a
-calendar. Public booking times are displayed in the operator's timezone; the
-customer no longer selects a timezone. The public availability query refreshes
-while the page is open so calendar and inventory changes appear without a
-manual reload.
+Background jobs (HighLevel sync, Stripe transfers and refunds, invoices, hold
+expiry) run from the `outbox_jobs` table, triggered every minute by Supabase
+pg_cron. See the [operations runbook](docs/operations/OPERATIONS_RUNBOOK.md).
 
-For the standalone Staff PWA, deploy the frontend and Passport API behind the
-same HTTPS origin using the root `vercel.json` `/api` rewrite. **Do not set
-`VITE_API_BASE_URL` in production**: an installed iPhone/Android PWA needs the
-same-origin API so its host-only, HTTP-only recovery cookie is sent after an
-app restart. A separately hosted API remains supported for the public web
-booking pages, but is intentionally rejected by the standalone Staff PWA.
+## Documentation
 
-The detailed API contract and GHL integration boundary are documented in
-`docs/FAREHARBOR_REPLICA_IMPLEMENTATION_SPEC.md`.
+| Area | Location |
+|---|---|
+| Architecture and trust boundaries | [docs/architecture.md](docs/architecture.md) |
+| Operations runbook, migrations, incidents | [docs/operations/](docs/operations/) |
+| Current plan and backlog | [docs/planning/](docs/planning/) |
+| HighLevel and FareHarbor integration notes | [docs/integrations/](docs/integrations/) |
+| Feature notes | [docs/features/](docs/features/) |
+| Audits and historical plans | [docs/audits/](docs/audits/), [docs/history/](docs/history/) |
+| Release notes | [CHANGELOG.md](CHANGELOG.md), [docs/releases/](docs/releases/) |
 
-## Standalone Staff PWA installation
-
-The Staff PWA is the same `frontend/` project, deployed at its own public
-Passport frontend origin. Set `VITE_PWA_APP_URL` to that origin, for example
-`https://passport.example.com`, and install the PWA from
-`https://passport.example.com/app`. Do not use **Add to Home Screen** while the
-top-level browser page is `app.gohighlevel.com` or a HighLevel white-label
-host; that creates a HighLevel shortcut and opens native HighLevel pages.
-
-When Passport is embedded inside HighLevel, the install banner now provides an
-**Open Passport PWA** link instead of presenting the embedded page as the
-install target. On iPhone, open that standalone Passport URL in Safari and use
-Share → Add to Home Screen. On Android, open that URL in Chrome and use Install
-app or Add to Home screen.
-
-The standalone PWA keeps a short-lived Passport API token only in memory. A
-separate host-only, HTTP-only recovery cookie keeps the device signed in for
-31 days (`PWA_SESSION_MINUTES=44640`) and rotates on every refresh. Passport
-stores only a one-way nonce digest server-side, so Sign out, disabling the
-operator, removing membership, or rotating authorization revokes the session
-immediately. Clearing Passport site data or using a different browser/device
-requires login again.
-
-Calendar editors can configure one or more independent staff pools for
-assignment and GHL ownership. Existing calendars default to `Captain`; these
-pools no longer make a booking slot unavailable when a staff member or role is
-unavailable. Calendar hours, blocks, duration, and resource inventory remain
-the booking availability rules.
-The fixed custom-role dropdown contains only Captain, First Mate, Guide, Deckhand,
-and Instructor.
-
-For near-real-time synchronization, run `python worker.py` from the `backend/`
-directory on an always-on worker service. It performs a complete GHL directory
-and availability reconciliation every `GHL_STAFF_SYNC_INTERVAL_SECONDS` seconds
-(15 by default), keeps removed GHL users inactive locally, and preserves their
-historical bookings. Vercel cannot keep a persistent 10–15-second process alive;
-its protected daily cron remains a fallback reconciliation mechanism only. Set
-the same production environment variables on the worker as on the API, including
-`DATABASE_URL`, the encrypted GHL credentials, `GHL_STAFF_USER_SYNC_ENABLED`,
-`GHL_STAFF_SYNC_INTERVAL_SECONDS`, and the production secrets.
-
-The same worker expires pending-payment holds on every loop. Expired holds are
-transitioned locally, public access credentials are revoked, booking events are
-recorded, and idempotent GHL appointment-cancellation jobs are queued. The
-protected `/api/v1/internal/cron/daily` endpoint performs the same sweep as a
-fallback, but an always-on worker remains the required primary lifecycle
-process.
-
-Calendar, resource, availability, and booking endpoints commit Passport data and
-enqueue GHL work without waiting for external HTTP requests. This keeps the user
-response fast; the worker must be running for queued GHL calendar, contact, staff,
-and appointment jobs to be applied promptly. GHL notifications are disabled by
-default through `GHL_NOTIFICATIONS_ENABLED=false`; Passport remains the owner of
-customer communication unless that flag is intentionally enabled. The final booking validation remains
-inside the database transaction, so asynchronous synchronization does not allow
-an invalid or duplicate booking.
-
-## Production database connection behavior
-
-The API and worker each create one SQLAlchemy engine per running process with a
-single pooled database connection and no overflow connections. GHL token refreshes
-reuse the request or worker session instead of opening a nested database session.
-This prevents `QueuePool limit ... overflow ... reached` errors on deployments with
-a limited database connection budget. A serverless deployment can still have one
-connection per simultaneously warm Vercel instance; this setting limits each
-process, not the entire distributed platform. Use the Supabase pooler URL in
-`DATABASE_URL` and keep only one persistent staff worker process running.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.

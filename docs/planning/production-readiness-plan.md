@@ -52,14 +52,14 @@ Holds expire through `expire_pending_holds`. It runs in `worker.py` and the dail
 
 ## 5. Phases
 
-Each phase follows the cycle in the brief: goal, implement, tests, full regression, diff review, then update `TODO.md`.
+Each phase follows the cycle in the brief: goal, implement, tests, full regression, diff review, then update `docs/planning/TODO.md`.
 
 ### Phase 1: Reliability and production foundations (complete; see TODO.md)
 - Fix the 2 erroring tests (`requires_db`).
 - Cookie `Secure` flag: set it whenever the site is served over HTTPS, not only when `ENVIRONMENT=production` (fixes L4's cookie exposure regardless of the env var).
 - Readiness: report the environment, warn when a Vercel production deployment is not in production mode, and expand the required-table contract to every table runtime code needs.
 - Migration `041_enable_rls.sql`: enable RLS on every public table (fixes L3). It is reversible.
-- Runbook `docs/OPERATIONS_RUNBOOK.md`: scheduler options for L1, the migration apply and rollback order for L2–L3, and reconciliation steps for L5–L6.
+- Runbook `docs/operations/OPERATIONS_RUNBOOK.md`: scheduler options for L1, the migration apply and rollback order for L2–L3, and reconciliation steps for L5–L6.
 - Verified on a local PostgreSQL 17.5: migration chain 001→042 and the full DB suite.
 
 ### Phase 2: Mobile departure calendar and slot operations (complete; see TODO.md)

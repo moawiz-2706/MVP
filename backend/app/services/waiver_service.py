@@ -19,7 +19,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models.entities import Booking, BookingOrder, BookingWaiver, Operator, OperatorSettings
+from app.models.entities import (
+    Booking,
+    BookingOrder,
+    BookingParticipant,
+    BookingWaiver,
+    Operator,
+    OperatorSettings,
+)
 from app.schemas.waiver import WaiverSignRequest
 from app.utils.timezone import require_timezone
 
@@ -171,6 +178,52 @@ class WaiverService:
             },
         }
 
+    def _record_participants(self, booking: Booking, data: WaiverSignRequest, activity_day: date) -> None:
+        """Put everyone named on the signed waiver onto the booking's manifest.
+
+        People staff already entered are matched by name and left as they are;
+        only missing people are added, so nobody is listed twice.
+        """
+        existing = list(
+            self.db.scalars(
+                select(BookingParticipant)
+                .where(BookingParticipant.booking_id == booking.id)
+                .with_for_update()
+            )
+        )
+        known = {
+            (row.first_name.casefold(), row.last_name.casefold())
+            for row in existing
+            if row.status != "cancelled"
+        }
+        sequence = max((row.sequence for row in existing), default=0)
+        signer_name = f"{data.signer.first_name} {data.signer.last_name}"
+        people = [(data.signer, data.signer.email, data.signer.phone)]
+        people += [(person, person.email, person.phone) for person in data.participants]
+        for person, email, phone in people:
+            key = (person.first_name.casefold(), person.last_name.casefold())
+            if key in known:
+                continue
+            known.add(key)
+            sequence += 1
+            minor = age_on(person.date_of_birth, activity_day) < ADULT_AGE
+            self.db.add(
+                BookingParticipant(
+                    operator_id=booking.operator_id,
+                    booking_id=booking.id,
+                    sequence=sequence,
+                    first_name=person.first_name,
+                    last_name=person.last_name,
+                    email=str(email) if email else None,
+                    phone=phone,
+                    date_of_birth=person.date_of_birth,
+                    is_minor=minor,
+                    # The adult signing the waiver signs on behalf of the minor.
+                    guardian_name=signer_name if minor else None,
+                    source="waiver",
+                )
+            )
+
     def sign(
         self, token: str, data: WaiverSignRequest, *, ip: str | None, user_agent: str | None
     ) -> dict[str, Any]:
@@ -200,6 +253,12 @@ class WaiverService:
             raise ConflictError("A date of birth is in the future")
         if age_on(data.signer.date_of_birth, today) < ADULT_AGE:
             raise ConflictError("The person signing must be 18 or older")
+        for person in data.participants:
+            if age_on(person.date_of_birth, activity_day) >= ADULT_AGE and not (person.email and person.phone):
+                raise ConflictError(
+                    f"Please add an email and phone number for {person.first_name} {person.last_name}; "
+                    "every adult taking part needs contact details"
+                )
 
         waiver.status = "signed"
         waiver.signed_at = datetime.now(UTC)
@@ -223,5 +282,6 @@ class WaiverService:
             "opt_in_label": settings.waiver_opt_in_label,
         }
         waiver.signature_png = data.signature_png
+        self._record_participants(booking, data, activity_day)
         self.db.commit()
         return self._view(waiver, booking, order, operator, settings)

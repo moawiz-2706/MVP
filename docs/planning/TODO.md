@@ -1,12 +1,12 @@
 # Passport TODO
 
-Updated 2026-11-02. Baseline: `fa90589`. See `plan.md` for findings L1–L7 and the phase plan, and `docs/OPERATIONS_RUNBOOK.md` for procedures.
+Updated 2026-11-03. Scope-by-scope status: [SCOPE_STATUS.md](SCOPE_STATUS.md); FareHarbor catalogue: [CATALOG_MAPPING.md](../integrations/fareharbor/CATALOG_MAPPING.md). Baseline: `fa90589`. See `docs/planning/production-readiness-plan.md` for findings L1–L7 and the phase plan, and `docs/operations/OPERATIONS_RUNBOOK.md` for procedures.
 
 ## Blockers needing the owner
 
 - [x] **Disposable PostgreSQL for tests.** PostgreSQL 17.5 portable binaries in `D:\passport\pgdl`, data in `D:\passport\pgdata`, port 55432 (outside the repo).
-- [ ] **L1: outbox runner is down** (GitHub billing lock). Decision: use the free Supabase scheduler. **Owner action:** run `supabase/manual_schedule_outbox_pg_cron.sql` in the Supabase SQL editor with the real `CRON_SECRET`.
-- [x] **L2/L3: `038`, `040`, `041`, `042` applied to production** by the owner on 2026-11-02, via `supabase/manual_2026-11-02_production_apply.sql`. Verified read-only: the schema marker reaches `042`.
+- [ ] **L1: outbox runner is down** (GitHub billing lock). Decision: use the free Supabase scheduler. **Owner action:** run `supabase/manual/schedule_outbox_pg_cron.sql` in the Supabase SQL editor with the real `CRON_SECRET`.
+- [x] **L2/L3: `038`, `040`, `041`, `042` applied to production** by the owner on 2026-11-02, via `supabase/manual/2026-11-02_production_apply.sql`. Verified read-only: the schema marker reaches `042`.
 - [ ] **Apply `supabase/migrations/043_attribution_checkin_intent_cancel.sql` to production before deploying this branch.** The new code reads its columns on every booking query, and readiness requires marker `043`. It is additive, idempotent, and tested on a fresh 001→043 chain.
 - [ ] **L4:** set `ENVIRONMENT=production` on the Vercel backend after the migrations. Authorized; needs the Vercel dashboard (no Vercel CLI access here). Check that every variable in `Settings.validate_runtime` is set first, or the API will refuse to start. To roll back, remove the variable and redeploy.
 - [x] **L5:** the owner confirmed the two failed-webhook payments are test data. **Voided, not deleted** (Part B of the apply script): booking and order cancelled, payment `failed`, webhook rows annotated, HighLevel appointment cancellation queued. All rows are kept for audit.
@@ -19,7 +19,7 @@ Done:
 - [x] `/api/readiness` reports `environment` and warns when a Vercel production deployment is not in production mode. In production mode it also warns about outbox jobs overdue by more than 15 minutes, and logs (but does not publish) a warning for tables without RLS. The required-table contract grew from 12 to 27 tables.
 - [x] `POST /internal/process-outbox` expires abandoned holds before draining, so hold release no longer waits for the daily cron.
 - [x] Migration `041_enable_row_level_security.sql` (reversible; rollback in header). **Not applied.**
-- [x] `docs/OPERATIONS_RUNBOOK.md`.
+- [x] `docs/operations/OPERATIONS_RUNBOOK.md`.
 - [x] Tests: secure-cookie matrix, env warning, RLS migration contract, process-outbox ordering.
 
 Evidence:
@@ -53,7 +53,7 @@ Evidence:
 Remaining / notes:
 - [ ] Branding colours: the PWA uses the existing teal accent. **Need the approved brand colours** to apply them.
 - [ ] "Keep one Passport app/menu entry": the duplicate entry lives in the HighLevel Marketplace or custom-menu configuration, not in this repo. Needs a check in the HighLevel location before removing anything.
-- [ ] New booking from a departure card does not yet pre-select that activity and time (Phase 3 booking flow).
+- [x] New booking from a departure card pre-selects that activity and time (done 2026-11-03).
 - [ ] Live config issues seen in production (read-only): one active rate ("Single Kayak") has **no resource mapping**, so its capacity falls back to the per-booking maximum. "Tandem Kayak" counts 2 seats while "Tandem Kayak Rental" counts 1. Owner should confirm the intended values.
 - [ ] Found in passing: `/me` returns 500 if a stored user email fails strict validation (for example a reserved domain), which would lock that user out. Low likelihood with HighLevel emails; fix by relaxing that response field.
 
@@ -62,8 +62,8 @@ Remaining / notes:
 - [x] The booking's creator is stored separately from the trip staff: `booking_orders.created_by_user_id`, `created_by_staff_id` and `booking_source` (`public`, `staff_link`, `pwa`, `desktop`), set on all four paths. **Staff-link bookings previously recorded no staff member at all.** A signed-in user's staff record is found through their shared HighLevel user. An `X-Passport-Client` header tells the PWA and desktop apart; it is used for reporting only and grants nothing.
 - [x] Multi-staff per departure, and no double-booking of one person: these already existed (DB exclusion constraint `staff_assignments_no_overlap`, row-lock serialisation tests). They are **now tested against the real migrated schema** (`tests/test_migrated_schema.py` with `TEST_MIGRATED_DATABASE_URL`).
 - [x] The PWA booking detail shows "Created by".
-- [ ] New booking from a departure card pre-selecting that activity and time, and the explicit close/return flow.
-- [ ] **Decision needed:** must a departure have required staff before it can be sold?
+- [x] "Book this departure" pre-selects the activity, date and time; same-day booking is allowed in the PWA; closing or finishing returns to the Departures board (2026-11-03).
+- [x] **Decided by the owner (2026-11-02): departures are sold without assigned staff; staff are added afterwards.** This is already the behaviour (the booking staff gate was removed in migration `027`). The departure board's "Needs staff" filter and the "No staff assigned" flag are reminders only and never block a sale.
 
 ## Phase 4: Payment and capacity, built in part
 
@@ -75,7 +75,10 @@ Remaining / notes:
 
 - [x] `GET /pwa/manifest` for one exact departure: lead booker with tap-to-call, parties, named attendees, minors with their guardian, payment state, waiver state, staff, and booked, named and checked-in totals. The PWA screen opens from each departure card.
 - [x] Per-person check-in. It is idempotent: a double tap keeps the first timestamp and writes one audit event. It is undoable, with its own audit event, blocked on cancelled, failed or no-show bookings, and tenant-isolated. Stored as `checked_in_at` and `checked_in_by_user_id`.
-- [ ] Per-attendee secure waiver links, guardian-signs-for-minor, required adult fields, and HighLevel attachment. **Need the client's waiver, retention and data-mapping decisions first.**
+- [x] Required adult contact details: every adult in the party must give email and phone (scope rule). The adult signer signs as parent/guardian for listed minors (2026-11-03).
+- [x] Signed attendees are added to the departure manifest automatically, matched by name so staff-entered guests are not duplicated (2026-11-03).
+- [ ] A separate secure link per attendee to sign individually (needs a small schema change).
+- [ ] HighLevel attachment versus secure link for signed waivers, and retention. **Needs Cole's approval.**
 
 ## Phase 6: Slot-wide weather closure, built
 
@@ -118,7 +121,6 @@ Remaining / notes:
 ## Client decisions needed (from the brief)
 
 - Capacity unit per activity (seats, kayaks or boats), and whether there are multiple resource types per departure.
-- Whether a departure must have assigned staff before it can be sold.
 - Refund rules for paid quantity decreases and weather closures.
 - Waiver: required adult fields, guardian verification, retention period, and HighLevel attachment versus secure-link fallback.
 - Commission: percentage or fixed, calculation base, earning time, treatment of invoices, free bookings and refunds.

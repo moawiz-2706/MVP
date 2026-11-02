@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Build output
+frontend/dist/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local environment and secrets (templates are .env.example)
+.env
+.env.*
+!.env.example
+
+# Editor, OS and tool state
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/
+.mcp.json
+.vercel/
+
+# Local-only preview configuration
+frontend/vite.preview.config.ts

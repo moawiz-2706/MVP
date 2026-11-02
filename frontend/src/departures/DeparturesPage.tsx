@@ -90,6 +90,9 @@ function ResourceMeter({ resource }: { resource: PwaDeparture["resources"][numbe
 function DepartureCard({ departure, timeZone }: { departure: PwaDeparture; timeZone: string }) {
   const bookings = activeBookings(departure);
   const inactive = departure.bookings.length - bookings.length;
+  // Offer booking only for a future, open departure with space left.
+  const bookable = !departure.blocked && departure.source !== "unscheduled" && new Date(departure.start_at) > new Date()
+    && (departure.resources.length === 0 || departure.resources.some((resource) => resource.remaining > 0));
   return (
     <article className={`departure-card ${departure.blocked ? "blocked" : ""}`}>
       <header className="departure-card-header">
@@ -137,11 +140,10 @@ function DepartureCard({ departure, timeZone }: { departure: PwaDeparture; timeZ
         </ul>
       )}
       {inactive > 0 && <p className="departure-note">{inactive} cancelled {inactive === 1 ? "booking" : "bookings"} not shown.</p>}
-      {bookings.length > 0 && (
-        <div className="departure-card-actions">
-          <Link to={`/app/manifest?${new URLSearchParams({ calendar_id: departure.calendar_id, start_at: departure.start_at })}`}><ClipboardList size={15} aria-hidden="true" />Manifest &amp; check-in</Link>
-        </div>
-      )}
+      <div className="departure-card-actions">
+        {bookable && <Link to={`/app/bookings?${new URLSearchParams({ new: "1", calendar_id: departure.calendar_id, start_at: departure.start_at, return: "/app/departures" })}`}><Plus size={15} aria-hidden="true" />Book this departure</Link>}
+        {bookings.length > 0 && <Link to={`/app/manifest?${new URLSearchParams({ calendar_id: departure.calendar_id, start_at: departure.start_at })}`}><ClipboardList size={15} aria-hidden="true" />Manifest &amp; check-in</Link>}
+      </div>
     </article>
   );
 }

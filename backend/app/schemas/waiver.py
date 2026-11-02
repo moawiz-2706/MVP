@@ -45,6 +45,20 @@ class WaiverSigner(WaiverPerson):
     phone: str = Field(min_length=3, max_length=40)
 
 
+class WaiverParticipant(WaiverPerson):
+    """Another person in the party. Adults must give contact details; the
+    signer acts as parent/guardian for any minor they list."""
+
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, min_length=3, max_length=40)
+
+    @field_validator("email", "phone", mode="before")
+    @classmethod
+    def blank_contact_to_none(cls, value: Any) -> Any:
+        value = _strip(value)
+        return value or None
+
+
 class WaiverAddress(BaseModel):
     street: str = Field(min_length=1, max_length=200)
     city: str = Field(min_length=1, max_length=120)
@@ -63,7 +77,7 @@ class WaiverSignRequest(BaseModel):
 
     signer: WaiverSigner
     address: WaiverAddress
-    participants: list[WaiverPerson] = Field(default_factory=list, max_length=99)
+    participants: list[WaiverParticipant] = Field(default_factory=list, max_length=99)
     opt_in: bool = False
     agreed: bool
     signature_png: str = Field(max_length=len(PNG_PREFIX) + MAX_SIGNATURE_BYTES * 4 // 3 + 8)

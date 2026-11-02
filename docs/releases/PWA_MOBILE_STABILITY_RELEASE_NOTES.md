@@ -23,7 +23,7 @@ supabase/migrations/039_pwa_sessions.sql
 Or run the complete deployment bundle:
 
 ```sql
-DATABASE_MIGRATIONS_TO_RUN.sql
+supabase/manual/legacy_combined_migrations_to_run.sql
 ```
 
 The backend readiness endpoint will intentionally report the database as not ready until the `039_pwa_sessions` schema marker and `pwa_sessions` table exist.

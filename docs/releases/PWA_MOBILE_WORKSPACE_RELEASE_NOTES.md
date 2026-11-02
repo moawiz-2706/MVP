@@ -23,7 +23,7 @@ Run the forward-only migration below against the same Supabase/PostgreSQL databa
 
 ```sql
 -- Run this file in order if migrations 035–037 are not already deployed:
-DATABASE_MIGRATIONS_TO_RUN.sql
+supabase/manual/legacy_combined_migrations_to_run.sql
 
 -- If your database already has 035_schema_reconciliation,
 -- 036_ghl_sync_state, and 037_pwa_auth_handoffs, run only:
