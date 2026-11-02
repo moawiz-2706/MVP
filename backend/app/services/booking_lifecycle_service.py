@@ -21,6 +21,7 @@ from app.models.entities import (
 )
 from app.schemas.booking import BookingUpdate
 from app.services.adjustment_service import AdjustmentService
+from app.services.ghl_workflow_trigger_service import enqueue_workflow_event
 from app.services.policy_service import PolicyService
 
 
@@ -212,6 +213,15 @@ class BookingLifecycleService:
             )
             .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
         )
+        # After the refund/reversal adjustment is recorded, in the same commit.
+        enqueue_workflow_event(
+            self.db,
+            self._settings(),
+            order,
+            "booking_cancelled",
+            str(booking.id),
+            focus_booking_id=booking.id,
+        )
         self.db.commit()
         try:
             from app.services.outbox_service import OutboxService
@@ -323,7 +333,7 @@ class BookingLifecycleService:
         from app.services.booking_admin_service import BookingAdminService
 
         result = BookingAdminService(self.db, self.operator_id).update(
-            booking_id, data, allow_paid_reschedule=True
+            booking_id, data, allow_paid_reschedule=True, emit_workflow_event=False
         )
         refreshed, order, payment = self._booking_bundle(booking_id)
         adjustment = None
@@ -370,6 +380,15 @@ class BookingLifecycleService:
                 status="pending",
             )
             .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
+        )
+        # Emitted here, not in update(), so the event follows the refund adjustment.
+        enqueue_workflow_event(
+            self.db,
+            self._settings(),
+            order,
+            "booking_updated",
+            f"{refreshed.id}:{refreshed.updated_at.isoformat()}",
+            focus_booking_id=refreshed.id,
         )
         self.db.commit()
         result["payment_outcome"] = "refund" if delta < 0 else "unchanged"

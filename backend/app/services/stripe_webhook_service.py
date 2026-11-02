@@ -25,6 +25,7 @@ from app.models.entities import (
 from app.services.availability_service import AvailabilityService
 from app.services.capacity import CapacityInterval, batch_fits
 from app.services.ghl_sync_service import GHLSyncService
+from app.services.ghl_workflow_trigger_service import enqueue_workflow_event
 from app.services.stripe_payment_service import StripePaymentService
 
 
@@ -320,6 +321,10 @@ class StripeWebhookService:
             request_row.stripe_payment_intent_id = intent_id
         order.status = "confirmed"
         self._enqueue(order, payment)
+        # Verified payment_intent.succeeded or invoice.paid. One logical event
+        # per order: a redelivered Stripe event returns early above, and the
+        # deterministic key makes any second call a no-op.
+        enqueue_workflow_event(self.db, self.settings, order, "payment_confirmed", "v1")
 
     @staticmethod
     def _int_or_none(value: Any) -> int | None:

@@ -91,9 +91,19 @@ Remaining / notes:
 - [x] The existing per-booking weather cancel in the desktop uses the same service, so it gains the sales block and retry safety. This is a shared safety fix.
 - [ ] **Decision needed:** the refund rule per calendar (`full_refund`, `credit`, `manual_review` or `no_refund`). The current default is the calendar's policy, otherwise a full refund.
 
-## Phase 7: HighLevel Marketplace custom trigger, **blocked**
+## Phase 7: HighLevel Marketplace custom trigger `passport_booking_created`, **built, not yet verified live**
 
-- [ ] Needs verification in the client's HighLevel location that the approved custom trigger is installed and visible in the workflow builder, plus the Marketplace app's trigger contract. Not implemented: guessing the payload or endpoint, or substituting an inbound webhook, is excluded by the brief. Customer messages still use the existing Passport → HighLevel Conversations path.
+Design: [`docs/integrations/highlevel/MARKETPLACE_TRIGGER_RUNTIME.md`](../integrations/highlevel/MARKETPLACE_TRIGGER_RUNTIME.md). Uses the published v1.0 trigger; no second trigger, no inbound webhook.
+
+- [x] Slice 1: subscription callback `POST /api/v1/integrations/marketplace/workflow-trigger/subscription` (CREATED / UPDATED / DELETED), shared-secret header, installed-location check, execution-host check, encrypted `targetUrl`, one row per workflow trigger instance, replay-safe.
+- [x] Slice 2: migration 045, one logical event row per booking event plus a delivery row per workflow subscription, outbox job `ghl_workflow_trigger`.
+- [x] Slice 3: producers inside the booking transaction: `booking_created` (all three entry points via `OrderService.create`), `payment_confirmed` (verified Stripe `payment_intent.succeeded` / `invoice.paid`), `booking_cancelled`, `booking_updated` (staff edit, reschedule, party-size adjustment).
+- [x] Slice 4: payload builder from committed records; status fields snapshot when the event is created, contact / waiver / staff resolved at send.
+- [x] Slice 5: delivery: contact ensured first, retry on transient errors, permanent errors stop, "no subscriber" recorded separately.
+- [x] Slice 6: status API, notification, booking-drawer status and an idempotent retry action.
+- [ ] Confirm the execution request (method, headers, body) on a **test** location. HighLevel's docs do not specify it; see the design doc.
+- [ ] HighLevel side: add the `X-Passport-Trigger-Secret` header to the trigger's Subscription URL (new trigger version) and set `GHL_WORKFLOW_TRIGGER_SECRET` in Vercel.
+- [ ] Run the outbox more often than daily (`supabase/manual/schedule_outbox_pg_cron.sql`); until then delivery can lag up to a day.
 
 ## Phase 8: Attribution and commission, built in part
 

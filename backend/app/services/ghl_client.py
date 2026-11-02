@@ -106,12 +106,41 @@ class GHLClient:
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        return self._send(
+            method,
+            f"{self.settings.ghl_api_base_url.rstrip('/')}/{path.lstrip('/')}",
+            path,
+            version=version,
+            params=params,
+            json=json,
+        )
+
+    def post_workflow_trigger(self, target_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Execute a Marketplace Custom Trigger at the targetUrl HighLevel issued.
+
+        The targetUrl identifies a workflow and is treated as a secret, so logs
+        and errors name the operation instead of the URL.
+        """
+        return self._send(
+            "POST", target_url, "workflow-trigger execute", version="2021-07-28", json=payload
+        )
+
+    def _send(
+        self,
+        method: str,
+        url: str,
+        path: str,
+        *,
+        version: str,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         token = self._load_token()
         for attempt in range(2):
             try:
                 response = httpx.request(
                     method,
-                    f"{self.settings.ghl_api_base_url.rstrip('/')}/{path.lstrip('/')}",
+                    url,
                     params=params,
                     json=json,
                     headers={
@@ -154,5 +183,10 @@ class GHLClient:
                 path,
                 response.status_code,
             )
-            return response.json() if response.content else {}
+            if not response.content:
+                return {}
+            try:
+                return response.json()
+            except ValueError:
+                return {}
         raise GHLAPIError("HighLevel authorization failed", status_code=401, permanent=True)

@@ -1126,6 +1126,112 @@ class GHLSyncRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
 
+class GHLWorkflowTriggerSubscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A workflow that uses the Marketplace Custom Trigger (migration 045).
+
+    HighLevel registers it through the Subscription URL. The execution
+    targetUrl is encrypted at rest and never returned by any API.
+    """
+
+    __tablename__ = "ghl_workflow_trigger_subscriptions"
+    __table_args__ = (
+        CheckConstraint("status IN ('active','deleted')", name="status_valid"),
+        CheckConstraint(
+            "last_callback_event IN ('CREATED','UPDATED','DELETED')", name="event_valid"
+        ),
+        UniqueConstraint(
+            "ghl_location_id", "ghl_workflow_id", "ghl_trigger_id",
+            name="uq_ghl_workflow_trigger_subscription",
+        ),
+        Index("ix_ghl_workflow_trigger_subscriptions_operator_status", "operator_id", "status"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False
+    )
+    ghl_location_id: Mapped[str] = mapped_column(Text, nullable=False)
+    ghl_company_id: Mapped[str | None] = mapped_column(Text)
+    ghl_workflow_id: Mapped[str] = mapped_column(Text, nullable=False)
+    ghl_trigger_id: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_key: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_version: Mapped[str | None] = mapped_column(Text)
+    target_url_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    filters: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    last_callback_event: Mapped[str] = mapped_column(String(20), nullable=False)
+    last_callback_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    last_callback_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GHLWorkflowTriggerEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One logical booking event for the Marketplace Custom Trigger.
+
+    `snapshot` holds the status and booking fields as committed with the
+    change itself, so a delayed send never reports a later state.
+    """
+
+    __tablename__ = "ghl_workflow_trigger_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('booking_created','payment_confirmed','booking_updated','booking_cancelled')",
+            name="type_valid",
+        ),
+        CheckConstraint(
+            "status IN ('pending','delivered','partially_delivered','failed','no_subscriber')",
+            name="status_valid",
+        ),
+        UniqueConstraint("idempotency_key", name="uq_ghl_workflow_trigger_events_idempotency_key"),
+        Index("ix_ghl_workflow_trigger_events_order", "booking_order_id", "created_at"),
+        Index("ix_ghl_workflow_trigger_events_operator_status", "operator_id", "status"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False
+    )
+    booking_order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("booking_orders.id"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    event_id: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GHLWorkflowTriggerDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ghl_workflow_trigger_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','delivered','retrying','failed','filtered')", name="status_valid"
+        ),
+        CheckConstraint("attempt_count >= 0", name="attempts_nonnegative"),
+        UniqueConstraint("event_id", "subscription_id", name="uq_ghl_workflow_trigger_delivery"),
+        Index("ix_ghl_workflow_trigger_deliveries_operator_status", "operator_id", "status"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False
+    )
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ghl_workflow_trigger_events.id", ondelete="CASCADE"), nullable=False
+    )
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ghl_workflow_trigger_subscriptions.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class GHLSyncAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "ghl_sync_attempts"
     __table_args__ = (
@@ -1224,7 +1330,8 @@ class OutboxJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "'ghl_booking_cancellation_email','ghl_booking_weather_email','ghl_booking_reschedule_email',"
             "'ghl_sync_staff_user',"
             "'stripe_create_invoice','stripe_create_refund','stripe_create_adjustment_refund','stripe_create_transfer_reversal','stripe_reconcile_payment_intent','stripe_cancel_payment_intent',"
-            "'ghl_sync_calendar','ghl_delete_calendar','ghl_sync_appointment','ghl_cancel_appointment')",
+            "'ghl_sync_calendar','ghl_delete_calendar','ghl_sync_appointment','ghl_cancel_appointment',"
+            "'ghl_workflow_trigger')",
             name="job_type_valid",
         ),
         CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),

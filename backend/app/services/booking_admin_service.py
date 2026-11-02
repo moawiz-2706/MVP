@@ -40,6 +40,7 @@ from app.models.entities import (
 )
 from app.schemas.booking import BookingUpdate
 from app.services.availability_service import AvailabilityService
+from app.services.ghl_workflow_trigger_service import enqueue_workflow_event
 from app.services.outbox_service import OutboxService
 from app.services.waiver_service import WaiverService
 
@@ -430,7 +431,14 @@ class BookingAdminService:
         data: BookingUpdate,
         *,
         allow_paid_reschedule: bool = False,
+        emit_workflow_event: bool = True,
     ) -> dict:
+        """Change a booking's time or quantity.
+
+        Callers that finish a payment adjustment afterwards pass
+        `emit_workflow_event=False` and record the trigger event themselves,
+        so HighLevel never hears about a change before its refund or charge.
+        """
         booking = self.db.scalar(
             select(Booking)
             .where(Booking.id == booking_id, Booking.operator_id == self.operator_id)
@@ -559,6 +567,17 @@ class BookingAdminService:
                 status="pending",
             )
         )
+        if emit_workflow_event:
+            order = self.db.get(BookingOrder, booking.booking_order_id)
+            if order is not None:
+                enqueue_workflow_event(
+                    self.db,
+                    get_settings(),
+                    order,
+                    "booking_updated",
+                    f"{booking.id}:{booking.updated_at.isoformat()}",
+                    focus_booking_id=booking.id,
+                )
         self.db.commit()
         try:
             OutboxService(self.db, get_settings()).process(limit=100, prefer_newest=True)

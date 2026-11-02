@@ -99,6 +99,14 @@ class OutboxService:
                         order.ghl_contact_sync_status = "failed"
                     elif order and job.job_type == "ghl_send_confirmation_email":
                         order.ghl_confirmation_email_status = "failed"
+                if job.job_type == "ghl_workflow_trigger" and job.status == "dead":
+                    from app.services.ghl_workflow_trigger_service import (
+                        WorkflowTriggerDeliveryService,
+                    )
+
+                    WorkflowTriggerDeliveryService(self.db, job.operator_id, self.settings).mark_dead(
+                        uuid.UUID((job.payload or {})["trigger_event_id"])
+                    )
             self.db.commit()
         return {"claimed": len(ids), "completed": completed, "failed": failed}
 
@@ -175,6 +183,13 @@ class OutboxService:
                 reason=payload.get("reason", "Booking rescheduled"),
                 previous_start=payload.get("previous_start", ""),
                 payment_outcome=payload.get("payment_outcome", ""),
+            )
+            return
+        if job.job_type == "ghl_workflow_trigger":
+            from app.services.ghl_workflow_trigger_service import WorkflowTriggerDeliveryService
+
+            WorkflowTriggerDeliveryService(self.db, job.operator_id, self.settings).deliver(
+                uuid.UUID(payload["trigger_event_id"])
             )
             return
         if job.job_type == "ghl_sync_calendar":

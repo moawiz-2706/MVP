@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     # process alive, so production deployments should run backend/worker.py on
     # an always-on worker host for near-real-time synchronization.
     ghl_staff_sync_interval_seconds: int = Field(default=15, ge=10, le=60)
+    # HighLevel Marketplace Custom Trigger `passport_booking_created`. Off by
+    # default so no booking path touches the migration 045 tables before they
+    # exist. The secret is the value HighLevel sends in the
+    # X-Passport-Trigger-Secret header configured on the trigger's
+    # Subscription URL; without it every subscription callback is refused.
+    ghl_workflow_trigger_enabled: bool = False
+    ghl_workflow_trigger_secret: str = ""
     cron_secret: str = ""
     # Set by Vercel on every deployment ("production", "preview", "development").
     vercel_env: str = ""

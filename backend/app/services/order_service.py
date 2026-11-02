@@ -45,6 +45,7 @@ from app.services.capacity import CapacityInterval, batch_fits
 from app.services.public_access_service import PublicAccessService
 from app.services.staffing_service import lock_calendars
 from app.services.ghl_sync_service import GHLSyncService
+from app.services.ghl_workflow_trigger_service import enqueue_workflow_event
 from app.services.stripe_payment_service import StripePaymentService
 from app.utils.identifiers import public_reference
 from app.utils.money import PaymentBreakdown, apply_basis_points, calculate_payment
@@ -698,6 +699,11 @@ class OrderService:
                     status="pending",
                 )
             )
+        # Public link, private staff link and Passport/PWA bookings all reach
+        # this one place, so the Marketplace trigger event is recorded exactly
+        # once, in the booking's own transaction, with its real pending or
+        # confirmed status.
+        enqueue_workflow_event(self.db, self.settings, order, "booking_created", "v1")
         access_token = PublicAccessService(self.db).issue(
             operator_id=operator.id,
             order_id=order.id,
