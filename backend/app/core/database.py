@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Generator
 from functools import lru_cache
 
@@ -19,8 +20,25 @@ REQUIRED_PRODUCTION_TABLES = (
     "public_access_credentials",
     "pwa_auth_handoffs",
     "pwa_sessions",
+    "passport_schema_version",
+    "stripe_connections",
+    "stripe_webhook_events",
+    "payment_intent_requests",
+    "payment_refund_attempts",
+    "transfer_reversal_attempts",
+    "ghl_installations",
+    "ghl_calendar_mappings",
+    "ghl_appointment_mappings",
+    "staff",
+    "staff_assignments",
+    "customers",
+    "booking_participants",
+    "booking_waivers",
+    "booking_line_items",
 )
-REQUIRED_SCHEMA_VERSION = "040_booking_adjustment_refunds"
+REQUIRED_SCHEMA_VERSION = "043_attribution_checkin_intent_cancel"
+OUTBOX_STALE_MINUTES = 15
+logger = logging.getLogger("passport.readiness")
 
 
 @lru_cache
@@ -88,4 +106,36 @@ def check_database_readiness() -> dict[str, object]:
             if version is None:
                 parts.append(f"missing schema marker: {REQUIRED_SCHEMA_VERSION}")
             raise RuntimeError("Database is not ready: " + "; ".join(parts))
-    return {"status": "ready", "schema_version": REQUIRED_SCHEMA_VERSION}
+        warnings: list[str] = []
+        unprotected = session.scalar(
+            text(
+                "SELECT count(*) FROM pg_tables "
+                "WHERE schemaname = 'public' AND NOT rowsecurity"
+            )
+        )
+        if unprotected:
+            # Logged, not returned: readiness is public and must not advertise
+            # that the Data API is unprotected.
+            logger.warning(
+                "%s public table(s) have row level security disabled; "
+                "apply 041_enable_row_level_security.sql",
+                unprotected,
+            )
+        # A backlog older than this means no outbox runner is draining jobs.
+        stale = session.scalar(
+            text(
+                "SELECT count(*) FROM outbox_jobs "
+                "WHERE status IN ('pending', 'failed') "
+                "AND coalesce(next_attempt_at, created_at) < now() - make_interval(mins => :minutes)"
+            ),
+            {"minutes": OUTBOX_STALE_MINUTES},
+        )
+        if stale:
+            warnings.append(
+                f"{stale} outbox job(s) overdue by more than {OUTBOX_STALE_MINUTES} minutes; "
+                "check the outbox runner"
+            )
+    payload: dict[str, object] = {"status": "ready", "schema_version": REQUIRED_SCHEMA_VERSION}
+    if warnings:
+        payload["warnings"] = warnings
+    return payload

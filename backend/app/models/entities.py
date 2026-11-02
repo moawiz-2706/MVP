@@ -507,6 +507,10 @@ class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "ghl_confirmation_email_status IN ('pending','sent','failed','disabled')",
             name="email_status_valid",
         ),
+        CheckConstraint(
+            "booking_source IS NULL OR booking_source IN ('public','staff_link','pwa','desktop')",
+            name="booking_source_check",
+        ),
     )
 
     operator_id: Mapped[uuid.UUID] = mapped_column(
@@ -540,6 +544,15 @@ class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ghl_conversation_id: Mapped[str | None] = mapped_column(Text)
     ghl_message_id: Mapped[str | None] = mapped_column(Text)
     ghl_email_message_id: Mapped[str | None] = mapped_column(Text)
+    # Who created the booking and through which path (migration 043). This is
+    # not who operates the trip; that is staff_assignments.
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_users.id")
+    )
+    created_by_staff_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("staff.id")
+    )
+    booking_source: Mapped[str | None] = mapped_column(Text)
 
 
 class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -983,6 +996,10 @@ class PWASession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     ghl_location_id: Mapped[str] = mapped_column(Text, nullable=False)
     refresh_nonce_digest: Mapped[str] = mapped_column(String(128), nullable=False)
+    # The nonce replaced by the latest rotation stays valid briefly so two
+    # refreshes racing from one device do not sign it out (migration 042).
+    previous_refresh_nonce_digest: Mapped[str | None] = mapped_column(String(128))
+    refresh_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1189,7 +1206,7 @@ class OutboxJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "'ghl_staff_assigned_email','ghl_staff_reminder','ghl_staff_unassigned_email',"
             "'ghl_booking_cancellation_email','ghl_booking_weather_email','ghl_booking_reschedule_email',"
             "'ghl_sync_staff_user',"
-            "'stripe_create_invoice','stripe_create_refund','stripe_create_adjustment_refund','stripe_create_transfer_reversal','stripe_reconcile_payment_intent',"
+            "'stripe_create_invoice','stripe_create_refund','stripe_create_adjustment_refund','stripe_create_transfer_reversal','stripe_reconcile_payment_intent','stripe_cancel_payment_intent',"
             "'ghl_sync_calendar','ghl_delete_calendar','ghl_sync_appointment','ghl_cancel_appointment')",
             name="job_type_valid",
         ),
@@ -1405,6 +1422,10 @@ class BookingParticipant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     operational_notes: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="checkout")
+    checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    checked_in_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_users.id")
+    )
 
 
 class BookingEvent(UUIDPrimaryKeyMixin, Base):

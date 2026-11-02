@@ -1,5 +1,8 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -27,19 +30,39 @@ from app.api.v1 import (
     stripe_webhooks,
     waivers,
 )
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.exceptions import DomainError, domain_error_handler
 from app.core.database import check_database_readiness
 
-settings = get_settings()
+logger = logging.getLogger("passport.startup")
+
+# Why the API refused to serve, as safe text (setting names, never values).
+# A crash at import or startup takes every route down with no diagnosis, so
+# configuration failures instead lock the business API behind a 503 while
+# /api/health and /api/readiness keep explaining what is wrong.
+startup_error: str | None = None
+try:
+    settings = get_settings()
+except ValidationError as exc:
+    fields = sorted({str(error["loc"][0]).upper() for error in exc.errors() if error.get("loc")})
+    startup_error = "Invalid settings: " + ", ".join(fields)
+    logger.error("Passport settings are invalid: %s", ", ".join(fields))
+    settings = Settings.model_construct()
 app = FastAPI(title=settings.app_name, version="1.0.0")
 
 
 @app.on_event("startup")
 async def validate_runtime_settings() -> None:
-    settings.validate_runtime()
-    if settings.environment.lower() == "production":
-        check_database_readiness()
+    global startup_error
+    if startup_error:
+        return
+    try:
+        settings.validate_runtime()
+        if settings.is_production:
+            check_database_readiness()
+    except Exception as exc:
+        startup_error = str(exc)[:500]
+        logger.error("Passport startup checks failed: %s", startup_error)
 
 
 app.add_middleware(
@@ -55,6 +78,7 @@ app.add_middleware(
         "X-GHL-Signature",
         "X-Checkout-Key",
         "X-Staff-Booking-Key",
+        "X-Passport-Client",
     ],
 )
 app.add_exception_handler(DomainError, domain_error_handler)
@@ -75,7 +99,14 @@ async def integrity_error_handler(_request: Request, _exc: IntegrityError) -> JS
 
 @app.middleware("http")
 async def iframe_security_headers(request: Request, call_next):
-    response = await call_next(request)
+    if startup_error and request.url.path.startswith(settings.api_prefix):
+        # Fail closed: no booking or payment work on a misconfigured deployment.
+        response = JSONResponse(
+            status_code=503,
+            content={"error": {"code": "not_ready", "message": "Passport is not configured correctly. See /api/readiness."}},
+        )
+    else:
+        response = await call_next(request)
     # frame-ancestors https: allows embedding inside HighLevel and any agency
     # white-label domain (unknowable in advance for a Marketplace app). Security
     # comes from the encrypted GHL user-context handshake, not from framing.
@@ -92,12 +123,18 @@ def health() -> dict[str, str]:
 
 @app.get("/api/readiness", tags=["health"])
 def readiness() -> JSONResponse:
+    if startup_error:
+        return JSONResponse(status_code=503, content={"status": "not_ready", "detail": startup_error})
     try:
         settings.validate_runtime()
-        if settings.environment.lower() == "production":
+        if settings.is_production:
             payload = check_database_readiness()
         else:
             payload = {"status": "ready", "schema_version": "development"}
+        payload["environment"] = "production" if settings.is_production else "non-production"
+        warnings = settings.environment_warnings + list(payload.get("warnings", []))
+        if warnings:
+            payload["warnings"] = warnings
         return JSONResponse(status_code=200, content=payload)
     except Exception as exc:
         return JSONResponse(
