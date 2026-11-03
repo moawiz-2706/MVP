@@ -15,6 +15,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.models.entities import (
     Booking,
+    CalendarCategory,
     BookingLineItem,
     BookingWaiver,
     Operator,
@@ -72,6 +73,8 @@ class FakeSession:
         entity = self._entity(statement)
         if entity is Payment:
             return self.payment
+        if entity is CalendarCategory:
+            return "Sunset Cruises"
         if entity is BookingWaiver:
             booking_id = statement.whereclause.right.value
             return self.waivers.get(booking_id)
@@ -108,6 +111,7 @@ def _scenario(
         customer_first_name="Alex", customer_last_name="Smith",
         customer_email="alex@example.com", customer_phone=phone,
         ghl_contact_id="existing-ghl-contact-id",
+        partner_id=None, partner_name_snapshot=None, partner_hotel_bps=None, partner_pga_bps=None,
     )
     calendar_id = uuid.uuid4()
 
@@ -136,7 +140,7 @@ def _scenario(
         for index, item in enumerate(bookings):
             token = "demo-token" if index == 0 else f"demo-token-{index}"
             waivers[item.id] = SimpleNamespace(token=token, status=waiver_status, signed_at=None)
-    payment = SimpleNamespace(status=payment_status, payment_method=method)
+    payment = SimpleNamespace(status=payment_status, payment_method=method, refunded_minor=0)
     db = FakeSession(
         operator=operator,
         settings=SimpleNamespace(waiver_text=waiver_text),
@@ -162,8 +166,19 @@ def _payload(db, operator, order, event_type="booking_created", focus=None):
     return service.build_payload(event, order)
 
 
+PARTNER_TYPES = {
+    "source_partner": str, "gross_booking_amount": str, "hotel_commission_20pct": str,
+    "pga_commission_30pct": str, "net_to_operator": str, "gratuity_amount": str,
+    "number_of_guests": int, "tour_date": str, "tour_type": str,
+}
+
+
 def _assert_published_shape(payload):
-    assert list(payload) == list(PUBLISHED_TYPES), "keys must match the published v1.0 sample"
+    # The published v1.0 keys come first and unchanged; partner fields follow.
+    assert list(payload)[: len(PUBLISHED_TYPES)] == list(PUBLISHED_TYPES)
+    assert list(payload)[len(PUBLISHED_TYPES):] == list(PARTNER_TYPES)
+    for key, kind in PARTNER_TYPES.items():
+        assert isinstance(payload[key], kind), key
     for key, kind in PUBLISHED_TYPES.items():
         assert isinstance(payload[key], kind), key
     for key in ("occurred_at", "start_at", "end_at"):
@@ -444,3 +459,26 @@ def test_event_name_migration_keeps_history_and_renames_undelivered():
     for name in PUBLISHED_EVENT_OPTIONS - {"waiver_signed"} | {"payment_confirmed", "booking_updated"}:
         assert f"'{name}'" in migration
     assert "status <> 'delivered'" in migration
+
+
+def test_direct_booking_keeps_everything_for_the_operator():
+    db, operator, order, _ = _scenario(order_status="confirmed", payment_status="succeeded", booking_status="confirmed")
+    payload = _payload(db, operator, order, "booking_confirmed")
+    assert payload["source_partner"] == "Direct"
+    assert (payload["gross_booking_amount"], payload["hotel_commission_20pct"], payload["pga_commission_30pct"],
+            payload["net_to_operator"], payload["gratuity_amount"]) == ("100.00", "0.00", "0.00", "100.00", "0.00")
+    assert payload["number_of_guests"] == 2
+    assert payload["tour_date"] == "2026-10-25"  # 15:00 UTC is 11:00 in New York
+    assert payload["tour_type"] == "Sunset Cruises"
+
+
+def test_partner_booking_splits_20_30_50_of_the_price_before_tax_and_fees():
+    db, operator, order, _ = _scenario(order_status="confirmed", payment_status="succeeded", booking_status="confirmed")
+    order.partner_id, order.partner_name_snapshot = uuid.uuid4(), "Sunseeker"
+    order.partner_hotel_bps, order.partner_pga_bps = 2000, 3000
+    payload = _payload(db, operator, order, "booking_confirmed")
+    assert payload["source_partner"] == "Sunseeker"
+    # subtotal 100.00; the 13.00 of fees and taxes is not commissionable
+    assert (payload["hotel_commission_20pct"], payload["pga_commission_30pct"], payload["net_to_operator"]) == (
+        "20.00", "30.00", "50.00"
+    )

@@ -6,6 +6,7 @@ import { useSession } from "../auth/GHLSessionProvider";
 import type { AvailabilityResponse, AvailabilitySlot, Calendar, CalendarRate } from "../api/types";
 import { formatTime, tomorrowInZone, zoneLabel } from "../lib/datetime";
 import { PaymentPanel } from "../public-booking/PaymentPanel";
+import { PartnerSelect } from "../components/PartnerSelect";
 
 interface OrderCreateResponse {
   public_reference: string;
@@ -31,6 +32,7 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("invoice");
+  const [partnerId, setPartnerId] = useState("");
   const [created, setCreated] = useState<OrderCreateResponse | null>(null);
 
   useEffect(() => { if (timeZone && !day) setDay(tomorrowInZone(timeZone)); }, [timeZone, day]);
@@ -47,6 +49,7 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
         items: [{ calendar_id: calendar.id, start_at: slot.start_at, units, rate_id: selectedRate?.id || null }],
         customer: { first_name: first.trim(), last_name: last.trim(), email: email.trim(), phone: phone.trim() || null },
         payment_method: paymentMethod,
+        partner_id: partnerId || null,
       }));
     },
     onSuccess: async (result) => { setCreated(result); await client.invalidateQueries({ queryKey: ["bookings"] }); },
@@ -91,6 +94,7 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
       <div className="summary-row"><span>Quantity</span><div className="quantity"><button type="button" onClick={() => setUnits(Math.max(1, units - 1))}><Minus size={14} /></button><strong>{units}</strong><button type="button" disabled={units >= slotLimit} onClick={() => setUnits(Math.min(slotLimit, units + 1))}><Plus size={14} /></button></div></div>
       <div className="summary-row"><span>Available for selected rate</span><strong>{slotLimit}</strong></div>
       <div className="summary-row"><span>Price</span><strong>{new Intl.NumberFormat(undefined, { style: "currency", currency: calendar.currency.toUpperCase() }).format(((selectedRate?.price_minor ?? calendar.base_price_minor) * units) / 100)}</strong></div>
+      <div style={{ marginTop: 15 }}><PartnerSelect value={partnerId} onChange={setPartnerId} /></div>
       <label className="field full" style={{ marginTop: 15 }}><span>Payment method</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}><option value="card">Card — collect payment now</option><option value="invoice">Invoice — send payment request</option><option value="none">Free booking — no payment</option></select><small>{paymentMethod === "card" ? "Reserve the booking, then collect card payment securely with Stripe." : paymentMethod === "invoice" ? "Create the booking and send the client a hosted Stripe invoice." : "Confirm the booking immediately without collecting payment."}</small></label>
       <div className="form-grid" style={{ marginTop: 15 }}><label className="field"><span>First name</span><input required value={first} onChange={(event) => setFirst(event.target.value)} /></label><label className="field"><span>Last name</span><input required value={last} onChange={(event) => setLast(event.target.value)} /></label><label className="field full"><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field full"><span>Phone (optional)</span><input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></div>
       {create.error && <div className="error-banner" style={{ marginTop: 12 }}>{create.error.message}</div>}

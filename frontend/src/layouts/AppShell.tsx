@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bell,
   CalendarDays,
+  Handshake,
   Home,
   LogOut,
   MapPin,
@@ -38,6 +39,7 @@ const links = [
   { to: "/app/locations", label: "Locations", icon: MapPin, adminOnly: true },
   { to: "/app/calendars", label: "Calendars", icon: Shapes, adminOnly: true },
   { to: "/app/staff", label: "Staff", icon: Users, adminOnly: true },
+  { to: "/app/partners", label: "Partners", icon: Handshake, adminOnly: true },
   { to: "/app/customers", label: "Customers", icon: UserRound },
   { to: "/app/reports", label: "Reports", icon: BarChart3 },
 ];

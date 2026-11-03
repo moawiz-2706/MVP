@@ -503,6 +503,31 @@ class StaffAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     role: Mapped[str | None] = mapped_column(Text)
 
 
+class BookingPartner(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A hotel partner that sends bookings and shares the revenue (migration 047)."""
+
+    __tablename__ = "booking_partners"
+    __table_args__ = (
+        CheckConstraint("code ~ '^[a-z0-9]+(?:[-_][a-z0-9]+)*$'", name="code_format"),
+        CheckConstraint(
+            "hotel_commission_bps BETWEEN 0 AND 10000 AND pga_commission_bps BETWEEN 0 AND 10000 "
+            "AND hotel_commission_bps + pga_commission_bps <= 10000",
+            name="bps_range",
+        ),
+        UniqueConstraint("operator_id", "code", name="uq_booking_partners_operator_code"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    hotel_commission_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    pga_commission_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=3000)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "booking_orders"
     __table_args__ = (
@@ -570,6 +595,15 @@ class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("staff.id")
     )
     booking_source: Mapped[str | None] = mapped_column(Text)
+    # Hotel partner that sent the booking (migration 047); NULL is "Direct".
+    # The name and rates are copied at booking time so later partner edits
+    # never change an existing booking's split.
+    partner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("booking_partners.id")
+    )
+    partner_name_snapshot: Mapped[str | None] = mapped_column(Text)
+    partner_hotel_bps: Mapped[int | None] = mapped_column(Integer)
+    partner_pga_bps: Mapped[int | None] = mapped_column(Integer)
 
 
 class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):

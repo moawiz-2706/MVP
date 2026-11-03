@@ -15,6 +15,7 @@ const BookingsPage = lazy(() => import("./bookings/BookingsPage").then((module) 
 const ResourcesPage = lazy(() => import("./resources/ResourcesPage").then((module) => ({ default: module.ResourcesPage })));
 const LocationsPage = lazy(() => import("./locations/LocationsPage").then((module) => ({ default: module.LocationsPage })));
 const CalendarsPage = lazy(() => import("./calendars/CalendarsPage").then((module) => ({ default: module.CalendarsPage })));
+const PartnersPage = lazy(() => import("./partners/PartnersPage").then((module) => ({ default: module.PartnersPage })));
 const StaffPage = lazy(() => import("./staff/StaffPage").then((module) => ({ default: module.StaffPage })));
 const NotificationsPage = lazy(() => import("./notifications/NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
 const SettingsPage = lazy(() => import("./settings/SettingsPage").then((module) => ({ default: module.SettingsPage })));
@@ -57,6 +58,7 @@ const router = createBrowserRouter([
     { path: "locations", element: <AdminOnly><LocationsPage /></AdminOnly> },
     { path: "calendars", element: <AdminOnly><CalendarsPage /></AdminOnly> },
     { path: "staff", element: <AdminOnly><StaffPage /></AdminOnly> },
+    { path: "partners", element: <AdminOnly><PartnersPage /></AdminOnly> },
     { path: "customers", element: <CustomersPage /> },
     { path: "reports", element: <ReportsPage /> },
     { path: "settings", element: <AdminOnly><SettingsPage /></AdminOnly> },

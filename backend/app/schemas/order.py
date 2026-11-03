@@ -49,6 +49,12 @@ class OrderCreateRequest(OrderQuoteRequest):
     # Only the authenticated team-booking endpoint consumes this override. Public
     # checkout omits it and keeps its existing price-driven behavior.
     payment_required: bool | None = None
+    # Hotel partner. `partner_code` comes from a partner booking link
+    # (`?partner=sunseeker`) on any flow; an unknown code books as Direct.
+    # `partner_id` is a staff choice, honoured only on the authenticated
+    # Passport/PWA booking endpoint.
+    partner_code: str | None = Field(default=None, max_length=80)
+    partner_id: uuid.UUID | None = None
 
 
 class QuotedItem(BaseModel):
