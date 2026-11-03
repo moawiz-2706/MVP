@@ -85,6 +85,8 @@ PARTNER_FIELDS: dict[str, Any] = {
     "number_of_guests": 0,
     "tour_date": "",
     "tour_type": "",
+    "tour_start_local": "",
+    "tour_end_local": "",
 }
 
 
@@ -331,6 +333,8 @@ def build_snapshot(
     split = partner_split(order, payment)
     tour_type = ""
     tour_date = ""
+    tour_start_local = ""
+    tour_end_local = ""
     if primary is not None:
         tour_type = db.scalar(
             select(CalendarCategory.name)
@@ -342,6 +346,15 @@ def build_snapshot(
         except ZoneInfoNotFoundError:
             zone = UTC
         tour_date = primary.start_at.astimezone(zone).date().isoformat()
+        # Ready to print in customer messages, in the operator's time zone,
+        # e.g. "Wednesday, December 9, 2026 at 5:15 PM" and "7:15 PM".
+        local_start = primary.start_at.astimezone(zone)
+        local_end = primary.end_at.astimezone(zone)
+        tour_start_local = (
+            f"{local_start:%A, %B} {local_start.day}, {local_start.year} at "
+            f"{local_start.hour % 12 or 12}:{local_start:%M %p}"
+        )
+        tour_end_local = f"{local_end.hour % 12 or 12}:{local_end:%M %p}"
     first = order.customer_first_name or ""
     last = order.customer_last_name or ""
     return {
@@ -380,6 +393,8 @@ def build_snapshot(
         ),
         "tour_date": tour_date,
         "tour_type": tour_type,
+        "tour_start_local": tour_start_local,
+        "tour_end_local": tour_end_local,
     }
 
 
