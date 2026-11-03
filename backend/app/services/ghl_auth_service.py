@@ -54,6 +54,8 @@ def requested_scopes(settings: Settings) -> set[str]:
     lacks one still installs and signs in; that feature reports its own error.
     """
     scopes = required_scopes(settings)
+    # Contact custom fields are found by key, so Passport can read their ids.
+    scopes.add("locations/customFields.readonly")
     if settings.ghl_workflow_trigger_enabled:
         scopes.add("workflows.readonly")
     if settings.ghl_notifications_enabled:
@@ -62,6 +64,7 @@ def requested_scopes(settings: Settings) -> set[str]:
     if settings.ghl_booking_record_sync_enabled:
         scopes.update(
             {
+                "objects/schema.readonly",
                 "objects/record.readonly",
                 "objects/record.write",
                 "associations.readonly",

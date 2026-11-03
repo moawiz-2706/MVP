@@ -1,6 +1,5 @@
 import re
 import uuid
-from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,7 +8,6 @@ from app.models.entities import (
     Booking,
     BookingOrder,
     Customer,
-    GHLCustomFieldMapping,
     Operator,
     Payment,
     Staff,
@@ -54,6 +52,9 @@ class GHLContactService:
         operator = self.db.get(Operator, self.operator_id)
         if order is None or operator is None:
             raise RuntimeError("GHL contact order not found")
+        from app.services.ghl_booking_facts import booking_facts
+
+        facts = booking_facts(self.db, order)
         contact_id = self._upsert(
             operator.ghl_location_id,
             existing_id=order.ghl_contact_id,
@@ -61,7 +62,8 @@ class GHLContactService:
             last_name=order.customer_last_name,
             email=order.customer_email,
             phone=order.customer_phone,
-            custom_fields=self._booking_custom_fields(order),
+            custom_fields=self._booking_custom_fields(order, facts),
+            date_of_birth=facts.lead_date_of_birth,
         )
         self._add_tags(contact_id, [CUSTOMER_TAG])
         order.ghl_contact_id = contact_id
@@ -74,69 +76,25 @@ class GHLContactService:
         self.db.commit()
         return contact_id
 
-    @staticmethod
-    def _custom_field_payload(
-        values: dict[str, object], mappings: Iterable[GHLCustomFieldMapping]
-    ) -> list[dict[str, str]]:
-        payload: list[dict[str, str]] = []
-        for mapping in mappings:
-            if not mapping.ghl_field_id or mapping.passport_key not in values:
-                continue
-            value = values[mapping.passport_key]
-            if hasattr(value, "isoformat"):
-                value = value.isoformat()
-            payload.append(
-                {
-                    "id": mapping.ghl_field_id,
-                    "key": mapping.passport_key,
-                    "fieldValue": "" if value is None else str(value),
-                }
-            )
-        return payload
+    def _booking_custom_fields(self, order: BookingOrder, facts=None) -> list[dict[str, str]]:
+        """Booking details for the contact's "Passport …" custom fields.
 
-    def _booking_custom_fields(self, order: BookingOrder) -> list[dict[str, str]]:
-        bookings = list(
-            self.db.scalars(
-                select(Booking)
-                .where(
-                    Booking.booking_order_id == order.id,
-                    Booking.operator_id == self.operator_id,
-                )
-                .order_by(Booking.start_at, Booking.id)
-            )
+        Fields are found by key in the location (no manual mapping); a field
+        that was not created in HighLevel is simply skipped.
+        """
+        from app.services.ghl_booking_facts import booking_facts, contact_values
+        from app.services.ghl_field_registry import contact_field_ids
+
+        operator = self.db.get(Operator, self.operator_id)
+        values = contact_values(facts or booking_facts(self.db, order))
+        field_ids = contact_field_ids(
+            self.db, self.client, self.operator_id, operator.ghl_location_id, set(values)
         )
-        payment = self.db.scalar(select(Payment).where(Payment.booking_order_id == order.id))
-        waiver_summaries = [WaiverService(self.db).summary(booking) for booking in bookings]
-        waiver_urls = [str(item["url"]) for item in waiver_summaries if item.get("url")]
-        values: dict[str, object] = {
-            "passport_booking_id": str(order.id),
-            "passport_booking_reference": order.public_reference,
-            "passport_booking_status": ", ".join(sorted({booking.status for booking in bookings})),
-            "passport_payment_status": payment.status if payment else "unknown",
-            "passport_service_name": ", ".join(booking.calendar_name_snapshot for booking in bookings),
-            "passport_quantity": ", ".join(str(booking.units) for booking in bookings),
-            "passport_total": order.customer_total_minor,
-            "passport_currency": order.currency.upper(),
-            "passport_start_at": min((booking.start_at for booking in bookings), default=None),
-            "passport_end_at": max((booking.end_at for booking in bookings), default=None),
-            "passport_waiver_url": "\n".join(waiver_urls),
-            "passport_waiver_status": ", ".join(
-                str(item.get("status") or "not_applicable") for item in waiver_summaries
-            ),
-            "passport_waiver_expires_at": ", ".join(
-                str(item.get("expires_at")) for item in waiver_summaries if item.get("expires_at")
-            ),
-            "passport_marketing_opt_in": str(bool(order.marketing_opt_in)).lower(),
-        }
-        mappings = self.db.scalars(
-            select(GHLCustomFieldMapping).where(
-                GHLCustomFieldMapping.operator_id == self.operator_id,
-                GHLCustomFieldMapping.object_type == "contact",
-                GHLCustomFieldMapping.enabled.is_(True),
-                GHLCustomFieldMapping.ghl_field_id.is_not(None),
-            )
-        )
-        return self._custom_field_payload(values, mappings)
+        return [
+            {"id": field_ids[key], "key": key, "fieldValue": value}
+            for key, value in values.items()
+            if key in field_ids
+        ]
 
     def sync_staff(self, staff_id: uuid.UUID) -> str | None:
         """Create or update a staff member's Contact and tag it passport-staff.
@@ -174,6 +132,7 @@ class GHLContactService:
         email: str | None,
         phone: str | None,
         custom_fields: list[dict[str, str]] | None = None,
+        date_of_birth=None,
     ) -> str:
         contact_id = existing_id
         if not contact_id:
@@ -189,6 +148,9 @@ class GHLContactService:
             fields["phone"] = normalized_phone
         if custom_fields:
             fields["customFields"] = custom_fields
+        if date_of_birth is not None:
+            # The contact's standard "Date of birth", from the lead booker's waiver.
+            fields["dateOfBirth"] = date_of_birth.isoformat()
         if contact_id:
             current = self.client.request("GET", f"/contacts/{contact_id}", version="v3")
             current_contact = current.get("contact", current) if isinstance(current, dict) else {}

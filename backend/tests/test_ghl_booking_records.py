@@ -24,6 +24,8 @@ class FakeClient:
         self.relation_error = relation_error
 
     def request(self, method, path, *, version="", params=None, json=None):
+        if path == f"/objects/{KEY}":
+            return {"fields": [{"fieldKey": f"{KEY}.{name}"} for name in PROPS]}
         self.calls.append((method, path, params, json))
         if method == "PUT" and self.put_error:
             raise self.put_error
@@ -42,7 +44,7 @@ def _service(monkeypatch, client, mapping):
     db = MagicMock()
     db.scalar.side_effect = [order, mapping]
     db.get.return_value = SimpleNamespace(ghl_location_id="loc-1")
-    monkeypatch.setattr(service_module, "record_properties", lambda db, order: dict(PROPS))
+    monkeypatch.setattr(service_module, "record_properties", lambda db, order, keys=None: {k: v for k, v in PROPS.items() if keys is None or k in keys})
     service = GHLBookingRecordService.__new__(GHLBookingRecordService)
     service.db, service.operator_id, service.client = db, order.operator_id, client
     service.settings = Settings(ghl_booking_object_key=KEY)
@@ -128,3 +130,23 @@ def test_migration_allows_the_job_and_creates_the_table():
     migration = (Path(__file__).resolve().parents[2] / "supabase" / "migrations" / "048_ghl_booking_records.sql").read_text()
     assert "'ghl_sync_booking_record'" in migration
     assert "CREATE TABLE IF NOT EXISTS public.ghl_booking_records" in migration
+
+
+def test_field_guide_lists_exactly_the_keys_passport_sends():
+    import re
+    from pathlib import Path
+
+    from app.services.ghl_booking_facts import BASE_OBJECT_FIELDS, contact_values, object_properties
+
+    guide = (Path(__file__).resolve().parents[2] / "docs" / "integrations" / "highlevel" / "CRM_FIELDS.md").read_text(encoding="utf-8")
+    object_part, contact_part = guide.split("## Passport Bookings object")[1], guide.split("## Contact: custom fields")[1].split("## Passport Bookings object")[0]
+    documented_object = set(re.findall(r"\| `([a-z_]+)` \|", object_part))
+    documented_contact = set(re.findall(r"\| `([a-z_]+)` \|", contact_part))
+    facts = SimpleNamespace(**{name: "" for name in (
+        "booking_reference booking_id booking_status payment_status payment_method invoice_status customer_name "
+        "customer_email customer_phone activity tour_start tour_start_utc tour_end_utc total_amount currency "
+        "source_partner assigned_staff waiver_status waiver_link waiver_signed_at waiver_expires_at emergency_contact"
+    ).split()}, guests=0, marketing_opt_in=False)
+    assert documented_object == set(object_properties(facts))
+    assert documented_contact == set(contact_values(facts))
+    assert BASE_OBJECT_FIELDS <= documented_object
