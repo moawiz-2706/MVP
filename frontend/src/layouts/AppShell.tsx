@@ -22,6 +22,7 @@ import { Suspense, useEffect, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { usePwaBootstrap } from "../api/bootstrap";
 import { useSession } from "../auth/GHLSessionProvider";
+import { useIsAdmin } from "../components/AdminOnly";
 import { GlobalSearch } from "../components/GlobalSearch";
 import { OperationNotice } from "../components/OperationNotice";
 import { PwaInstallPrompt } from "../components/PwaInstallPrompt";
@@ -32,10 +33,11 @@ const links = [
   { to: "/app/bookings", label: "Bookings", icon: CalendarDays },
   { to: "/app/departures", label: "Departures", icon: Ship, standaloneOnly: true },
   { to: "/app/notifications", label: "Notifications", icon: Bell },
-  { to: "/app/resources", label: "Resources", icon: Warehouse, feature: "calendar_management" },
-  { to: "/app/locations", label: "Locations", icon: MapPin, feature: "calendar_management" },
-  { to: "/app/calendars", label: "Calendars", icon: Shapes, feature: "calendar_management" },
-  { to: "/app/staff", label: "Staff", icon: Users },
+  // adminOnly pages stay hidden until the session is confirmed as an admin's.
+  { to: "/app/resources", label: "Resources", icon: Warehouse, adminOnly: true },
+  { to: "/app/locations", label: "Locations", icon: MapPin, adminOnly: true },
+  { to: "/app/calendars", label: "Calendars", icon: Shapes, adminOnly: true },
+  { to: "/app/staff", label: "Staff", icon: Users, adminOnly: true },
   { to: "/app/customers", label: "Customers", icon: UserRound },
   { to: "/app/reports", label: "Reports", icon: BarChart3 },
 ];
@@ -71,7 +73,7 @@ export function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const bootstrap = usePwaBootstrap();
-  const features = bootstrap.data?.features;
+  const admin = useIsAdmin();
   // The departure board and bottom bar belong to the standalone Staff PWA;
   // the embedded HighLevel desktop keeps its existing navigation.
   const standalone = !isEmbeddedInHighLevel();
@@ -114,7 +116,7 @@ export function AppShell() {
           <button className="icon-button sidebar-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={18} /></button>
         </div>
         <nav>
-          {links.filter((item) => (!item.feature || features?.[item.feature] !== false) && (!item.standaloneOnly || standalone)).map(({ to, label, icon: Icon, end }) => (
+          {links.filter((item) => (!item.adminOnly || admin) && (!item.standaloneOnly || standalone)).map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} onClick={() => setMobileOpen(false)} className={({ isActive }) => isActive ? "active" : ""}>
               <Icon size={18} />{label}
               {label === "Staff" && staffMissingRoles > 0 && <span className="nav-count" aria-label={`${staffMissingRoles} staff need a custom role`}>{staffMissingRoles > 99 ? "99+" : staffMissingRoles}</span>}
@@ -123,7 +125,7 @@ export function AppShell() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <NavLink to="/app/settings" onClick={() => setMobileOpen(false)} className={({ isActive }) => isActive ? "active" : ""}><Settings size={18} />Settings</NavLink>
+          {admin && <NavLink to="/app/settings" onClick={() => setMobileOpen(false)} className={({ isActive }) => isActive ? "active" : ""}><Settings size={18} />Settings</NavLink>}
           <div className="user-chip"><div className="avatar">{(me.user.name || me.user.email || "U").charAt(0).toUpperCase()}</div><div><strong>{me.user.name || "Passport user"}</strong><span>{me.user.role}</span></div></div>
           {window.parent === window && <button className="sidebar-sign-out" type="button" onClick={() => { setMobileOpen(false); void signOut(); }}><LogOut size={17} />Sign out</button>}
         </div>

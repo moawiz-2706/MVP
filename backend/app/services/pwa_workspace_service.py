@@ -153,7 +153,12 @@ class PWAWorkspaceService:
             permissions=permissions,
             features={
                 "booking_management": True,
+                # Configuration pages (calendars, resources, locations, staff
+                # and their roles, settings) are admin-only; the API enforces
+                # the same rule, these flags only hide the pages.
                 "calendar_management": admin,
+                "staff_management": admin,
+                "settings": admin,
                 "staff_assignment": True,
                 "waivers": True,
                 "payments": admin,
@@ -161,8 +166,9 @@ class PWAWorkspaceService:
                 "ghl_resync": True,
             },
             badge_counts=PWABadgeCounts(
-                notifications=int(sync_failures) + int(missing_roles),
-                staff_missing_roles=int(missing_roles),
+                # Only admins can assign a missing role, so only they are told.
+                notifications=int(sync_failures) + (int(missing_roles) if admin else 0),
+                staff_missing_roles=int(missing_roles) if admin else 0,
             ),
         )
 

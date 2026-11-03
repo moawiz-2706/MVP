@@ -20,6 +20,14 @@ from app.models.entities import (
 from app.services.ghl_client import GHLAPIError, GHLClient
 
 
+def _remote_calendar_gone(exc: GHLAPIError) -> bool:
+    """HighLevel answers 404, or 400 "The calendar is deleted", for a calendar
+    removed on its side; either way Passport must not keep updating it."""
+    return exc.status_code == 404 or (
+        exc.status_code == 400 and "calendar is deleted" in str(exc).lower()
+    )
+
+
 class GHLCalendarService:
     def __init__(self, db: Session, operator_id: uuid.UUID) -> None:
         self.db = db
@@ -216,11 +224,18 @@ class GHLCalendarService:
                         json=common_body,
                     )
                 except GHLAPIError as exc:
-                    if exc.status_code != 404:
+                    if not _remote_calendar_gone(exc):
                         raise
                     remote_id = None
                     mapping.ghl_calendar_id = None
                     self.db.flush()
+                    if archived:
+                        # Already gone in HighLevel: nothing left to deactivate.
+                        mapping.status = "deleted"
+                        mapping.applied_revision = mapping.desired_revision
+                        mapping.last_error = None
+                        self.db.commit()
+                        return None
             if remote_id is None:
                 recovered_id = self._find_remote_calendar(operator, calendar)
                 if recovered_id:
@@ -266,7 +281,7 @@ class GHLCalendarService:
         try:
             self.client.request("DELETE", f"/calendars/{remote_id}", version="v3")
         except GHLAPIError as exc:
-            if exc.status_code != 404:
+            if not _remote_calendar_gone(exc):
                 raise
         if mapping is not None:
             mapping.ghl_calendar_id = None

@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AdminOnly } from "./components/AdminOnly";
 import { createBrowserRouter, isRouteErrorResponse, Navigate, RouterProvider, useRouteError } from "react-router-dom";
 import { GHLSessionProvider } from "./auth/GHLSessionProvider";
 import { AppShell } from "./layouts/AppShell";
@@ -52,13 +53,13 @@ const router = createBrowserRouter([
     { path: "departures", element: <DeparturesPage /> },
     { path: "manifest", element: <ManifestPage /> },
     { path: "notifications", element: <NotificationsPage /> },
-    { path: "resources", element: <ResourcesPage /> },
-    { path: "locations", element: <LocationsPage /> },
-    { path: "calendars", element: <CalendarsPage /> },
-    { path: "staff", element: <StaffPage /> },
+    { path: "resources", element: <AdminOnly><ResourcesPage /></AdminOnly> },
+    { path: "locations", element: <AdminOnly><LocationsPage /></AdminOnly> },
+    { path: "calendars", element: <AdminOnly><CalendarsPage /></AdminOnly> },
+    { path: "staff", element: <AdminOnly><StaffPage /></AdminOnly> },
     { path: "customers", element: <CustomersPage /> },
     { path: "reports", element: <ReportsPage /> },
-    { path: "settings", element: <SettingsPage /> },
+    { path: "settings", element: <AdminOnly><SettingsPage /></AdminOnly> },
   ] },
   { path: "/book/:operatorSlug", element: <OperatorBookingPage /> },
   { path: "/book/:operatorSlug/category/:categorySlug", element: <CategoryBookingPage /> },

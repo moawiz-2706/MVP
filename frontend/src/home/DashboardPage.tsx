@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Booking, PwaDashboardResponse } from "../api/types";
 import { useSession } from "../auth/GHLSessionProvider";
+import { useIsAdmin } from "../components/AdminOnly";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 
@@ -70,6 +71,7 @@ function BookingList({ bookings, timeZone, emptyCopy }: { bookings: Booking[]; t
 
 export function DashboardPage() {
   const { me } = useSession();
+  const admin = useIsAdmin();
   const operatorTimeZone = me.operator.time_zone || "UTC";
   const [selectedDate, setSelectedDate] = useState(() => todayInZone(operatorTimeZone));
   const dashboard = useQuery({
@@ -103,7 +105,7 @@ export function DashboardPage() {
         <div className="dashboard-actions" aria-label="Quick actions">
           <Link className="button" to="/app/bookings?new=1"><Plus size={17} aria-hidden="true" />New booking</Link>
           <Link className="button secondary" to="/app/bookings"><CalendarDays size={17} aria-hidden="true" />Bookings</Link>
-          <Link className="button secondary" to="/app/calendars"><Clock3 size={17} aria-hidden="true" />Calendars</Link>
+          {admin && <Link className="button secondary" to="/app/calendars"><Clock3 size={17} aria-hidden="true" />Calendars</Link>}
           <Link className="button secondary" to="/app/customers"><UserRound size={17} aria-hidden="true" />Customers</Link>
         </div>
       </section>

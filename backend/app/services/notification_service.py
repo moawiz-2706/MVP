@@ -28,7 +28,12 @@ class NotificationService:
         self.db = db
         self.operator_id = operator_id
 
-    def list(self) -> NotificationsResponse:
+    def list(self, *, include_configuration: bool = True) -> NotificationsResponse:
+        """Actionable items for this tenant.
+
+        Calendar setup items (availability, resources) need configuration
+        rights to act on, so they are left out for non-admins.
+        """
         now = datetime.now(UTC)
         items: list[NotificationItem] = []
         calendars = list(
@@ -43,7 +48,7 @@ class NotificationService:
             )
         )
         calendar_ids = [calendar.id for calendar in calendars]
-        if calendar_ids:
+        if calendar_ids and include_configuration:
             items.extend(self._calendar_items(calendars))
         items.extend(self._ghl_sync_items())
         if get_settings().ghl_workflow_trigger_enabled:
