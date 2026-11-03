@@ -283,9 +283,14 @@ class WaiverService:
         }
         waiver.signature_png = data.signature_png
         self._record_participants(booking, data, activity_day)
-        from app.services.ghl_booking_record_service import enqueue_booking_record_sync
+        from app.services.ghl_booking_record_service import (
+            enqueue_booking_record_sync,
+            enqueue_contact_refresh,
+        )
 
-        # The HighLevel booking record shows the waiver status.
+        # The HighLevel booking record shows the waiver status and link; the
+        # contact gets the signer's date of birth and emergency contact.
         enqueue_booking_record_sync(self.db, get_settings(), order)
+        enqueue_contact_refresh(self.db, get_settings(), order, f"waiver:{waiver.id}")
         self.db.commit()
         return self._view(waiver, booking, order, operator, settings)

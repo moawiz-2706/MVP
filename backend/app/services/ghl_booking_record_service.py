@@ -24,12 +24,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models.entities import (
-    Booking,
     BookingOrder,
     GHLBookingRecord,
     Operator,
     OutboxJob,
-    Payment,
 )
 
 logger = logging.getLogger("passport.ghl_booking_records")
@@ -62,26 +60,40 @@ def enqueue_booking_record_sync(db: Session, settings: Settings, order: BookingO
         logger.exception("Could not queue HighLevel booking record sync for order %s", order.id)
 
 
-def record_properties(db: Session, order: BookingOrder) -> dict[str, str]:
-    """The object's fields, by their short keys, from the committed order."""
-    from app.services.waiver_service import WaiverService
+def enqueue_contact_refresh(db: Session, settings: Settings, order: BookingOrder, reason: str) -> None:
+    """Re-sync the customer's HighLevel contact (e.g. a waiver brought a birthday)."""
+    if settings.ghl_sync_mode != "outbox":
+        return
+    try:
+        with db.begin_nested():
+            db.execute(
+                insert(OutboxJob)
+                .values(
+                    operator_id=order.operator_id,
+                    booking_order_id=order.id,
+                    job_type="ghl_upsert_contact",
+                    idempotency_key=f"order:{order.id}:ghl_contact:{reason}",
+                    status="pending",
+                )
+                .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
+            )
+    except SQLAlchemyError:
+        logger.exception("Could not queue a HighLevel contact refresh for order %s", order.id)
 
-    payment = db.scalar(select(Payment).where(Payment.booking_order_id == order.id))
-    bookings = list(
-        db.scalars(
-            select(Booking)
-            .where(Booking.booking_order_id == order.id, Booking.operator_id == order.operator_id)
-            .order_by(Booking.start_at, Booking.id)
-        )
-    )
-    waivers = WaiverService(db)
-    statuses = list(dict.fromkeys(str(waivers.summary(booking).get("status") or "") for booking in bookings))
+
+def record_properties(db: Session, order: BookingOrder, field_keys: set[str] | None = None) -> dict[str, str]:
+    """The record's values for the fields that exist on the object.
+
+    `field_keys` is the object's field list; when it cannot be read, only the
+    five fields the object was created with are sent.
+    """
+    from app.services.ghl_booking_facts import BASE_OBJECT_FIELDS, booking_facts, object_properties
+
+    allowed = field_keys if field_keys else BASE_OBJECT_FIELDS
     return {
-        "booking_reference": order.public_reference,
-        "passport_booking_id": str(order.id),
-        "payment_status": payment.status if payment else "",
-        "invoice_status": (payment.invoice_status or "") if payment else "",
-        "waiver_status": ", ".join(status for status in statuses if status),
+        key: value
+        for key, value in object_properties(booking_facts(db, order)).items()
+        if key in allowed
     }
 
 
@@ -118,9 +130,11 @@ class GHLBookingRecordService:
         mapping = self.db.scalar(
             select(GHLBookingRecord).where(GHLBookingRecord.booking_order_id == order.id).with_for_update()
         )
-        properties = record_properties(self.db, order)
+        from app.services.ghl_field_registry import object_field_keys
+
         key = self.settings.ghl_booking_object_key
         location_id = operator.ghl_location_id
+        properties = record_properties(self.db, order, object_field_keys(self.client, key, location_id))
         try:
             record_id = mapping.ghl_record_id
             if record_id:
