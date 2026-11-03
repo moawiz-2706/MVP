@@ -1267,6 +1267,30 @@ class GHLWorkflowTriggerDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class GHLBookingRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """The HighLevel "Passport Booking" custom object record of an order (migration 048)."""
+
+    __tablename__ = "ghl_booking_records"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','synced','failed')", name="status_valid"),
+        UniqueConstraint("booking_order_id", name="uq_ghl_booking_records_order"),
+        Index("ix_ghl_booking_records_operator_status", "operator_id", "status"),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False
+    )
+    booking_order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("booking_orders.id"), nullable=False
+    )
+    ghl_record_id: Mapped[str | None] = mapped_column(Text)
+    ghl_contact_id: Mapped[str | None] = mapped_column(Text)
+    contact_linked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class GHLSyncAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "ghl_sync_attempts"
     __table_args__ = (
@@ -1366,7 +1390,7 @@ class OutboxJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "'ghl_sync_staff_user',"
             "'stripe_create_invoice','stripe_create_refund','stripe_create_adjustment_refund','stripe_create_transfer_reversal','stripe_reconcile_payment_intent','stripe_cancel_payment_intent',"
             "'ghl_sync_calendar','ghl_delete_calendar','ghl_sync_appointment','ghl_cancel_appointment',"
-            "'ghl_workflow_trigger')",
+            "'ghl_workflow_trigger','ghl_sync_booking_record')",
             name="job_type_valid",
         ),
         CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
