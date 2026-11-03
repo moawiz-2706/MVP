@@ -29,6 +29,8 @@ class PublicCalendar(BaseModel):
     gallery_image_urls: list[str] = Field(default_factory=list)
     duration_minutes: int
     base_price_minor: int
+    # Lowest active rate, the "from" price; None for a calendar without rates.
+    from_price_minor: int | None = None
     currency: str
     category_id: uuid.UUID | None
     category_name: str | None

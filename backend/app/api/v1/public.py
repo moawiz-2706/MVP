@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -41,6 +41,7 @@ def _public_calendar(
     category: CalendarCategory | None,
     location: DepartureLocation | None,
     policy: CalendarBookingPolicy | None = None,
+    from_price_minor: int | None = None,
 ) -> PublicCalendar:
     return PublicCalendar(
         id=calendar.id,
@@ -53,6 +54,7 @@ def _public_calendar(
         gallery_image_urls=calendar.gallery_image_urls or [],
         duration_minutes=calendar.duration_minutes,
         base_price_minor=calendar.base_price_minor,
+        from_price_minor=from_price_minor,
         currency=calendar.currency,
         category_id=category.id if category else None,
         category_name=category.name if category else None,
@@ -75,6 +77,24 @@ def _public_calendar(
             if policy
             else None
         ),
+    )
+
+
+def _from_prices(db: Session, operator_id) -> dict:
+    """Lowest bookable rate per calendar: the same rates the activity page lists."""
+    return dict(
+        db.execute(
+            select(CalendarRate.calendar_id, func.min(CalendarRate.price_minor))
+            .join(CustomerType, CustomerType.id == CalendarRate.customer_type_id)
+            .where(
+                CalendarRate.operator_id == operator_id,
+                CalendarRate.deleted_at.is_(None),
+                CalendarRate.is_active.is_(True),
+                CustomerType.deleted_at.is_(None),
+                CustomerType.is_active.is_(True),
+            )
+            .group_by(CalendarRate.calendar_id)
+        ).all()
     )
 
 
@@ -122,11 +142,15 @@ def public_catalog(
         .order_by(CalendarBookingPolicy.version.desc())
     ):
         policies.setdefault(policy.calendar_id, policy)
+    from_prices = _from_prices(db, operator.id)
     return PublicOperatorCatalog(
         name=operator.name,
         slug=operator.slug,
         time_zone=_operator_time_zone(operator),
-        calendars=[_public_calendar(*row, policies.get(row[0].id)) for row in rows],
+        calendars=[
+            _public_calendar(*row, policies.get(row[0].id), from_prices.get(row[0].id))
+            for row in rows
+        ],
     )
 
 
@@ -178,13 +202,19 @@ def public_category(
         .order_by(CalendarBookingPolicy.version.desc())
     ):
         policy.setdefault(item.calendar_id, item)
+    from_prices = _from_prices(db, operator.id)
     return PublicCategoryPage(
         operator_name=operator.name,
         operator_slug=operator.slug,
         time_zone=_operator_time_zone(operator),
         category_name=category.name,
         category_slug=category.slug,
-        calendars=[_public_calendar(calendar, category, location, policy.get(calendar.id)) for calendar, location in rows],
+        calendars=[
+            _public_calendar(
+                calendar, category, location, policy.get(calendar.id), from_prices.get(calendar.id)
+            )
+            for calendar, location in rows
+        ],
     )
 
 
