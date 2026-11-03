@@ -185,6 +185,13 @@ class OutboxService:
                 payment_outcome=payload.get("payment_outcome", ""),
             )
             return
+        if job.job_type == "ghl_sync_booking_record":
+            from app.services.ghl_booking_record_service import GHLBookingRecordService
+
+            if job.booking_order_id is None:
+                raise RuntimeError("Booking record job has no booking order")
+            GHLBookingRecordService(self.db, job.operator_id, self.settings).sync(job.booking_order_id)
+            return
         if job.job_type == "ghl_workflow_trigger":
             from app.services.ghl_workflow_trigger_service import WorkflowTriggerDeliveryService
 

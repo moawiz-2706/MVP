@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # Subscription URL; without it every subscription callback is refused.
     ghl_workflow_trigger_enabled: bool = False
     ghl_workflow_trigger_secret: str = ""
+    # HighLevel "Passport Bookings" custom object. Off until migration 048 is
+    # applied and the app has the objects/record and associations scopes.
+    ghl_booking_record_sync_enabled: bool = False
+    ghl_booking_object_key: str = "custom_objects.passport_bookings"
     cron_secret: str = ""
     # Set by Vercel on every deployment ("production", "preview", "development").
     vercel_env: str = ""

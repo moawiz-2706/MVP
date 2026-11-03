@@ -401,7 +401,13 @@ def enqueue_workflow_event(
     The writes run in a savepoint: if they fail (for example a migration not
     yet applied), only the trigger event is lost and logged. The booking or
     payment the caller is saving always goes ahead.
+
+    Every booking change passes through here, so it also refreshes the
+    order's HighLevel "Passport Booking" record (its own flag).
     """
+    from app.services.ghl_booking_record_service import enqueue_booking_record_sync
+
+    enqueue_booking_record_sync(db, settings, order)
     if not settings.ghl_workflow_trigger_enabled or settings.ghl_sync_mode == "disabled":
         return
     if event_type not in EVENT_TYPES:
