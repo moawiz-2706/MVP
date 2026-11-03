@@ -44,6 +44,33 @@ def required_scopes(settings: Settings) -> set[str]:
     return scopes
 
 
+def requested_scopes(settings: Settings) -> set[str]:
+    """Scopes to ask for on every HighLevel authorization (install and PWA sign-in).
+
+    The PWA sign-in replaces the location token, so it must ask for every
+    scope an enabled feature uses; asking for less silently disables the
+    trigger, Passport-sent emails and booking records until the next install.
+    Feature scopes are requested but not required, so a Marketplace app that
+    lacks one still installs and signs in; that feature reports its own error.
+    """
+    scopes = required_scopes(settings)
+    if settings.ghl_workflow_trigger_enabled:
+        scopes.add("workflows.readonly")
+    if settings.ghl_notifications_enabled:
+        # Reminders and staff emails go through the Conversations API.
+        scopes.add("conversations/message.write")
+    if settings.ghl_booking_record_sync_enabled:
+        scopes.update(
+            {
+                "objects/record.readonly",
+                "objects/record.write",
+                "associations.readonly",
+                "associations/relation.write",
+            }
+        )
+    return scopes
+
+
 def _slugify(value: str) -> str:
     result = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return result[:140] or "rental-operator"

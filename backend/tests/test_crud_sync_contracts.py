@@ -20,8 +20,9 @@ def test_highlevel_calendar_and_appointment_scopes_are_required() -> None:
     }.issubset(REQUIRED_SCOPES)
 
 
-def test_highlevel_conversation_message_scope_is_not_requested() -> None:
-    # Customer email/SMS delivery is owned by GHL workflows, not Passport.
+def test_highlevel_conversation_message_scope_is_not_required() -> None:
+    # Customer confirmations come from GHL workflows; Passport only needs this
+    # scope for reminders and staff emails, so it is requested, never required.
     assert "conversations/message.write" not in REQUIRED_SCOPES
 
 
@@ -189,3 +190,39 @@ def test_booking_update_rejects_terminal_booking() -> None:
     )
     with pytest.raises(ConflictError, match="Only pending or confirmed bookings"):
         service.update("booking", SimpleNamespace(start_at=None, units=None))
+
+
+def test_every_authorization_requests_the_scopes_enabled_features_need() -> None:
+    """A PWA sign-in replaces the location token; asking for less broke the
+    trigger, Passport emails and booking records (3 Nov 2026)."""
+    from app.core.config import Settings
+    from app.services.ghl_auth_service import requested_scopes, required_scopes
+
+    everything = Settings(
+        ghl_workflow_trigger_enabled=True,
+        ghl_notifications_enabled=True,
+        ghl_booking_record_sync_enabled=True,
+    )
+    scopes = requested_scopes(everything)
+    assert {
+        "workflows.readonly",
+        "conversations/message.write",
+        "objects/record.readonly",
+        "objects/record.write",
+        "associations.readonly",
+        "associations/relation.write",
+    } <= scopes
+    assert required_scopes(everything) <= scopes
+    # Feature scopes are never required, so a missing one cannot block sign-in.
+    assert "workflows.readonly" not in required_scopes(everything)
+    minimal = requested_scopes(Settings(ghl_notifications_enabled=False))
+    assert "conversations/message.write" not in minimal and "workflows.readonly" not in minimal
+
+
+def test_install_and_pwa_links_use_the_requested_scopes() -> None:
+    from pathlib import Path
+
+    api = Path(__file__).resolve().parents[1] / "app" / "api" / "v1"
+    for name in ("ghl_oauth.py", "pwa_auth.py"):
+        source = (api / name).read_text(encoding="utf-8")
+        assert '"scope": " ".join(sorted(requested_scopes(settings)))' in source, name

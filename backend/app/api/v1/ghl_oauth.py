@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
-from app.services.ghl_auth_service import REQUIRED_SCOPES, GHLAuthService
+from app.services.ghl_auth_service import GHLAuthService, requested_scopes
 from app.services.pwa_auth_service import PWAAuthService
 
 logger = logging.getLogger("passport.ghl_oauth")
@@ -87,7 +87,7 @@ def oauth_start(
         "client_id": settings.ghl_client_id,
         "redirect_uri": settings.ghl_oauth_redirect_uri,
         "response_type": "code",
-        "scope": " ".join(sorted(REQUIRED_SCOPES)),
+        "scope": " ".join(sorted(requested_scopes(settings))),
         "state": state,
     }
     response = RedirectResponse(f"{settings.ghl_oauth_authorize_url}?{urlencode(params)}")
