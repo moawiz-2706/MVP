@@ -130,6 +130,7 @@ def create_booking(
         operator_slug,
         data,
         allow_payment_override=True,
+        allow_partner_selection=True,
         attribution=staff_attribution(db, principal, client),
     )
 

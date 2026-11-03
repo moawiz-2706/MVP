@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections import defaultdict
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
@@ -41,6 +42,7 @@ from app.models.entities import (
 from app.schemas.booking import BookingUpdate
 from app.services.availability_service import AvailabilityService
 from app.services.ghl_workflow_trigger_service import enqueue_workflow_event
+from app.services.partner_service import partner_split
 from app.services.outbox_service import OutboxService
 from app.services.waiver_service import WaiverService
 
@@ -264,6 +266,8 @@ class BookingAdminService:
         return {
             **self._list_dict(booking, order, category),
             "booking_source": order.booking_source,
+            "partner_id": order.partner_id,
+            "partner_split": asdict(partner_split(order, payment)),
             "created_by_name": self._creator_name(order),
             "customer_phone": order.customer_phone,
             "marketing_opt_in": order.marketing_opt_in,

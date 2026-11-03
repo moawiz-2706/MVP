@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Clock3, MapPin } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
+import { partnerFromLink } from "./partner";
 import { api } from "../api/client";
 import type { PublicCalendar, PublicCatalog } from "../api/types";
 import { useEmbed, withEmbed } from "./embed";
@@ -58,6 +59,8 @@ export function ServiceCard({ operatorSlug, calendar, embed }: { operatorSlug: s
 }
 
 export function OperatorBookingPage() {
+  // Remember a partner booking link (?partner=…) for the checkout page.
+  useEffect(() => { partnerFromLink(window.location.search); }, []);
   const { operatorSlug = "" } = useParams();
   const embed = useEmbed();
   const query = useQuery({ queryKey: ["public-catalog", operatorSlug], queryFn: () => api<PublicCatalog>(`/public/${operatorSlug}`) });

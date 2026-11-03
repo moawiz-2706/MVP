@@ -46,6 +46,7 @@ from app.services.public_access_service import PublicAccessService
 from app.services.staffing_service import lock_calendars
 from app.services.ghl_sync_service import GHLSyncService
 from app.services.ghl_workflow_trigger_service import enqueue_workflow_event
+from app.services.partner_service import PartnerService, tag_order
 from app.services.stripe_payment_service import StripePaymentService
 from app.utils.identifiers import public_reference
 from app.utils.money import PaymentBreakdown, apply_basis_points, calculate_payment
@@ -457,6 +458,7 @@ class OrderService:
         checkout_key: str | None = None,
         allow_payment_override: bool = False,
         allow_private_operator: bool = False,
+        allow_partner_selection: bool = False,
         attribution: BookingAttribution | None = None,
     ) -> OrderCreateResponse:
         attribution = attribution or BookingAttribution()
@@ -506,6 +508,12 @@ class OrderService:
             if connection is None:
                 raise ConflictError("This operator is not ready to accept paid bookings")
 
+        partners = PartnerService(self.db, operator.id)
+        if allow_partner_selection and request.partner_id is not None:
+            partner = partners.active_by_id(request.partner_id)
+        else:
+            partner = partners.active_by_code(request.partner_code)
+
         now = datetime.now(UTC)
         hold_expires = now + timedelta(minutes=self.settings.booking_hold_minutes) if paid else None
         reference = public_reference()
@@ -544,6 +552,7 @@ class OrderService:
                 else "disabled"
             ),
         )
+        tag_order(order, partner)
         self.db.add(order)
         self.db.flush()
         for item in prepared:

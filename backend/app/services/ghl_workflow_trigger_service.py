@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -36,8 +37,11 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.core.encryption import TokenCipher
 from app.core.exceptions import NotFoundError
+from app.services.partner_service import partner_split
 from app.models.entities import (
     Booking,
+    Calendar,
+    CalendarCategory,
     BookingLineItem,
     BookingOrder,
     GHLInstallation,
@@ -71,6 +75,17 @@ RETRYABLE_STATUSES = {408, 409, 425, 429}
 logger = logging.getLogger("passport.workflow_trigger")
 INACTIVE_BOOKING_STATUSES = {"cancelled", "failed", "expired"}
 _URL_PATTERN = re.compile(r"https?://\S+")
+PARTNER_FIELDS: dict[str, Any] = {
+    "source_partner": "Direct",
+    "gross_booking_amount": "0.00",
+    "hotel_commission_20pct": "0.00",
+    "pga_commission_30pct": "0.00",
+    "net_to_operator": "0.00",
+    "gratuity_amount": "0.00",
+    "number_of_guests": 0,
+    "tour_date": "",
+    "tour_type": "",
+}
 
 
 class SubscriptionCallbackError(ValueError):
@@ -313,6 +328,20 @@ def build_snapshot(
                 }
             )
     payment_status = payment.status if payment else "unknown"
+    split = partner_split(order, payment)
+    tour_type = ""
+    tour_date = ""
+    if primary is not None:
+        tour_type = db.scalar(
+            select(CalendarCategory.name)
+            .join(Calendar, Calendar.calendar_category_id == CalendarCategory.id)
+            .where(Calendar.id == primary.calendar_id)
+        ) or ""
+        try:
+            zone = ZoneInfo(operator.time_zone) if operator and operator.time_zone else UTC
+        except ZoneInfoNotFoundError:
+            zone = UTC
+        tour_date = primary.start_at.astimezone(zone).date().isoformat()
     first = order.customer_first_name or ""
     last = order.customer_last_name or ""
     return {
@@ -339,6 +368,18 @@ def build_snapshot(
         "timezone": operator.time_zone if operator else "",
         "location_name": (primary.departure_location_name_snapshot or "") if primary else "",
         "items": items,
+        # Hotel-partner fields (the Opportunity fields of the partner scope).
+        "source_partner": split.source_partner,
+        "gross_booking_amount": format_amount(split.gross_minor),
+        "hotel_commission_20pct": format_amount(split.hotel_commission_minor),
+        "pga_commission_30pct": format_amount(split.pga_commission_minor),
+        "net_to_operator": format_amount(split.net_to_operator_minor),
+        "gratuity_amount": format_amount(split.gratuity_minor),
+        "number_of_guests": sum(
+            booking.units for booking in bookings if booking.status not in {"failed", "expired"}
+        ),
+        "tour_date": tour_date,
+        "tour_type": tour_type,
     }
 
 
@@ -517,6 +558,9 @@ class WorkflowTriggerDeliveryService:
                 {key: value for key, value in item.items() if key != "booking_id"}
                 for item in snapshot.get("items", [])
             ],
+            # Added after v1.0's variables: usable once a trigger version
+            # publishes them as custom variables; ignored by older ones.
+            **{key: snapshot.get(key, default) for key, default in PARTNER_FIELDS.items()},
         }
 
     def deliver(self, trigger_event_id: uuid.UUID) -> None:

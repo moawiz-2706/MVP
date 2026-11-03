@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, json } from "../api/client";
 import type { AvailabilityMonth, AvailabilityResponse, AvailabilitySlot, PublicCalendar, PublicCatalog, PublicCustomField, PublicRate, SlotRate } from "../api/types";
 import { PaymentPanel } from "./PaymentPanel";
+import { partnerFromLink } from "./partner";
 import { PublicFrame } from "./OperatorBookingPage";
 import { useEmbed, withEmbed } from "./embed";
 import { formatDay, formatTime, isoDayInZone, safeTimeZone } from "../lib/datetime";
@@ -171,7 +172,7 @@ export function CalendarBookingPage() {
   const requestItems = useMemo(() => cart.map(({ calendar_id, start_at, units: itemUnits, rate_id }) => rate_id ? ({ calendar_id, start_at, quantity: itemUnits, rate_id }) : ({ calendar_id, start_at, units: itemUnits })), [cart]);
   const quote = useQuery({ queryKey: ["quote", operatorSlug, JSON.stringify(requestItems)], queryFn: () => api<Quote>(`/public/${operatorSlug}/orders/quote`, json("POST", { items: requestItems })), enabled: cart.length > 0 });
   const create = useMutation({
-    mutationFn: () => api<Created>(`/public/${operatorSlug}/orders`, { ...json("POST", { items: requestItems, customer: { first_name: first, last_name: last, email, phone: phone || null, marketing_opt_in: marketingOptIn }, custom_fields: customFields }), headers: { "X-Checkout-Key": checkoutKey } }),
+    mutationFn: () => api<Created>(`/public/${operatorSlug}/orders`, { ...json("POST", { items: requestItems, customer: { first_name: first, last_name: last, email, phone: phone || null, marketing_opt_in: marketingOptIn }, custom_fields: customFields, partner_code: partnerFromLink(window.location.search) }), headers: { "X-Checkout-Key": checkoutKey } }),
     onSuccess: (result) => {
       setCreated(result);
       const suffix = result.access_token ? `?access_token=${encodeURIComponent(result.access_token)}` : "";

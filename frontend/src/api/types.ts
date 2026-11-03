@@ -133,6 +133,8 @@ export interface DashboardSlot { start_at: string; calendars: SlotCalendar[] }
 
 export interface BookingDetail extends Booking {
   booking_source?: string | null;
+  partner_id?: Id | null;
+  partner_split?: PartnerSplit | null;
   created_by_name?: string | null;
   customer_phone: string | null;
   marketing_opt_in: boolean;
@@ -425,4 +427,34 @@ export interface CreatorReport {
   start_date: string;
   end_date: string;
   rows: CreatorReportRow[];
+}
+
+export interface Partner {
+  id: Id;
+  name: string;
+  code: string;
+  hotel_commission_bps: number;
+  pga_commission_bps: number;
+  is_active: boolean;
+  booking_link: string;
+  created_at: string;
+}
+export interface PartnerSplit {
+  source_partner: string;
+  gross_minor: number;
+  hotel_commission_minor: number;
+  pga_commission_minor: number;
+  net_to_operator_minor: number;
+  gratuity_minor: number;
+}
+export interface PartnerCommissionRow extends Omit<PartnerSplit, "gratuity_minor"> {
+  partner_id: Id | null;
+  bookings: number;
+  guests: number;
+  currency: string;
+}
+export interface PartnerCommissionReport {
+  start_date: string;
+  end_date: string;
+  rows: PartnerCommissionRow[];
 }

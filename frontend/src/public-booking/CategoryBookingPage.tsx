@@ -1,12 +1,16 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
+import { partnerFromLink } from "./partner";
 import { api } from "../api/client";
 import type { PublicCategoryPage } from "../api/types";
 import { PublicFrame, ServiceCard } from "./OperatorBookingPage";
 import { useEmbed, withEmbed } from "./embed";
 
 export function CategoryBookingPage() {
+  // Remember a partner booking link (?partner=…) for the checkout page.
+  useEffect(() => { partnerFromLink(window.location.search); }, []);
   const { operatorSlug = "", categorySlug = "" } = useParams();
   const embed = useEmbed();
   const query = useQuery({

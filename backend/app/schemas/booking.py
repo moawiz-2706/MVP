@@ -104,8 +104,21 @@ class BookingParticipantWrite(BaseModel):
     status: str = Field(default="active", pattern="^(active|cancelled|no_show)$")
 
 
+class PartnerSplitRead(BaseModel):
+    """Revenue split for a hotel-partner booking; Direct keeps 100%."""
+
+    source_partner: str
+    gross_minor: int
+    hotel_commission_minor: int
+    pga_commission_minor: int
+    net_to_operator_minor: int
+    gratuity_minor: int = 0
+
+
 class BookingDetail(BookingListItem):
     booking_source: str | None = None
+    partner_id: uuid.UUID | None = None
+    partner_split: PartnerSplitRead | None = None
     created_by_name: str | None = None
     customer_phone: str | None
     marketing_opt_in: bool
