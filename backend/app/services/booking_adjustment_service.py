@@ -238,7 +238,9 @@ class BookingAdjustmentService:
             self.db,
             self.settings,
             order,
-            "booking_updated",
+            # A refund or an unpaid price change is a payment update; a
+            # same-price move is a reschedule.
+            "payment_updated" if delta != 0 else "booking_rescheduled",
             f"{booking.id}:{booking.updated_at.isoformat()}",
             focus_booking_id=booking.id,
         )
@@ -330,7 +332,7 @@ class BookingAdjustmentService:
                     self.db,
                     self.settings,
                     order,
-                    "booking_updated",
+                    "payment_updated",
                     f"{booking.id}:{booking.updated_at.isoformat()}",
                     focus_booking_id=booking.id,
                 )

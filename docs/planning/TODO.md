@@ -97,7 +97,7 @@ Design: [`docs/integrations/highlevel/MARKETPLACE_TRIGGER_RUNTIME.md`](../integr
 
 - [x] Slice 1: subscription callback `POST /api/v1/integrations/marketplace/workflow-trigger/subscription` (CREATED / UPDATED / DELETED), shared-secret header, installed-location check, execution-host check, encrypted `targetUrl`, one row per workflow trigger instance, replay-safe.
 - [x] Slice 2: migration 045, one logical event row per booking event plus a delivery row per workflow subscription, outbox job `ghl_workflow_trigger`.
-- [x] Slice 3: producers inside the booking transaction: `booking_created` (all three entry points via `OrderService.create`), `payment_confirmed` (verified Stripe `payment_intent.succeeded` / `invoice.paid`), `booking_cancelled`, `booking_updated` (staff edit, reschedule, party-size adjustment).
+- [x] Slice 3: producers inside the booking transaction: `booking_created` (all three entry points via `OrderService.create`), `booking_confirmed` (verified Stripe `payment_intent.succeeded` / `invoice.paid`), `booking_cancelled`, `booking_rescheduled` (staff edit, reschedule), `payment_updated` (party-size change with refund or charge). Names match the published Event Type options (migration 046).
 - [x] Slice 4: payload builder from committed records; status fields snapshot when the event is created, contact / waiver / staff resolved at send.
 - [x] Slice 5: delivery: contact ensured first, retry on transient errors, permanent errors stop, "no subscriber" recorded separately.
 - [x] Slice 6: status API, notification, booking-drawer status and an idempotent retry action.

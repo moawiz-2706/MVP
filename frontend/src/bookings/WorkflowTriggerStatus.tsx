@@ -5,6 +5,9 @@ import type { WorkflowTriggerOrderStatus } from "../api/types";
 
 const eventLabel: Record<string, string> = {
   booking_created: "Booking created",
+  booking_confirmed: "Booking confirmed",
+  booking_rescheduled: "Booking rescheduled",
+  payment_updated: "Payment updated",
   payment_confirmed: "Payment confirmed",
   booking_updated: "Booking updated",
   booking_cancelled: "Booking cancelled",

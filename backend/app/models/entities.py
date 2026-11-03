@@ -1176,7 +1176,8 @@ class GHLWorkflowTriggerEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "ghl_workflow_trigger_events"
     __table_args__ = (
         CheckConstraint(
-            "event_type IN ('booking_created','payment_confirmed','booking_updated','booking_cancelled')",
+            "event_type IN ('booking_created','booking_confirmed','booking_rescheduled','payment_updated',"
+            "'booking_cancelled','payment_confirmed','booking_updated')",
             name="type_valid",
         ),
         CheckConstraint(
