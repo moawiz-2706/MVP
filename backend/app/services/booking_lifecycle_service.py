@@ -386,7 +386,7 @@ class BookingLifecycleService:
             self.db,
             self._settings(),
             order,
-            "booking_updated",
+            "booking_rescheduled",
             f"{refreshed.id}:{refreshed.updated_at.isoformat()}",
             focus_booking_id=refreshed.id,
         )

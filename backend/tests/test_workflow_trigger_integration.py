@@ -191,7 +191,7 @@ def test_each_entry_point_records_exactly_one_booking_created_event(db, source):
     assert len(_events(db, order)) == 1
 
 
-def test_pending_card_then_payment_confirmed_are_two_distinct_events(db):
+def test_pending_card_then_booking_confirmed_are_two_distinct_events(db):
     operator, calendar = _shop(db)
     order = _book(db, operator, calendar)
     payment = db.scalar(select(Payment).where(Payment.booking_order_id == order.id))
@@ -200,13 +200,13 @@ def test_pending_card_then_payment_confirmed_are_two_distinct_events(db):
     created.snapshot = {**created.snapshot, "booking_status": "pending_payment",
                         "payment_status": "requires_payment", "confirmed": False}
     db.commit()
-    enqueue_workflow_event(db, SETTINGS, order, "payment_confirmed", "v1")
-    enqueue_workflow_event(db, SETTINGS, order, "payment_confirmed", "v1")  # Stripe redelivery
+    enqueue_workflow_event(db, SETTINGS, order, "booking_confirmed", "v1")
+    enqueue_workflow_event(db, SETTINGS, order, "booking_confirmed", "v1")  # Stripe redelivery
     db.commit()
     by_type = {event.event_type: event for event in _events(db, order)}
-    assert set(by_type) == {"booking_created", "payment_confirmed"}
+    assert set(by_type) == {"booking_created", "booking_confirmed"}
     assert by_type["booking_created"].snapshot["confirmed"] is False
-    assert by_type["payment_confirmed"].snapshot["confirmed"] is True
+    assert by_type["booking_confirmed"].snapshot["confirmed"] is True
     assert payment.status == "succeeded"
 
 

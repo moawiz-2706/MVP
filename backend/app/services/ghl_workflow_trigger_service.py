@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -29,6 +30,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -55,9 +57,18 @@ SOURCE = "passport"
 SECRET_HEADER = "X-Passport-Trigger-Secret"
 EXECUTE_HOST = "services.leadconnectorhq.com"
 EXECUTE_PATH_PREFIX = "/workflows-marketplace/triggers/execute/"
-EVENT_TYPES = {"booking_created", "payment_confirmed", "booking_updated", "booking_cancelled"}
+# The values offered by the published v1.0 trigger's Event Type filter, so a
+# workflow filtered on them starts for every event Passport sends.
+EVENT_TYPES = {
+    "booking_created",
+    "booking_confirmed",
+    "booking_rescheduled",
+    "payment_updated",
+    "booking_cancelled",
+}
 CALLBACK_EVENTS = {"CREATED", "UPDATED", "DELETED"}
 RETRYABLE_STATUSES = {408, 409, 425, 429}
+logger = logging.getLogger("passport.workflow_trigger")
 INACTIVE_BOOKING_STATUSES = {"cancelled", "failed", "expired"}
 _URL_PATTERN = re.compile(r"https?://\S+")
 
@@ -345,6 +356,10 @@ def enqueue_workflow_event(
     The caller commits; nothing is sent until then. A repeated call with the
     same (order, event_type, discriminator) is a no-op, so webhook redelivery
     and request retries never create a second event.
+
+    The writes run in a savepoint: if they fail (for example a migration not
+    yet applied), only the trigger event is lost and logged. The booking or
+    payment the caller is saving always goes ahead.
     """
     if not settings.ghl_workflow_trigger_enabled or settings.ghl_sync_mode == "disabled":
         return
@@ -352,35 +367,42 @@ def enqueue_workflow_event(
         raise ValueError(f"Unsupported workflow trigger event: {event_type}")
     db.flush()
     idempotency_key = f"booking_order:{order.id}:workflow:{event_type}:{discriminator}"
-    event_row_id = db.scalar(
-        insert(GHLWorkflowTriggerEvent)
-        .values(
-            operator_id=order.operator_id,
-            booking_order_id=order.id,
-            event_type=event_type,
-            event_id=f"{order.id}:{event_type}:{discriminator}",
-            idempotency_key=idempotency_key,
-            occurred_at=datetime.now(UTC),
-            snapshot=build_snapshot(db, order, focus_booking_id=focus_booking_id),
-            status="pending",
+    try:
+        with db.begin_nested():
+            event_row_id = db.scalar(
+                insert(GHLWorkflowTriggerEvent)
+                .values(
+                    operator_id=order.operator_id,
+                    booking_order_id=order.id,
+                    event_type=event_type,
+                    event_id=f"{order.id}:{event_type}:{discriminator}",
+                    idempotency_key=idempotency_key,
+                    occurred_at=datetime.now(UTC),
+                    snapshot=build_snapshot(db, order, focus_booking_id=focus_booking_id),
+                    status="pending",
+                )
+                .on_conflict_do_nothing(constraint="uq_ghl_workflow_trigger_events_idempotency_key")
+                .returning(GHLWorkflowTriggerEvent.id)
+            )
+            if event_row_id is None:
+                return
+            db.execute(
+                insert(OutboxJob)
+                .values(
+                    operator_id=order.operator_id,
+                    booking_order_id=order.id,
+                    job_type="ghl_workflow_trigger",
+                    idempotency_key=f"workflow_trigger_event:{event_row_id}",
+                    payload={"trigger_event_id": str(event_row_id)},
+                    status="pending",
+                )
+                .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
+            )
+    except SQLAlchemyError:
+        logger.exception(
+            "Could not record Marketplace trigger event %s; the booking change is kept",
+            idempotency_key,
         )
-        .on_conflict_do_nothing(constraint="uq_ghl_workflow_trigger_events_idempotency_key")
-        .returning(GHLWorkflowTriggerEvent.id)
-    )
-    if event_row_id is None:
-        return
-    db.execute(
-        insert(OutboxJob)
-        .values(
-            operator_id=order.operator_id,
-            booking_order_id=order.id,
-            job_type="ghl_workflow_trigger",
-            idempotency_key=f"workflow_trigger_event:{event_row_id}",
-            payload={"trigger_event_id": str(event_row_id)},
-            status="pending",
-        )
-        .on_conflict_do_nothing(index_elements=[OutboxJob.idempotency_key])
-    )
 
 
 def _filter_value(value: Any) -> str:

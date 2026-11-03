@@ -324,7 +324,7 @@ class StripeWebhookService:
         # Verified payment_intent.succeeded or invoice.paid. One logical event
         # per order: a redelivered Stripe event returns early above, and the
         # deterministic key makes any second call a no-op.
-        enqueue_workflow_event(self.db, self.settings, order, "payment_confirmed", "v1")
+        enqueue_workflow_event(self.db, self.settings, order, "booking_confirmed", "v1")
 
     @staticmethod
     def _int_or_none(value: Any) -> int | None:

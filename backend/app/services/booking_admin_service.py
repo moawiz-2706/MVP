@@ -574,7 +574,7 @@ class BookingAdminService:
                     self.db,
                     get_settings(),
                     order,
-                    "booking_updated",
+                    "booking_rescheduled",
                     f"{booking.id}:{booking.updated_at.isoformat()}",
                     focus_booking_id=booking.id,
                 )

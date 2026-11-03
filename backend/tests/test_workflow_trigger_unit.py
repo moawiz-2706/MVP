@@ -176,7 +176,7 @@ def test_paid_confirmation_matches_published_sample():
     db, operator, order, bookings = _scenario(
         order_status="confirmed", payment_status="succeeded", booking_status="confirmed"
     )
-    payload = _payload(db, operator, order, "payment_confirmed")
+    payload = _payload(db, operator, order, "booking_confirmed")
     _assert_published_shape(payload)
     assert payload["confirmed"] is True
     assert payload["booking_status"] == "confirmed"
@@ -289,11 +289,11 @@ def test_execute_url_must_be_highlevel_trigger_host():
 
 def test_filters_gate_pending_payments_out_of_a_confirmation_workflow():
     pending = {"event_type": "booking_created", "confirmed": False, "payment_status": "requires_payment"}
-    paid = {"event_type": "payment_confirmed", "confirmed": True, "payment_status": "succeeded"}
+    paid = {"event_type": "booking_confirmed", "confirmed": True, "payment_status": "succeeded"}
     confirmation = [{"field": "confirmed", "operator": "==", "value": "true"}]
     assert not matches_filters(confirmation, pending)
     assert matches_filters(confirmation, paid)
-    multi = [{"field": "event_type", "operator": "==", "value": ["booking_created", "payment_confirmed"]}]
+    multi = [{"field": "event_type", "operator": "==", "value": ["booking_created", "booking_confirmed"]}]
     assert matches_filters(multi, pending) and matches_filters(multi, paid)
     assert not matches_filters([{"field": "payment_status", "operator": "!=", "value": "succeeded"}], paid)
     # Unknown operators and fields are left to HighLevel.
@@ -397,3 +397,50 @@ def test_callback_rejects_missing_or_wrong_secret(client, secret):
 def test_callback_rejects_malformed_subscriptions_before_touching_storage(client, body):
     response = _callback(client, Settings(ghl_workflow_trigger_secret="s3cret"), body)
     assert response.status_code == 400
+
+
+# Event Type options of the published v1.0 trigger (its multi-select filter).
+PUBLISHED_EVENT_OPTIONS = {
+    "booking_created", "booking_confirmed", "payment_updated",
+    "waiver_signed", "booking_cancelled", "booking_rescheduled",
+}
+
+
+def test_every_event_passport_sends_is_a_published_filter_option():
+    from app.services.ghl_workflow_trigger_service import EVENT_TYPES
+
+    assert EVENT_TYPES <= PUBLISHED_EVENT_OPTIONS
+    app_dir = ROOT / "backend" / "app"
+    sent = set()
+    for path in app_dir.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        # Only the quoted names inside each enqueue_workflow_event(...) call.
+        for call in re.finditer(r"enqueue_workflow_event\((.{0,400}?)\)\s*$", text, re.S | re.M):
+            sent |= set(re.findall(r'"((?:booking|payment)_[a-z]+)"', call.group(1)))
+    assert sent and sent <= PUBLISHED_EVENT_OPTIONS, sent
+
+
+def test_a_failed_event_write_never_blocks_the_booking():
+    from sqlalchemy.exc import ProgrammingError
+
+    db = MagicMock()
+    db.scalar.side_effect = ProgrammingError("INSERT", {}, Exception("relation does not exist"))
+    order = SimpleNamespace(id=uuid.uuid4(), operator_id=uuid.uuid4())
+    import app.services.ghl_workflow_trigger_service as service
+
+    original = service.build_snapshot
+    service.build_snapshot = lambda *args, **kwargs: {}
+    try:
+        enqueue_workflow_event(db, Settings(ghl_workflow_trigger_enabled=True), order, "booking_created", "v1")
+    finally:
+        service.build_snapshot = original
+    db.begin_nested.assert_called_once()
+    db.commit.assert_not_called()
+    db.rollback.assert_not_called()  # only the savepoint is undone
+
+
+def test_event_name_migration_keeps_history_and_renames_undelivered():
+    migration = (ROOT / "supabase" / "migrations" / "046_trigger_event_type_names.sql").read_text()
+    for name in PUBLISHED_EVENT_OPTIONS - {"waiver_signed"} | {"payment_confirmed", "booking_updated"}:
+        assert f"'{name}'" in migration
+    assert "status <> 'delivered'" in migration

@@ -51,6 +51,8 @@ is final for that trigger instance: a replayed CREATED or UPDATED is ignored.
 
 ## Events
 
+Event names are the published trigger's Event Type filter values (migration 046 renamed `payment_confirmed` to `booking_confirmed` and `booking_updated` to `booking_rescheduled` / `payment_updated`). Recording an event runs in a savepoint: if it fails, the failure is logged and the booking or payment is still saved.
+
 Producers write the event row and its outbox job **inside the booking's own
 transaction**, so the booking and its event commit together or not at all.
 Delivery runs later in the outbox, so a HighLevel failure can never roll back
@@ -59,9 +61,10 @@ a booking or a Stripe payment.
 | `event_type` | Produced by | Idempotency discriminator |
 |---|---|---|
 | `booking_created` | `OrderService.create`: public link `POST /public/{slug}/orders`, staff link `POST /staff-booking/{token}/orders`, Passport/PWA `POST /bookings` | `v1` (once per order) |
-| `payment_confirmed` | Verified Stripe `payment_intent.succeeded` or `invoice.paid` that confirms the order | `v1` (once per order; Stripe redelivery is a no-op) |
+| `booking_confirmed` | Verified Stripe `payment_intent.succeeded` or `invoice.paid` that confirms the order | `v1` (once per order; Stripe redelivery is a no-op) |
 | `booking_cancelled` | `BookingLifecycleService.cancel` (operator cancel, weather closure), after the refund/reversal is recorded | booking id |
-| `booking_updated` | Staff edit (`BookingAdminService.update`), reschedule, party-size adjustment (immediate, or after the verified extra charge) | booking id + `updated_at` |
+| `booking_rescheduled` | Staff edit (`BookingAdminService.update`), reschedule, same-price party-size or time change | booking id + `updated_at` |
+| `payment_updated` | Party-size change that refunds or charges the difference (after the refund is recorded or the extra charge succeeded) | booking id + `updated_at` |
 
 `idempotency_key` = `booking_order:{order_id}:workflow:{event_type}:{discriminator}`,
 `event_id` = `{order_id}:{event_type}:{discriminator}`. Both are deterministic.
@@ -78,7 +81,7 @@ When the event is created, it snapshots `booking_status`, `payment_status`,
 booking's calendar and times, and the items. So `booking_created` for a card
 booking always says `pending_payment` / `requires_payment` / `confirmed:
 false`, even if it is delivered after the payment. The paid state arrives as
-its own `payment_confirmed` event. The contact id, waiver and staff are read
+its own `booking_confirmed` event. The contact id, waiver and staff are read
 when the event is sent.
 
 - `confirmed` is true only when the order is `confirmed` **and** the payment is `succeeded`. Free bookings are confirmed at creation; their `payment_method` is `none`.
@@ -150,7 +153,7 @@ Passport's own confirmation email runs only when `GHL_NOTIFICATIONS_ENABLED=true
 workflow sends confirmations, set `GHL_NOTIFICATIONS_ENABLED=false`, or switch
 off "confirmation email" in the operator's settings, so only the workflow
 sends. In the workflow, send "booking confirmed" only when `confirmed` is
-`true` (for example on `payment_confirmed`, or on `booking_created` with
+`true` (for example on `booking_confirmed`, or on `booking_created` with
 `confirmed == true` for free bookings). `booking_created` with
 `confirmed == false` means payment is still pending.
 
@@ -158,5 +161,5 @@ sends. In the workflow, send "booking confirmed" only when `confirmed` is
 
 1. **Add the header** `X-Passport-Trigger-Secret: <GHL_WORKFLOW_TRIGGER_SECRET>` to the trigger's Subscription URL. This is a change to the trigger, so it needs a new trigger version and review in the Marketplace developer portal. The key, name, sample payload, filters and variables stay as published.
 2. **Re-save the workflows.** The Subscription URL returned 404 until this code is deployed, so any workflow that added the trigger before then was never stored. Open each workflow that uses "Passport Booking Created" and save it again (or remove and re-add the trigger) so HighLevel sends a fresh CREATED/UPDATED.
-3. **Optional new version:** to let workflow authors pick `payment_confirmed`, `booking_updated` or `booking_cancelled` from the Event Type filter, add them as options in a new trigger version. The repository cannot change the published trigger.
+3. Event names match the published Event Type options (`booking_created`, `booking_confirmed`, `booking_rescheduled`, `payment_updated`, `booking_cancelled`), so no new trigger version is needed for them. `waiver_signed` is a published option Passport does not emit yet.
 4. On a **test** location, confirm one delivery end to end (the execution contract is undocumented) before enabling the feature for the client.
