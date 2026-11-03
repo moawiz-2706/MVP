@@ -52,7 +52,7 @@ export function ServiceCard({ operatorSlug, calendar, embed }: { operatorSlug: s
     <h2>{calendar.name}</h2>
     <p>{calendar.headline || calendar.description || "Select a date to view live times and available quantity."}</p>
     <div className="service-meta">
-      <span><Clock3 size={14} />{calendar.duration_minutes} minutes · from {money(calendar.base_price_minor, calendar.currency)}</span>
+      <span><Clock3 size={14} />{calendar.duration_minutes} minutes · from {money(calendar.from_price_minor ?? calendar.base_price_minor, calendar.currency)}</span>
       {calendar.location && <span><MapPin size={14} />{calendar.location.name}</span>}
     </div>
   </Link>;

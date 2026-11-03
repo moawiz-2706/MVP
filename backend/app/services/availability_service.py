@@ -449,13 +449,9 @@ class AvailabilityService:
                 candidate += timedelta(minutes=calendar.slot_interval_minutes)
         return starts
 
-    def public_day(
-        self,
-        operator_slug: str,
-        calendar_slug: str,
-        day: date,
-        display_timezone: str | None = None,
-    ) -> PublicAvailabilityResponse:
+    def _public_calendar(
+        self, operator_slug: str, calendar_slug: str
+    ) -> tuple[Calendar, Operator, DepartureLocation | None]:
         row = self.db.execute(
             select(Calendar, Operator, DepartureLocation)
             .join(Operator, Operator.id == Calendar.operator_id)
@@ -473,29 +469,14 @@ class AvailabilityService:
         if row is None:
             raise NotFoundError("Public calendar not found")
         calendar, operator, location = row
-        operator_timezone = self._operator_timezone(operator)
-        operator_zone = require_timezone(operator_timezone)
-        display_zone = require_timezone((display_timezone or operator_timezone).strip() or "UTC")
-        if display_timezone:
-            display_start = local_datetime(day, time(0), display_timezone)
-            display_end = local_datetime(day + timedelta(days=1), time(0), display_timezone)
-            first_operator_day = display_start.astimezone(operator_zone).date() - timedelta(days=1)
-            last_operator_day = display_end.astimezone(operator_zone).date() + timedelta(days=1)
-            source_days = [
-                first_operator_day + timedelta(days=offset)
-                for offset in range((last_operator_day - first_operator_day).days + 1)
-            ]
-        else:
-            source_days = [day]
+        return calendar, operator, location
+
+    def _public_slots(
+        self, calendar: Calendar, candidates: list[datetime]
+    ) -> list[AvailabilitySlot]:
+        """Bookability of each candidate start, with one batch of queries for all of them."""
         now = datetime.now(UTC)
         slots: list[AvailabilitySlot] = []
-        candidates = [
-            candidate
-            for source_day in source_days
-            for candidate in self._candidate_starts(calendar, operator, source_day)
-            if candidate.astimezone(UTC) > now
-            and candidate.astimezone(display_zone).date() == day
-        ]
         if candidates:
             mappings = self._mappings(calendar.id)
             rate_mappings = self._rate_mappings(calendar.id)
@@ -592,6 +573,39 @@ class AvailabilityService:
                     )
                 )
         slots.sort(key=lambda item: item.start_at)
+        return slots
+
+    def public_day(
+        self,
+        operator_slug: str,
+        calendar_slug: str,
+        day: date,
+        display_timezone: str | None = None,
+    ) -> PublicAvailabilityResponse:
+        calendar, operator, location = self._public_calendar(operator_slug, calendar_slug)
+        operator_timezone = self._operator_timezone(operator)
+        operator_zone = require_timezone(operator_timezone)
+        display_zone = require_timezone((display_timezone or operator_timezone).strip() or "UTC")
+        if display_timezone:
+            display_start = local_datetime(day, time(0), display_timezone)
+            display_end = local_datetime(day + timedelta(days=1), time(0), display_timezone)
+            first_operator_day = display_start.astimezone(operator_zone).date() - timedelta(days=1)
+            last_operator_day = display_end.astimezone(operator_zone).date() + timedelta(days=1)
+            source_days = [
+                first_operator_day + timedelta(days=offset)
+                for offset in range((last_operator_day - first_operator_day).days + 1)
+            ]
+        else:
+            source_days = [day]
+        now = datetime.now(UTC)
+        candidates = [
+            candidate
+            for source_day in source_days
+            for candidate in self._candidate_starts(calendar, operator, source_day)
+            if candidate.astimezone(UTC) > now
+            and candidate.astimezone(display_zone).date() == day
+        ]
+        slots = self._public_slots(calendar, candidates)
         return PublicAvailabilityResponse(
             date=day,
             time_zone=(display_timezone or operator_timezone).strip() or "UTC",
@@ -612,25 +626,99 @@ class AvailabilityService:
         )
 
     def public_month(self, operator_slug: str, calendar_slug: str, year: int, month: int) -> dict:
-        """Day-by-day bookability for one month, using the same rules as a single day."""
+        """Day-by-day bookability for one month, using the same rules as a single day.
+
+        All departures of the month are checked in one batch: a day at a time
+        meant ~8 database round trips per day, which took 10-60 s per month
+        over the serverless connection.
+        """
+        calendar, operator, _location = self._public_calendar(operator_slug, calendar_slug)
+        time_zone = self._operator_timezone(operator)
+        zone = require_timezone(time_zone)
         first = date(year, month, 1)
         following = date(year + (month == 12), month % 12 + 1, 1)
-        days: list[dict] = []
-        time_zone = "UTC"
         today = datetime.now(UTC).date()
+        now = datetime.now(UTC)
+        checked_days = [
+            first + timedelta(days=offset)
+            for offset in range((following - first).days)
+            if first + timedelta(days=offset) >= today - timedelta(days=1)
+        ]
+        candidates = [
+            candidate
+            for candidate in self._candidate_starts_range(calendar, operator, checked_days)
+            if candidate.astimezone(UTC) > now
+        ]
+        by_day: dict[date, list[AvailabilitySlot]] = defaultdict(list)
+        for slot in self._public_slots(calendar, candidates):
+            by_day[slot.start_at.astimezone(zone).date()].append(slot)
+        days: list[dict] = []
         current = first
         while current < following:
             status = "none"
-            if current >= today - timedelta(days=1):
-                result = self.public_day(operator_slug, calendar_slug, current)
-                time_zone = result.time_zone
-                if any(slot.available for slot in result.slots):
-                    status = "available"
-                elif result.slots:
-                    status = "sold_out"
+            day_slots = by_day.get(current, [])
+            if any(slot.available for slot in day_slots):
+                status = "available"
+            elif day_slots:
+                status = "sold_out"
             days.append({"date": current, "status": status})
             current += timedelta(days=1)
-        return {"month": f"{year:04d}-{month:02d}", "time_zone": time_zone, "days": days}
+        return {"month": f"{year:04d}-{month:02d}", "time_zone": time_zone.strip() or "UTC", "days": days}
+
+    def _candidate_starts_range(
+        self, calendar: Calendar, operator: Operator, days: list[date]
+    ) -> list[datetime]:
+        """`_candidate_starts` for many operator-local days with one query per source."""
+        if not days:
+            return []
+        time_zone = self._operator_timezone(operator)
+        if calendar.availability_mode == "pushed":
+            return self._pushed_starts(
+                calendar.id,
+                local_datetime(min(days), time(0), time_zone),
+                local_datetime(max(days) + timedelta(days=1), time(0), time_zone),
+            )
+        if calendar.availability_mode == "date_wise":
+            ranges = list(
+                self.db.execute(
+                    select(
+                        CalendarDateHour.start_date,
+                        CalendarDateHour.end_date,
+                        CalendarDateHour.start_time,
+                        CalendarDateHour.end_time,
+                    ).where(
+                        CalendarDateHour.calendar_id == calendar.id,
+                        CalendarDateHour.start_date <= max(days),
+                        CalendarDateHour.end_date >= min(days),
+                    )
+                )
+            )
+
+            def openings(day: date) -> list[tuple[time, time]]:
+                return sorted(
+                    (start, end) for first_day, last_day, start, end in ranges if first_day <= day <= last_day
+                )
+        else:
+            weekly: dict[int, list[tuple[time, time]]] = defaultdict(list)
+            for weekday, start, end in self.db.execute(
+                select(CalendarHour.day_of_week, CalendarHour.start_time, CalendarHour.end_time).where(
+                    CalendarHour.calendar_id == calendar.id
+                )
+            ):
+                weekly[weekday].append((start, end))
+
+            def openings(day: date) -> list[tuple[time, time]]:
+                return sorted(weekly.get(day.weekday(), []))
+        starts: list[datetime] = []
+        for day in days:
+            for opening_start, opening_end in openings(day):
+                candidate = local_datetime(day, opening_start, time_zone)
+                closing = local_datetime(day, opening_end, time_zone)
+                while candidate + timedelta(minutes=calendar.duration_minutes) <= closing:
+                    if self._valid_local(candidate, time_zone):
+                        starts.append(candidate)
+                    candidate += timedelta(minutes=calendar.slot_interval_minutes)
+        return starts
 
     def calendar_day(
         self, calendar_id: uuid.UUID, operator_id: uuid.UUID, day: date

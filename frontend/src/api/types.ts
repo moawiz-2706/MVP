@@ -247,6 +247,7 @@ export interface PublicCalendar {
   gallery_image_urls: string[];
   duration_minutes: number;
   base_price_minor: number;
+  from_price_minor?: number | null;
   currency: string;
   category_id: Id | null;
   category_name: string | null;
