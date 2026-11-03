@@ -17,7 +17,7 @@ from app.core.app_session import (
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.schemas.auth import GHLSessionResponse, PWAHandoffRequest
-from app.services.ghl_auth_service import GHLAuthService, required_scopes
+from app.services.ghl_auth_service import GHLAuthService, requested_scopes
 from app.services.pwa_auth_service import PWAAuthService
 
 router = APIRouter(prefix="/pwa-auth", tags=["PWA authentication"])
@@ -124,7 +124,7 @@ def pwa_highlevel_start(
         "client_id": settings.ghl_client_id,
         "redirect_uri": settings.ghl_oauth_redirect_uri,
         "response_type": "code",
-        "scope": " ".join(sorted(required_scopes(settings))),
+        "scope": " ".join(sorted(requested_scopes(settings))),
         "state": state,
     }
     response = RedirectResponse(f"{settings.ghl_oauth_authorize_url}?{urlencode(params)}")
