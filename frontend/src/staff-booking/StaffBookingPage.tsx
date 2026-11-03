@@ -33,7 +33,8 @@ export function StaffBookingPage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("invoice");
   const [created, setCreated] = useState<CreatedOrder | null>(null);
   const [paymentComplete, setPaymentComplete] = useState(false);
-  const [checkoutKey] = useState(() => crypto.randomUUID());
+  // One key per booking: retries of the same submit reuse it, "Book another" gets a new one.
+  const [checkoutKey, setCheckoutKey] = useState(() => crypto.randomUUID());
 
   const restoredOrder = useQuery({
     queryKey: ["staff-booking-order", token, paymentReference],
@@ -72,6 +73,23 @@ export function StaffBookingPage() {
     onSuccess: (result) => setCreated(result),
   });
 
+  const bookAnother = () => {
+    if (paymentReference) {
+      // Drop the card-return marker so the finished booking is not restored again.
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    setCreated(null);
+    setPaymentComplete(false);
+    setCheckoutKey(crypto.randomUUID());
+    setSlot(null);
+    setUnits(1);
+    setFirst("");
+    setLast("");
+    setEmail("");
+    setPhone("");
+    setCustomFields({});
+    create.reset();
+  };
   if (context.isLoading || (paymentReference && restoredOrder.isLoading && !created)) return <main className="public-main"><div className="center-state"><div className="spinner" /></div></main>;
   if (context.error || !data) return <main className="public-main"><div className="center-state"><div className="state-card"><h1>Private staff link unavailable</h1><p>{context.error?.message || "This link may have expired, been revoked, or the staff member may be inactive."}</p></div></div></main>;
 
@@ -83,7 +101,7 @@ export function StaffBookingPage() {
       return <main className="public-main"><div className="public-card staff-booking-mobile-card"><span className="eyebrow">Staff booking</span><h1>Collect card payment</h1><div className="success-banner">Booking {created.public_reference} is reserved and waiting for card payment.</div><p className="muted-note">The client’s card details are entered securely into Stripe. Passport and staff members never see or store the card number.</p><StaffPaymentPanel clientSecret={created.client_secret} returnUrl={returnUrl} onSuccess={() => setPaymentComplete(true)} /></div></main>;
     }
     if (isCard && !cardConfirmed) return <main className="public-main"><div className="public-card staff-booking-mobile-card"><span className="eyebrow">Staff booking</span><h1>Payment setup unavailable</h1><div className="error-banner">Stripe did not return a secure payment form. Do not retry the booking repeatedly; contact the operator and check the payment configuration.</div><p className="muted-note">The booking remains reserved while the payment form is repaired. Do not create a duplicate booking.</p></div></main>;
-    return <main className="public-main"><div className="public-card staff-booking-mobile-card"><span className="eyebrow">Staff booking</span><h1>{created.payment_method === "invoice" ? (created.invoice_url ? "Invoice sent" : "Invoice delivery pending") : "Appointment booked"}</h1>{created.payment_method === "invoice" ? <><div className="success-banner">Booking {created.public_reference} is pending invoice payment.</div><p className="muted-note">{created.invoice_url ? "Stripe has accepted the invoice for delivery to the customer’s email. The appointment will be confirmed automatically after payment." : "The booking is safely held and the invoice delivery job will retry automatically. Check the outbox/worker logs if the customer does not receive it."}</p>{created.invoice_url && <a className="button" href={created.invoice_url} target="_blank" rel="noreferrer">Open invoice</a>}</> : <div className="success-banner">Booking {created.public_reference} was created as a free appointment.</div>}<p className="muted-note">You can close this page after sharing the invoice with the client, if payment is required.</p></div></main>;
+    return <main className="public-main"><div className="public-card staff-booking-mobile-card"><span className="eyebrow">Staff booking</span><h1>{created.payment_method === "invoice" ? (created.invoice_url ? "Invoice sent" : "Invoice delivery pending") : "Appointment booked"}</h1>{created.payment_method === "invoice" ? <><div className="success-banner">Booking {created.public_reference} is pending invoice payment.</div><p className="muted-note">{created.invoice_url ? "Stripe has accepted the invoice for delivery to the customer’s email. The appointment will be confirmed automatically after payment." : "The booking is safely held and the invoice delivery job will retry automatically. Check the outbox/worker logs if the customer does not receive it."}</p>{created.invoice_url && <a className="button" href={created.invoice_url} target="_blank" rel="noreferrer">Open invoice</a>}</> : <div className="success-banner">{created.payment_method === "card" ? `Payment received. Booking ${created.public_reference} is confirmed.` : `Booking ${created.public_reference} was created as a free appointment.`}</div>}<p className="muted-note">{created.payment_method === "invoice" ? "Share the invoice with the client if needed, then book the next one." : "Ready for the next booking."}</p><button type="button" className="button" style={{ width: "100%", marginTop: 12 }} onClick={bookAnother}>Book another</button></div></main>;
   }
 
   const selectSlot = (value: AvailabilitySlot) => {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Clock3, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, json } from "../api/client";
 import type { AvailabilityResponse } from "../api/types";
 import { formatLongDate, formatTime, isoDayInZone, tomorrowInZone, zoneLabel } from "../lib/datetime";
@@ -38,10 +38,26 @@ const money = (value: number, currency: string) =>
     currency: currency.toUpperCase(),
   }).format(value / 100);
 
+/** Only same-app staff screens may be returned to (no open redirects). */
+function staffReturnPath(value: string | null): string | null {
+  if (!value || value.startsWith("//") || value.includes("://")) return null;
+  return value.startsWith("/app") || value.startsWith("/staff-book/") ? value : null;
+}
+
+/** Shown when staff took this booking: go straight back and book the next one. */
+function StaffActions({ to }: { to: string }) {
+  const home = to.startsWith("/app") ? "/app" : to;
+  return <div className="toolbar" style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #e6e9e8", flexWrap: "wrap" }}>
+    <Link className="button" to={to}>Book another</Link>
+    {home !== to && <Link className="button secondary" to={home}>Back to Passport</Link>}
+  </div>;
+}
+
 export function ConfirmationPage() {
   const { publicReference = "" } = useParams();
   const [params] = useSearchParams();
   const accessToken = params.get("access_token");
+  const staffReturn = staffReturnPath(params.get("staff_return"));
   const [reconcile, setReconcile] = useState(params.get("reconcile") === "true");
   const queryClient = useQueryClient();
   const statusParams = new URLSearchParams();
@@ -71,6 +87,7 @@ export function ConfirmationPage() {
           <div className="spinner" />
           <h1>Confirming your booking</h1>
           <p>We’re waiting for secure payment confirmation. You can safely keep this page open.</p>
+          {staffReturn && <StaffActions to={staffReturn} />}
         </div>
       </div>
     );
@@ -89,6 +106,7 @@ export function ConfirmationPage() {
               : "Payment processing can take a moment. This page updates automatically."}
           </p>
           <strong>{order.public_reference}</strong>
+          {staffReturn && <StaffActions to={staffReturn} />}
         </div>
       </div>
     );
@@ -132,6 +150,7 @@ export function ConfirmationPage() {
             <div className="summary-row total"><span>{cancelled ? "Original total" : "Total paid"}</span><span>{money(order.customer_total_minor, order.currency)}</span></div>
           </div>
           {!cancelled && accessToken && <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #e6e9e8" }}><button className="button secondary" disabled={cancel.isPending} onClick={() => { if (window.confirm("Cancel this reservation? The configured cancellation policy will be applied.")) cancel.mutate(); }}>{cancel.isPending ? "Cancelling…" : "Cancel reservation"}</button>{cancel.error && <div className="error-banner" style={{ marginTop: 10 }}>{cancel.error.message}</div>}</div>}
+          {staffReturn && <StaffActions to={staffReturn} />}
         </section>
       </main>
     </div>

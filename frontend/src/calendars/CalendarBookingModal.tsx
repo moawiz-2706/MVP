@@ -55,9 +55,11 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
     onSuccess: async (result) => { setCreated(result); await client.invalidateQueries({ queryKey: ["bookings"] }); },
   });
 
+  // Same activity, fresh customer: lets staff book several groups in a row.
+  const bookAnother = () => { setCreated(null); setSlot(null); setUnits(1); setFirst(""); setLast(""); setEmail(""); setPhone(""); setPartnerId(""); create.reset(); };
   if (created) {
     if (created.client_secret) {
-      return <div><p className="muted-note">Booking {created.public_reference} is reserved. Complete the card payment securely below.</p><PaymentPanel clientSecret={created.client_secret} publicReference={created.public_reference} accessToken={created.access_token} /></div>;
+      return <div><p className="muted-note">Booking {created.public_reference} is reserved. Complete the card payment securely below.</p><PaymentPanel clientSecret={created.client_secret} publicReference={created.public_reference} accessToken={created.access_token} staffReturn="/app/bookings?new=1" /></div>;
     }
     return <div>
       {created.invoice_url ? <>
@@ -65,7 +67,7 @@ export function CalendarBookingModal({ calendar, onDone }: { calendar: Calendar;
         <p className="muted-note">The client must pay the hosted Stripe invoice before this appointment is confirmed.</p>
         <a className="button" href={created.invoice_url} target="_blank" rel="noreferrer">Open invoice</a>
       </> : <div className="success-banner">Booking {created.public_reference} was created successfully.</div>}
-      <div className="dialog-actions"><button className="button" onClick={onDone}>Done</button></div>
+      <div className="dialog-actions"><button className="button secondary" onClick={bookAnother}>Book another</button><button className="button" onClick={onDone}>Done</button></div>
     </div>;
   }
 
