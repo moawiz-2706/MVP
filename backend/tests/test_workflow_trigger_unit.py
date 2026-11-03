@@ -170,6 +170,7 @@ PARTNER_TYPES = {
     "source_partner": str, "gross_booking_amount": str, "hotel_commission_20pct": str,
     "pga_commission_30pct": str, "net_to_operator": str, "gratuity_amount": str,
     "number_of_guests": int, "tour_date": str, "tour_type": str,
+    "tour_start_local": str, "tour_end_local": str,
 }
 
 
@@ -470,6 +471,9 @@ def test_direct_booking_keeps_everything_for_the_operator():
     assert payload["number_of_guests"] == 2
     assert payload["tour_date"] == "2026-10-25"  # 15:00 UTC is 11:00 in New York
     assert payload["tour_type"] == "Sunset Cruises"
+    # 15:00-17:00 UTC is 11:00 AM-1:00 PM in New York on Oct 25 (EDT).
+    assert payload["tour_start_local"] == "Sunday, October 25, 2026 at 11:00 AM"
+    assert payload["tour_end_local"] == "1:00 PM"
 
 
 def test_partner_booking_splits_20_30_50_of_the_price_before_tax_and_fees():
