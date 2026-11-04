@@ -133,11 +133,21 @@ def order_status(
     # Waiver links appear once the order is confirmed and the operator has a waiver.
     waivers = WaiverService(db)
     links: dict = {}
+    guests: dict = {}
     if confirmed and waivers.configured(operator.id):
         for booking in bookings:
             if booking.status in SIGNABLE_STATUSES:
-                waiver = waivers.ensure(booking)
-                links[booking.id] = (waiver_url(waiver.token), waiver.status == "signed")
+                booking_waivers = waivers.guest_waivers(booking)
+                first = booking_waivers[0]
+                links[booking.id] = (
+                    waiver_url(first.token),
+                    all(waiver.status == "signed" for waiver in booking_waivers),
+                )
+                if len(booking_waivers) > 1:
+                    guests[booking.id] = [
+                        {"guest_number": w.guest_number, "url": waiver_url(w.token), "signed": w.status == "signed"}
+                        for w in booking_waivers
+                    ]
     return PublicOrderStatus(
         public_reference=order.public_reference,
         operator_slug=operator.slug,
@@ -173,6 +183,7 @@ def order_status(
                 departure_location_address=booking.departure_location_address_snapshot,
                 waiver_url=links.get(booking.id, (None, False))[0],
                 waiver_signed=links.get(booking.id, (None, False))[1],
+                waiver_guests=guests.get(booking.id, []),
             )
             for booking in bookings
         ],

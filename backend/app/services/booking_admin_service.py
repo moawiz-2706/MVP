@@ -303,7 +303,10 @@ class BookingAdminService:
                 for resource_id, name, quantity in resources
             ],
             "created_at": booking.created_at,
-            "waiver": WaiverService(self.db).summary(booking),
+            "waiver": {
+                **WaiverService(self.db).summary(booking),
+                "guests": WaiverService(self.db).guest_rows(booking),
+            },
             "notes": self._notes(booking.id),
             "participants": [
                 {

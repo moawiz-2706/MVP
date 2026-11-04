@@ -553,6 +553,8 @@ class OrderService:
             ),
         )
         tag_order(order, partner)
+        if allow_payment_override and request.waiver_mode == "per_guest":
+            order.waiver_mode = "per_guest"
         self.db.add(order)
         self.db.flush()
         for item in prepared:

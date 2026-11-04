@@ -553,6 +553,7 @@ class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "booking_source IS NULL OR booking_source IN ('public','staff_link','pwa','desktop')",
             name="booking_source_check",
         ),
+        CheckConstraint("waiver_mode IN ('party','per_guest')", name="waiver_mode_check"),
     )
 
     operator_id: Mapped[uuid.UUID] = mapped_column(
@@ -604,6 +605,9 @@ class BookingOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     partner_name_snapshot: Mapped[str | None] = mapped_column(Text)
     partner_hotel_bps: Mapped[int | None] = mapped_column(Integer)
     partner_pga_bps: Mapped[int | None] = mapped_column(Integer)
+    # "party": one adult signs for everyone (public and affiliate checkouts);
+    # "per_guest": staff asked for a separate waiver per guest (migration 049).
+    waiver_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="party")
 
 
 class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -694,7 +698,8 @@ class BookingLineItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class BookingWaiver(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """One waiver per booking, signed once by the lead participant or guardian.
+    """A booking's waiver: guest 1 signs for the whole party, or (staff bookings
+    in per-guest mode, migration 049) one waiver per guest, numbered 1..units.
 
     Signing snapshots the exact waiver text and activity; a database trigger then
     rejects any further change or deletion (see the listeners at the end of this
@@ -704,6 +709,8 @@ class BookingWaiver(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "booking_waivers"
     __table_args__ = (
         UniqueConstraint("token_digest", name="uq_booking_waivers_token_digest"),
+        UniqueConstraint("booking_id", "guest_number", name="uq_booking_waivers_booking_guest"),
+        CheckConstraint("guest_number >= 1", name="guest_number_positive"),
         CheckConstraint("status IN ('pending', 'signed')", name="status_valid"),
         Index("ix_booking_waivers_operator_status_booking", "operator_id", "status", "booking_id"),
         CheckConstraint(
@@ -717,8 +724,9 @@ class BookingWaiver(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True
     )
     booking_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("bookings.id"), nullable=False, unique=True
+        UUID(as_uuid=True), ForeignKey("bookings.id"), nullable=False
     )
+    guest_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # Secret link credential sent to the customer; never sequential.
     token: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     # SHA-256 lookup key; the raw token is retained temporarily for existing URL reconstruction.

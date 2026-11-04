@@ -76,7 +76,9 @@ class FakeSession:
         if entity is CalendarCategory:
             return "Sunset Cruises"
         if entity is BookingWaiver:
-            booking_id = statement.whereclause.right.value
+            # WHERE booking_id = :id AND guest_number = :n
+            clauses = getattr(statement.whereclause, "clauses", [statement.whereclause])
+            booking_id = next(c.right.value for c in clauses if c.left.key == "booking_id")
             return self.waivers.get(booking_id)
         raise AssertionError(f"unexpected scalar query on {entity}")
 

@@ -36,7 +36,7 @@ REQUIRED_PRODUCTION_TABLES = (
     "booking_waivers",
     "booking_line_items",
 )
-REQUIRED_SCHEMA_VERSION = "047_booking_partners"
+REQUIRED_SCHEMA_VERSION = "049_per_guest_waivers"
 OUTBOX_STALE_MINUTES = 15
 logger = logging.getLogger("passport.readiness")
 

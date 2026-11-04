@@ -132,6 +132,14 @@ function SignForm({ waiver, token }: { waiver: PublicWaiver; token: string }) {
   const [others, setOthers] = useState<WaiverPerson[]>(() =>
     Array.from({ length: Math.max(0, waiver.participants_total - 1) }, () => ({ first_name: "", last_name: "", date_of_birth: "", email: "", phone: "" })),
   );
+  // Staff asked for one waiver per guest: an adult signs for themselves, or a
+  // parent or guardian signs for one guest under 18.
+  const perGuest = !!waiver.guest_number;
+  const [forMinor, setForMinor] = useState(false);
+  const toggleForMinor = (checked: boolean) => {
+    setForMinor(checked);
+    setOthers(checked ? [{ first_name: "", last_name: "", date_of_birth: "", email: "", phone: "" }] : []);
+  };
   const [optIn, setOptIn] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [signature, setSignature] = useState<string | null>(null);
@@ -148,16 +156,23 @@ function SignForm({ waiver, token }: { waiver: PublicWaiver; token: string }) {
   const signerTooYoung = !!signer.date_of_birth && ageOn(signer.date_of_birth, today) < ADULT_AGE;
   // Adults taking part must give contact details; the signer covers minors.
   const isMinor = (person: WaiverPerson) => !!person.date_of_birth && ageOn(person.date_of_birth, activityDay) < ADULT_AGE;
-  const adultMissingContact = others.some((person) => !isMinor(person) && (!person.email?.trim() || !person.phone?.trim()));
+  const adultMissingContact = !perGuest && others.some((person) => !isMinor(person) && (!person.email?.trim() || !person.phone?.trim()));
+  const guestNotMinor = perGuest && forMinor && !!others[0]?.date_of_birth && !isMinor(others[0]);
   const submit = (event: FormEvent) => { event.preventDefault(); if (signature && agreed && !signerTooYoung) sign.mutate(); };
 
   return (
     <form onSubmit={submit}>
       {waiver.waiver_text && <WaiverText text={waiver.waiver_text} />}
 
+      {perGuest && <section className="waiver-section">
+        <h2>Waiver for guest {waiver.guest_number} of {waiver.guest_total}</h2>
+        <p className="muted-note">Each guest on this booking signs their own waiver.</p>
+        <label className="check-field"><input type="checkbox" checked={forMinor} onChange={(event) => toggleForMinor(event.target.checked)} />This guest is under 18 and I am their parent or guardian</label>
+      </section>}
+
       <section className="waiver-section">
         <h2>Your details</h2>
-        <p className="muted-note">The person signing must be 18 or older and signs on behalf of everyone listed, including any minors in their care.</p>
+        <p className="muted-note">{perGuest ? (forMinor ? "You must be 18 or older and sign as the guest's parent or guardian." : "You must be 18 or older and sign for yourself.") : "The person signing must be 18 or older and signs on behalf of everyone listed, including any minors in their care."}</p>
         <div className="form-grid">
           <Field label="First name" value={signer.first_name} onChange={updateSigner("first_name")} maxLength={120} />
           <Field label="Last name" value={signer.last_name} onChange={updateSigner("last_name")} maxLength={120} />
@@ -181,11 +196,12 @@ function SignForm({ waiver, token }: { waiver: PublicWaiver; token: string }) {
 
       {others.length > 0 && (
         <section className="waiver-section">
-          <h2>Everyone else taking part</h2>
-          <p className="muted-note">This booking is for {waiver.participants_total} people, so please add the other {others.length}.</p>
+          <h2>{perGuest ? "The guest you are signing for" : "Everyone else taking part"}</h2>
+          <p className="muted-note">{perGuest ? "Enter the guest's own name and date of birth." : `This booking is for ${waiver.participants_total} people, so please add the other ${others.length}.`}</p>
+          {guestNotMinor && <div className="error-banner">This guest is 18 or older, so they need to sign their own waiver.</div>}
           {others.map((person, index) => (
             <div className="participant-block" key={index}>
-              <h3>Participant {index + 2}{person.date_of_birth && ageOn(person.date_of_birth, activityDay) < ADULT_AGE && <span className="badge warning">Minor</span>}</h3>
+              <h3>{perGuest ? "Guest" : `Participant ${index + 2}`}{person.date_of_birth && ageOn(person.date_of_birth, activityDay) < ADULT_AGE && <span className="badge warning">Minor</span>}</h3>
               <div className="form-grid">
                 <Field label="First name" value={person.first_name} onChange={updateOther(index, "first_name")} maxLength={120} />
                 <Field label="Last name" value={person.last_name} onChange={updateOther(index, "last_name")} maxLength={120} />
@@ -213,7 +229,7 @@ function SignForm({ waiver, token }: { waiver: PublicWaiver; token: string }) {
 
       <label className="check-field waiver-agree"><input type="checkbox" required checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />I have read this waiver, understand it, and agree to it on behalf of everyone listed.</label>
       {sign.error && <div className="error-banner" style={{ marginTop: 12 }}>{sign.error.message}</div>}
-      <button className="button waiver-submit" disabled={sign.isPending || !signature || !agreed || signerTooYoung || adultMissingContact}>
+      <button className="button waiver-submit" disabled={sign.isPending || !signature || !agreed || signerTooYoung || adultMissingContact || guestNotMinor}>
         {sign.isPending ? "Signing..." : signature ? "Sign waiver" : "Add your signature to continue"}
       </button>
     </form>

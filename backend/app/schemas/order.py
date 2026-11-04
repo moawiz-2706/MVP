@@ -55,6 +55,9 @@ class OrderCreateRequest(OrderQuoteRequest):
     # Passport/PWA booking endpoint.
     partner_code: str | None = Field(default=None, max_length=80)
     partner_id: uuid.UUID | None = None
+    # Staff bookings (Passport/PWA and the staff link) may ask for a waiver per
+    # guest; public and affiliate checkouts always use one waiver per party.
+    waiver_mode: Literal["party", "per_guest"] | None = None
 
 
 class QuotedItem(BaseModel):
@@ -100,12 +103,20 @@ class OrderCreateResponse(BaseModel):
     quote: OrderQuoteResponse
 
 
+class PublicWaiverGuest(BaseModel):
+    guest_number: int
+    url: str
+    signed: bool
+
+
 class PublicOrderItem(QuotedItem):
     booking_id: uuid.UUID
     calendar_slug: str
     # Signing link for the booking's waiver; None when the operator has no waiver.
     waiver_url: str | None = None
     waiver_signed: bool = False
+    # Per-guest waivers (staff chose one per guest): one link each.
+    waiver_guests: list[PublicWaiverGuest] = Field(default_factory=list)
 
 
 class PublicOrderStatus(BaseModel):

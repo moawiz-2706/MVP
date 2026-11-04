@@ -271,7 +271,8 @@ export interface SlotRate { rate_id: Id; customer_type_name: string; seat_count:
 export interface AvailabilityMonth { month: string; time_zone: string; days: { date: string; status: "available" | "sold_out" | "none" }[] }
 export interface AvailabilityResponse { date: string; time_zone: string; calendar: unknown; slots: AvailabilitySlot[] }
 
-export interface WaiverSummary { status: "signed" | "pending" | "not_set_up" | "not_applicable"; signed_at: string | null; url: string | null }
+export interface WaiverGuest { guest_number: number; status: "signed" | "pending"; url: string; signed_at: string | null; signed_by: string | null }
+export interface WaiverSummary { status: "signed" | "pending" | "not_set_up" | "not_applicable"; signed_at: string | null; url: string | null; signed_count?: number | null; total?: number | null; guests?: WaiverGuest[] }
 export interface BookingNote { id: Id; author_user_id: Id | null; author_name: string | null; body: string; created_at: string }
 export interface BookingParticipant { id: Id; sequence: number; first_name: string; last_name: string; email: string | null; phone: string | null; date_of_birth: string | null; is_minor: boolean; guardian_name: string | null; emergency_contact: Record<string, unknown> | null; operational_notes: string | null; status: string; source: string }
 export interface ReportSummary { start_date: string; end_date: string; total_bookings: number; confirmed_bookings: number; pending_payment_bookings: number; cancelled_bookings: number; completed_bookings: number; units_booked: number; gross_sales_minor: number; booking_fees_minor: number; taxes_minor: number; upcoming_bookings: number; failed_sync_jobs: number }
@@ -291,6 +292,8 @@ export interface PublicWaiver {
   activity_end_at: string;
   time_zone: string;
   participants_total: number;
+  guest_number?: number | null;
+  guest_total?: number | null;
   waiver_text: string | null;
   opt_in_label: string | null;
   prefill: { first_name: string; last_name: string; email: string; phone: string | null } | null;
