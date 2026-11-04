@@ -121,6 +121,9 @@ class PublicWaiver(BaseModel):
     activity_end_at: datetime
     time_zone: str
     participants_total: int
+    # Set when staff asked for one waiver per guest: "Guest 2 of 4".
+    guest_number: int | None = None
+    guest_total: int | None = None
     waiver_text: str | None
     opt_in_label: str | None
     prefill: WaiverPrefill | None = None
@@ -129,9 +132,21 @@ class PublicWaiver(BaseModel):
     signature_png: str | None = None
 
 
+class WaiverGuest(BaseModel):
+    guest_number: int
+    status: Literal["signed", "pending"]
+    url: str
+    signed_at: datetime | None = None
+    signed_by: str | None = None
+
+
 class WaiverSummary(BaseModel):
     """Waiver state shown on the admin booking panel."""
 
     status: Literal["signed", "pending", "not_set_up", "not_applicable"]
     signed_at: datetime | None
     url: str | None
+    # Per-guest waivers (staff bookings): progress and each guest's link.
+    signed_count: int | None = None
+    total: int | None = None
+    guests: list[WaiverGuest] = Field(default_factory=list)

@@ -1,9 +1,11 @@
 import logging
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -53,18 +55,49 @@ except ValidationError as exc:
 app = FastAPI(title=settings.app_name, version="1.0.0")
 
 
+# A database that is not ready yet (a migration still to apply) is checked
+# again on later requests, so applying the migration brings the API back
+# without a redeploy. Settings errors stay until the next deploy.
+_database_not_ready = False
+_last_database_check = 0.0
+DATABASE_RECHECK_SECONDS = 30.0
+
+
 @app.on_event("startup")
 async def validate_runtime_settings() -> None:
-    global startup_error
+    global startup_error, _database_not_ready, _last_database_check
     if startup_error:
         return
     try:
         settings.validate_runtime()
-        if settings.is_production:
-            check_database_readiness()
     except Exception as exc:
         startup_error = str(exc)[:500]
         logger.error("Passport startup checks failed: %s", startup_error)
+        return
+    if settings.is_production:
+        _last_database_check = time.monotonic()
+        try:
+            check_database_readiness()
+        except Exception as exc:
+            startup_error = str(exc)[:500]
+            _database_not_ready = True
+            logger.error("Passport database is not ready: %s", startup_error)
+
+
+def _recheck_database() -> None:
+    """Clear a database-not-ready state once the database has caught up."""
+    global startup_error, _database_not_ready, _last_database_check
+    if not _database_not_ready or time.monotonic() - _last_database_check < DATABASE_RECHECK_SECONDS:
+        return
+    _last_database_check = time.monotonic()
+    try:
+        check_database_readiness()
+    except Exception as exc:
+        startup_error = str(exc)[:500]
+        return
+    logger.info("Passport database is ready; serving requests again")
+    startup_error = None
+    _database_not_ready = False
 
 
 app.add_middleware(
@@ -101,6 +134,8 @@ async def integrity_error_handler(_request: Request, _exc: IntegrityError) -> JS
 
 @app.middleware("http")
 async def iframe_security_headers(request: Request, call_next):
+    if startup_error and _database_not_ready:
+        await run_in_threadpool(_recheck_database)
     if startup_error and request.url.path.startswith(settings.api_prefix):
         # Fail closed: no booking or payment work on a misconfigured deployment.
         response = JSONResponse(
@@ -125,6 +160,7 @@ def health() -> dict[str, str]:
 
 @app.get("/api/readiness", tags=["health"])
 def readiness() -> JSONResponse:
+    _recheck_database()
     if startup_error:
         return JSONResponse(status_code=503, content={"status": "not_ready", "detail": startup_error})
     try:

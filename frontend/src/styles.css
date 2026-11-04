@@ -350,6 +350,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line); border-bottom-width: 2px;
 .waiver-signed-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 8px; background: var(--accent-soft); color: #125b4e; font-size: 12.5px; }
 .waiver-signed-banner span { flex: 1; min-width: 200px; }
 .waiver-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.waiver-guests { display: grid; gap: 6px; justify-items: start; }
 
 /* Booking notes */
 .notes-list { display: grid; gap: 8px; margin-bottom: 10px; }

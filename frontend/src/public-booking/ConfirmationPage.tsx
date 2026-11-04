@@ -29,6 +29,7 @@ interface Status {
     calendar_slug?: string;
     waiver_url: string | null;
     waiver_signed: boolean;
+    waiver_guests?: { guest_number: number; url: string; signed: boolean }[];
   }[];
 }
 
@@ -138,7 +139,7 @@ export function ConfirmationPage() {
               </div>
               {!cancelled && item.waiver_url && (
                 <div style={{ marginTop: 10 }}>
-                  {item.waiver_signed ? <span className="badge success">Waiver signed</span> : <a className="button small" href={item.waiver_url}>Sign waiver for {item.units} {item.units === 1 ? "person" : "people"}</a>}
+                  {item.waiver_guests && item.waiver_guests.length > 0 ? <div className="toolbar" style={{ flexWrap: "wrap" }}>{item.waiver_guests.map((guest) => guest.signed ? <span key={guest.guest_number} className="badge success">Guest {guest.guest_number} signed</span> : <a key={guest.guest_number} className="button small secondary" href={guest.url}>Waiver for guest {guest.guest_number}</a>)}</div> : item.waiver_signed ? <span className="badge success">Waiver signed</span> : <a className="button small" href={item.waiver_url}>Sign waiver for {item.units} {item.units === 1 ? "person" : "people"}</a>}
                 </div>
               )}
               {!cancelled && accessToken && <RescheduleControl order={order} item={item} accessToken={accessToken} onDone={() => queryClient.invalidateQueries({ queryKey: ["order-status", publicReference] })} />}

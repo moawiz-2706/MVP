@@ -58,12 +58,21 @@ class WaiverService:
     def configured(self, operator_id: uuid.UUID) -> bool:
         return _has_text(self.db.get(OperatorSettings, operator_id))
 
-    def get(self, booking_id: uuid.UUID) -> BookingWaiver | None:
-        return self.db.scalar(select(BookingWaiver).where(BookingWaiver.booking_id == booking_id))
+    def get(self, booking_id: uuid.UUID, guest_number: int = 1) -> BookingWaiver | None:
+        return self.db.scalar(
+            select(BookingWaiver).where(
+                BookingWaiver.booking_id == booking_id, BookingWaiver.guest_number == guest_number
+            )
+        )
 
-    def ensure(self, booking: Booking) -> BookingWaiver:
-        """The booking's waiver, created with a fresh secret link if it has none yet."""
-        waiver = self.get(booking.id)
+    def per_guest(self, booking: Booking) -> bool:
+        """Staff asked for a separate waiver for every guest of this booking."""
+        order = self.db.get(BookingOrder, booking.booking_order_id)
+        return bool(order and order.waiver_mode == "per_guest")
+
+    def ensure(self, booking: Booking, guest_number: int = 1) -> BookingWaiver:
+        """A guest's waiver (guest 1 = the party waiver), created with a fresh secret link."""
+        waiver = self.get(booking.id, guest_number)
         if waiver is None:
             token = secrets.token_urlsafe(24)
             self.db.execute(
@@ -71,31 +80,81 @@ class WaiverService:
                 .values(
                     operator_id=booking.operator_id,
                     booking_id=booking.id,
+                    guest_number=guest_number,
                     token=token,
                     token_digest=waiver_token_digest(token),
                     status="pending",
                     public_expires_at=datetime.now(UTC) + timedelta(days=get_settings().waiver_public_days),
                 )
-                .on_conflict_do_nothing(index_elements=[BookingWaiver.booking_id])
+                .on_conflict_do_nothing(constraint="uq_booking_waivers_booking_guest")
             )
             self.db.commit()
-            waiver = self.get(booking.id)
+            waiver = self.get(booking.id, guest_number)
         return waiver
 
+    def guest_waivers(self, booking: Booking) -> list[BookingWaiver]:
+        """Every waiver the booking needs: one per guest, or the single party waiver."""
+        count = max(1, booking.units) if self.per_guest(booking) else 1
+        return [self.ensure(booking, number) for number in range(1, count + 1)]
+
     def links_for_bookings(self, bookings: list[Booking]) -> dict[uuid.UUID, str]:
-        """Signing links for unsigned, signable bookings; empty if waivers are off."""
+        """Signing links for unsigned, signable bookings; empty if waivers are off.
+
+        A per-guest booking lists one line per guest still to sign.
+        """
         if not bookings or not self.configured(bookings[0].operator_id):
             return {}
         links: dict[uuid.UUID, str] = {}
         for booking in bookings:
             if booking.status not in SIGNABLE_STATUSES:
                 continue
-            waiver = self.ensure(booking)
-            if waiver.status != "signed":
-                links[booking.id] = waiver_url(waiver.token)
+            waivers = self.guest_waivers(booking)
+            open_links = [
+                (waiver.guest_number, waiver_url(waiver.token)) for waiver in waivers if waiver.status != "signed"
+            ]
+            if not open_links:
+                continue
+            if len(waivers) == 1:
+                links[booking.id] = open_links[0][1]
+            else:
+                links[booking.id] = "\n".join(f"Guest {number}: {url}" for number, url in open_links)
         return links
 
+    def guest_rows(self, booking: Booking) -> list[dict[str, Any]]:
+        """Per-guest waiver state for staff screens (empty for a party waiver)."""
+        if not self.per_guest(booking) or booking.status not in SIGNABLE_STATUSES or not self.configured(booking.operator_id):
+            return []
+        rows = []
+        for waiver in self.guest_waivers(booking):
+            signer = ((waiver.details or {}).get("signer") or {}) if waiver.status == "signed" else {}
+            rows.append(
+                {
+                    "guest_number": waiver.guest_number,
+                    "status": waiver.status,
+                    "url": waiver_url(waiver.token),
+                    "signed_at": waiver.signed_at,
+                    "signed_by": " ".join(
+                        part for part in (signer.get("first_name"), signer.get("last_name")) if part
+                    ) or None,
+                }
+            )
+        return rows
+
     def summary(self, booking: Booking) -> dict[str, Any]:
+        if self.per_guest(booking) and booking.status in SIGNABLE_STATUSES and self.configured(booking.operator_id):
+            waivers = self.guest_waivers(booking)
+            signed = [waiver for waiver in waivers if waiver.status == "signed"]
+            done = len(signed) == len(waivers)
+            pending_links = [
+                f"Guest {waiver.guest_number}: {waiver_url(waiver.token)}" for waiver in waivers if waiver.status != "signed"
+            ]
+            return {
+                "status": "signed" if done else "pending",
+                "signed_at": max(waiver.signed_at for waiver in signed) if done else None,
+                "url": "\n".join(pending_links) if pending_links else waiver_url(waivers[0].token),
+                "signed_count": len(signed),
+                "total": len(waivers),
+            }
         waiver = self.get(booking.id)
         if waiver and waiver.status == "signed":
             return {"status": "signed", "signed_at": waiver.signed_at, "url": waiver_url(waiver.token)}
@@ -131,11 +190,15 @@ class WaiverService:
         return self._view(*row)
 
     def _view(self, waiver, booking, order, operator, settings) -> dict[str, Any]:
+        per_guest = order.waiver_mode == "per_guest"
         base = {
             "operator_name": operator.name,
             "website": settings.waiver_website if settings else None,
             "time_zone": operator.time_zone,
-            "participants_total": booking.units,
+            # A per-guest waiver covers one person; a party waiver everyone.
+            "participants_total": 1 if per_guest else booking.units,
+            "guest_number": waiver.guest_number if per_guest else None,
+            "guest_total": booking.units if per_guest else None,
             "activity_end_at": booking.end_at,
         }
         default_title = f"{operator.name} Waiver"
@@ -170,15 +233,18 @@ class WaiverService:
             **common,
             "status": "pending",
             "waiver_text": settings.waiver_text,
+            # Only the lead booker's own waiver is prefilled with their details.
             "prefill": {
                 "first_name": order.customer_first_name,
                 "last_name": order.customer_last_name,
                 "email": order.customer_email,
                 "phone": order.customer_phone,
-            },
+            } if not per_guest or waiver.guest_number == 1 else None,
         }
 
-    def _record_participants(self, booking: Booking, data: WaiverSignRequest, activity_day: date) -> None:
+    def _record_participants(
+        self, booking: Booking, data: WaiverSignRequest, activity_day: date, *, signer_takes_part: bool = True
+    ) -> None:
         """Put everyone named on the signed waiver onto the booking's manifest.
 
         People staff already entered are matched by name and left as they are;
@@ -198,7 +264,8 @@ class WaiverService:
         }
         sequence = max((row.sequence for row in existing), default=0)
         signer_name = f"{data.signer.first_name} {data.signer.last_name}"
-        people = [(data.signer, data.signer.email, data.signer.phone)]
+        # A guardian signing a minor's own waiver is not on the trip themselves.
+        people = [(data.signer, data.signer.email, data.signer.phone)] if signer_takes_part else []
         people += [(person, person.email, person.phone) for person in data.participants]
         for person, email, phone in people:
             key = (person.first_name.casefold(), person.last_name.casefold())
@@ -240,15 +307,24 @@ class WaiverService:
             raise ConflictError("This waiver is not available yet")
         if booking.status not in SIGNABLE_STATUSES:
             raise ConflictError("This booking is no longer active")
-        people = 1 + len(data.participants)
-        if people != booking.units:
-            noun = "person" if booking.units == 1 else "people"
-            raise ConflictError(
-                f"This booking is for {booking.units} {noun}; please list everyone taking part"
-            )
         zone = require_timezone(operator.time_zone)
         today = datetime.now(UTC).astimezone(zone).date()
         activity_day = booking.start_at.astimezone(zone).date()
+        per_guest = order.waiver_mode == "per_guest"
+        if per_guest:
+            # One waiver per guest: an adult signs for themselves, or a parent
+            # or guardian signs for exactly one minor.
+            if len(data.participants) > 1:
+                raise ConflictError("This waiver is for one guest only")
+            if data.participants and age_on(data.participants[0].date_of_birth, activity_day) >= ADULT_AGE:
+                raise ConflictError("An adult guest signs their own waiver; only a minor's can be signed by a guardian")
+        else:
+            people = 1 + len(data.participants)
+            if people != booking.units:
+                noun = "person" if booking.units == 1 else "people"
+                raise ConflictError(
+                    f"This booking is for {booking.units} {noun}; please list everyone taking part"
+                )
         if any(person.date_of_birth > today for person in [data.signer, *data.participants]):
             raise ConflictError("A date of birth is in the future")
         if age_on(data.signer.date_of_birth, today) < ADULT_AGE:
@@ -282,7 +358,9 @@ class WaiverService:
             "opt_in_label": settings.waiver_opt_in_label,
         }
         waiver.signature_png = data.signature_png
-        self._record_participants(booking, data, activity_day)
+        self._record_participants(
+            booking, data, activity_day, signer_takes_part=not (per_guest and data.participants)
+        )
         from app.services.ghl_booking_record_service import (
             enqueue_booking_record_sync,
             enqueue_contact_refresh,
