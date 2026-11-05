@@ -18,12 +18,10 @@ import { CalendarBookingModal } from "./CalendarBookingModal";
 const days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 const price = (minor:number,currency:string) => new Intl.NumberFormat(undefined,{style:"currency",currency:currency.toUpperCase()}).format(minor/100);
 // Rate-priced calendars keep base_price_minor at 0, so the list shows the
-// lowest active rate ("from") instead of a misleading $0.00.
+// lowest active rate ("from") that the calendar list returns.
 function CalendarPrice({calendar}:{calendar:Calendar}){
-  const rates=useQuery({queryKey:["calendar-rates",calendar.id],queryFn:()=>api<CalendarRate[]>(`/calendars/${calendar.id}/rates`),staleTime:60_000});
-  const active=(rates.data||[]).filter(rate=>rate.is_active);
-  if(active.length){const lowest=Math.min(...active.map(rate=>rate.price_minor));const single=active.length===1;return <span className="price-from">{!single&&<small>from</small>}<strong>{price(lowest,calendar.currency)}</strong>{single&&<small>{active[0]?.customer_type_name}</small>}</span>;}
-  if(rates.isLoading)return <span className="muted-note" style={{margin:0}}>…</span>;
+  const count=calendar.active_rate_count||0;
+  if(count&&calendar.lowest_rate_minor!=null)return <span className="price-from">{count>1&&<small>from</small>}<strong>{price(calendar.lowest_rate_minor,calendar.currency)}</strong>{count===1&&calendar.single_rate_name&&<small>{calendar.single_rate_name}</small>}</span>;
   return calendar.base_price_minor>0?<strong>{price(calendar.base_price_minor,calendar.currency)}</strong>:<span className="muted-note" style={{margin:0}}>No rates</span>;
 }
 const duration = (minutes:number) => minutes % 60 ? `${Math.floor(minutes/60)}h ${minutes%60}m` : `${minutes/60}h`;
@@ -85,7 +83,7 @@ function RateEditor({calendar,allResources}:{calendar:Calendar;allResources:Reso
         return {customer_type_id:type.id,price_minor:dollarsToMinor(draft.price_dollars),booking_fee_bps:draft.booking_fee_bps,tax_bps:draft.tax_bps,resources:draft.resources,duration_minutes:ruleValue(draft.duration_minutes),min_units_per_booking:ruleValue(draft.min_units_per_booking),max_units_per_booking:ruleValue(draft.max_units_per_booking),max_units_per_departure:ruleValue(draft.max_units_per_departure)};
       }),
     })),
-    onSuccess:()=>{setSuccess("Rate plans and resource requirements saved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});},
+    onSuccess:()=>{setSuccess("Rate plans and resource requirements saved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});void client.invalidateQueries({queryKey:["calendars"]});},
   });
   const createType=useMutation({
     mutationFn:()=>api<CustomerType>("/customer-types",json("POST",{name:newName,plural_name:newPlural||newName,note:null,seat_count:newSeats})),
@@ -93,7 +91,7 @@ function RateEditor({calendar,allResources}:{calendar:Calendar;allResources:Reso
   });
   const deleteRate=useMutation({
     mutationFn:(customerTypeId:string)=>api<void>(`/calendars/${calendar.id}/rates/${customerTypeId}`,{method:"DELETE"}),
-    onSuccess:(_,customerTypeId)=>{setEnabled(current=>({...current,[customerTypeId]:false}));setSuccess("Rate removed from this calendar. Historical bookings were preserved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});},
+    onSuccess:(_,customerTypeId)=>{setEnabled(current=>({...current,[customerTypeId]:false}));setSuccess("Rate removed from this calendar. Historical bookings were preserved.");void client.invalidateQueries({queryKey:["calendar-rates",calendar.id]});void client.invalidateQueries({queryKey:["calendars"]});},
   });
   const updateDraft=(typeId:string,patch:Partial<RateDraft>)=>setDrafts(current=>({...current,[typeId]:{...(current[typeId]||emptyDraft()),...patch}}));
   const addResource=(typeId:string)=>{
