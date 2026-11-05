@@ -26,6 +26,7 @@ const OperatorBookingPage = lazy(() => import("./public-booking/OperatorBookingP
 const CategoryBookingPage = lazy(() => import("./public-booking/CategoryBookingPage").then((module) => ({ default: module.CategoryBookingPage })));
 const CalendarBookingPage = lazy(() => import("./public-booking/CalendarBookingPage").then((module) => ({ default: module.CalendarBookingPage })));
 const ConfirmationPage = lazy(() => import("./public-booking/ConfirmationPage").then((module) => ({ default: module.ConfirmationPage })));
+const PartyPage = lazy(() => import("./public-booking/PartyPage").then((module) => ({ default: module.PartyPage })));
 const StripeReturnPage = lazy(() => import("./settings/StripeReturnPage").then((module) => ({ default: module.StripeReturnPage })));
 const WaiverPage = lazy(() => import("./waivers/WaiverPage").then((module) => ({ default: module.WaiverPage })));
 const IntegrationResultPage = lazy(() => import("./IntegrationResultPage").then((module) => ({ default: module.IntegrationResultPage })));
@@ -69,6 +70,7 @@ const router = createBrowserRouter([
   { path: "/book/:operatorSlug/:calendarSlug", element: <CalendarBookingPage /> },
   { path: "/staff-book/:token", element: <StaffBookingPage /> },
   { path: "/booking/:publicReference/confirmation", element: <ConfirmationPage /> },
+  { path: "/party/:token", element: <PartyPage /> },
   { path: "/integration-result", element: <IntegrationResultPage /> },
   { path: "/stripe/connect/return", element: <StripeReturnPage /> },
   { path: "/stripe/connect/refresh", element: <StripeReturnPage refresh /> },

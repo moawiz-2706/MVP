@@ -203,6 +203,8 @@ class Calendar(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     gallery_image_urls: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
+    # YouTube, Vimeo or a direct video-file link (migration 050).
+    video_url: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     public_booking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -980,7 +982,7 @@ class PublicAccessCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("token_digest", name="uq_public_access_credentials_digest"),
         CheckConstraint(
-            "purpose IN ('order_status','waiver_sign','waiver_view','waiver_view_sensitive','staff_booking')",
+            "purpose IN ('order_status','waiver_sign','waiver_view','waiver_view_sensitive','staff_booking','party_details')",
             name="public_access_purpose_valid",
         ),
     )

@@ -43,7 +43,7 @@ export async function api<T>(
   const notifySessionExpired = options.notifySessionExpired ?? true;
   const method = (init.method || "GET").toUpperCase();
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
   // Lets the API attribute staff-created bookings to the standalone PWA or the
   // embedded desktop. Reporting only; it grants nothing.

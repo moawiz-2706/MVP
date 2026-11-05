@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.entities import (
     Booking,
     BookingOrder,
+    BookingParticipant,
     Customer,
     Operator,
     Payment,
@@ -20,6 +22,10 @@ from app.services.waiver_service import WaiverService
 # update would replace every tag the operator's team had set on that contact.
 CUSTOMER_TAG = "passport-customer"
 STAFF_TAG = "passport-staff"
+# Other adults in a party who gave their details on a waiver.
+GUEST_TAG = "passport-guest"
+
+logger = logging.getLogger(__name__)
 
 
 def _normalized_phone(value: str | None) -> str | None:
@@ -28,6 +34,11 @@ def _normalized_phone(value: str | None) -> str | None:
     compact = re.sub(r"[^0-9+]", "", value)
     if compact.startswith("+") and compact[1:].isdigit() and 8 <= len(compact[1:]) <= 15:
         return compact
+    # Operators are US based: a 10-digit local number, or 1 + 10 digits.
+    if compact.isdigit() and len(compact) == 10:
+        return f"+1{compact}"
+    if compact.isdigit() and len(compact) == 11 and compact.startswith("1"):
+        return f"+{compact}"
     return None
 
 
@@ -55,13 +66,16 @@ class GHLContactService:
         from app.services.ghl_booking_facts import booking_facts
 
         facts = booking_facts(self.db, order)
+        participants = self._participants(order)
+        lead = self._lead(order, participants)
         contact_id = self._upsert(
             operator.ghl_location_id,
             existing_id=order.ghl_contact_id,
             first_name=order.customer_first_name,
             last_name=order.customer_last_name,
             email=order.customer_email,
-            phone=order.customer_phone,
+            # A staff booking may have no phone; the waiver signer then gives one.
+            phone=order.customer_phone or (lead.phone if lead else None),
             custom_fields=self._booking_custom_fields(order, facts),
             date_of_birth=facts.lead_date_of_birth,
         )
@@ -74,7 +88,60 @@ class GHLContactService:
             customer.ghl_contact_sync_status = "synced"
             customer.ghl_contact_last_error = None
         self.db.commit()
+        self._sync_guests(operator.ghl_location_id, participants, lead)
         return contact_id
+
+    def _participants(self, order: BookingOrder) -> list[BookingParticipant]:
+        return list(
+            self.db.scalars(
+                select(BookingParticipant)
+                .join(Booking, Booking.id == BookingParticipant.booking_id)
+                .where(
+                    Booking.booking_order_id == order.id,
+                    BookingParticipant.operator_id == self.operator_id,
+                    BookingParticipant.status == "active",
+                )
+                .order_by(BookingParticipant.sequence)
+            )
+        )
+
+    @staticmethod
+    def _lead(order: BookingOrder, participants: list[BookingParticipant]) -> BookingParticipant | None:
+        email = (order.customer_email or "").casefold()
+        return next(
+            (p for p in participants if email and (p.email or "").casefold() == email),
+            None,
+        )
+
+    def _sync_guests(
+        self,
+        location_id: str,
+        participants: list[BookingParticipant],
+        lead: BookingParticipant | None,
+    ) -> None:
+        """Give every other adult who signed or was listed on a waiver their own
+        Contact. Only details the Contact is missing are filled in; a failure
+        for one guest never fails the customer's sync."""
+        seen: set[str] = set()
+        for person in participants:
+            email = (person.email or "").strip()
+            if person is lead or person.is_minor or not email or email.casefold() in seen:
+                continue
+            seen.add(email.casefold())
+            try:
+                contact_id = self._upsert(
+                    location_id,
+                    existing_id=None,
+                    first_name=person.first_name,
+                    last_name=person.last_name,
+                    email=email,
+                    phone=person.phone,
+                    date_of_birth=person.date_of_birth,
+                    fill_missing_only=True,
+                )
+                self._add_tags(contact_id, [GUEST_TAG])
+            except Exception:  # noqa: BLE001 - one guest must not block the rest
+                logger.warning("Could not sync HighLevel contact for guest %s", person.id, exc_info=True)
 
     def _booking_custom_fields(self, order: BookingOrder, facts=None) -> list[dict[str, str]]:
         """Booking details for the contact's "Passport …" custom fields.
@@ -133,7 +200,14 @@ class GHLContactService:
         phone: str | None,
         custom_fields: list[dict[str, str]] | None = None,
         date_of_birth=None,
+        fill_missing_only: bool = False,
     ) -> str:
+        """Create the Contact, or update the one already there.
+
+        Phone and date of birth are only added when the Contact has none, so a
+        number or birthday the team corrected in HighLevel is never replaced.
+        With `fill_missing_only` the names are treated the same way.
+        """
         contact_id = existing_id
         if not contact_id:
             contact_id = self._find_clear_match(location_id, email=email)
@@ -154,9 +228,19 @@ class GHLContactService:
         if contact_id:
             current = self.client.request("GET", f"/contacts/{contact_id}", version="v3")
             current_contact = current.get("contact", current) if isinstance(current, dict) else {}
-            current_email = current_contact.get("email") if isinstance(current_contact, dict) else None
+            if not isinstance(current_contact, dict):
+                current_contact = {}
+            current_email = current_contact.get("email")
             if current_email and email and str(current_email).casefold() != email.casefold():
                 raise RuntimeError("HighLevel contact email is immutable; manual reconciliation is required")
+            if not current_email and not email:
+                fields.pop("email", None)
+            keep = ["phone", "dateOfBirth"]
+            if fill_missing_only:
+                keep += ["firstName", "lastName"]
+            for key in keep:
+                if key in fields and current_contact.get(key):
+                    fields.pop(key)
             result = self.client.request(
                 "PUT", f"/contacts/{contact_id}", version="v3", json=fields
             )
