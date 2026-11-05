@@ -7,6 +7,7 @@ import { GHLSessionProvider } from "./auth/GHLSessionProvider";
 import { AppShell } from "./layouts/AppShell";
 import { registerPwaServiceWorker } from "./pwa";
 import "./styles.css";
+import "./design.css";
 
 const DashboardPage = lazy(() => import("./home/DashboardPage").then((module) => ({ default: module.DashboardPage })));
 const DeparturesPage = lazy(() => import("./departures/DeparturesPage").then((module) => ({ default: module.DeparturesPage })));
