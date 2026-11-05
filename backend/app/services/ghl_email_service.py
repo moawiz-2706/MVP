@@ -1,4 +1,5 @@
 import html
+import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -24,6 +25,8 @@ from app.services.message_template_service import MessageTemplateService, defaul
 from app.services.reminder_service import reminder_still_due
 from app.services.waiver_service import WaiverService
 from app.utils.timezone import require_timezone
+
+logger = logging.getLogger(__name__)
 
 WHEN = {"day_before": "tomorrow", "same_day": "today"}
 WAIVER_LINK_LABEL = "Sign your waiver before you arrive"
@@ -112,6 +115,24 @@ def booking_reminder_content(
     )
     return rendered.subject, rendered.body, rendered.html
 
+
+
+def booking_reminder_sms(
+    operator: Operator, order: BookingOrder, booking: Booking, kind: str, waiver_url: str | None = None
+) -> str:
+    """Short reminder text sent alongside the reminder email."""
+    zone = require_timezone(operator.time_zone)
+    start = booking.start_at.astimezone(zone)
+    when = WHEN.get(kind, start.strftime("%b %d"))
+    text = (
+        f"{operator.name}: Reminder - {booking.calendar_name_snapshot} is {when} at {_clock(start)}"
+        f" ({start.strftime('%Z')}). Ref {order.public_reference}."
+    )
+    if booking.departure_location_name_snapshot:
+        text += f" Meet at {booking.departure_location_name_snapshot}."
+    if waiver_url:
+        text += f" Waiver: {waiver_url}"
+    return text
 
 def staff_content(
     kind: str,
@@ -371,8 +392,24 @@ class GHLEmailService:
             f"booking_reminder_{kind}",
             self._booking_context(order, operator, booking, waiver_url=waiver_link, when=WHEN[kind]),
         )
-        if rendered.enabled:
-            self._deliver(contact_id, rendered.subject, rendered.body, rendered.html, settings)
+        if not rendered.enabled:
+            return
+        self._deliver(contact_id, rendered.subject, rendered.body, rendered.html, settings)
+        if order.customer_phone:
+            # Best effort: the email already went out, so an SMS failure must not
+            # fail (and retry) the job and resend the email.
+            try:
+                self._deliver_sms(contact_id, booking_reminder_sms(operator, order, booking, kind, waiver_link))
+            except Exception:  # noqa: BLE001
+                logger.warning("Reminder SMS failed for booking %s", booking.id, exc_info=True)
+
+    def _deliver_sms(self, contact_id: str, message: str) -> dict[str, Any]:
+        return self.client.request(
+            "POST",
+            "/conversations/messages",
+            version="2021-04-15",
+            json={"type": "SMS", "contactId": contact_id, "message": message},
+        )
 
     def send_staff_assigned(self, assignment_id: uuid.UUID) -> None:
         self._send_staff(assignment_id, "assigned")
