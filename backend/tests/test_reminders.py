@@ -91,3 +91,72 @@ def test_staff_reminder_subject_says_when() -> None:
         operator_name="PG",
     )
     assert subject == "Reminder: Kayak Tour today at 1:00 PM - PG"
+
+
+def test_reminder_sms_is_short_and_carries_the_waiver_link() -> None:
+    from app.services.ghl_email_service import booking_reminder_sms
+
+    order = BookingOrder(customer_first_name="Ada", public_reference="RM-ABC")
+    booking = Booking(
+        calendar_name_snapshot="Sunset Cruise",
+        start_at=datetime(2026, 9, 15, 13, 0, tzinfo=UTC),
+        end_at=datetime(2026, 9, 15, 16, 0, tzinfo=UTC),
+        units=2,
+        departure_location_name_snapshot="Fishermen's Village",
+    )
+    text = booking_reminder_sms(_operator(), order, booking, "day_before", "https://example.test/w/1")
+    assert text.startswith("Punta Gorda Rentals: Reminder - Sunset Cruise is tomorrow at 9:00 AM (EDT).")
+    assert "Ref RM-ABC." in text and "Meet at Fishermen's Village." in text
+    assert text.endswith("Waiver: https://example.test/w/1")
+    assert "Waiver" not in booking_reminder_sms(_operator(), order, booking, "same_day")
+
+
+def test_reminder_sms_failure_does_not_fail_the_email_reminder(monkeypatch) -> None:
+    import uuid
+
+    from app.services import ghl_email_service as module
+
+    operator = _operator()
+    operator.id = uuid.uuid4()
+    order = BookingOrder(customer_first_name="Ada", public_reference="RM-ABC", customer_phone="+15550100", ghl_contact_id="c1")
+    booking = Booking(
+        id=uuid.uuid4(),
+        status="confirmed",
+        calendar_name_snapshot="Sunset Cruise",
+        start_at=datetime.now(UTC) + timedelta(hours=30),
+        end_at=datetime.now(UTC) + timedelta(hours=33),
+        units=1,
+    )
+
+    class Row:
+        def one_or_none(self):
+            return booking, order, operator, None
+
+    class DB:
+        def execute(self, _statement):
+            return Row()
+
+    class Rendered:
+        enabled, subject, body, html = True, "s", "b", "<p>b</p>"
+
+    sent: list[str] = []
+    service = module.GHLEmailService.__new__(module.GHLEmailService)
+    service.db, service.operator_id = DB(), operator.id
+    monkeypatch.setattr(module, "reminder_still_due", lambda *args: True)
+    monkeypatch.setattr(module.WaiverService, "links_for_bookings", lambda self, bookings: {})
+    monkeypatch.setattr(module.MessageTemplateService, "render", lambda self, *args: Rendered())
+    monkeypatch.setattr(module.GHLEmailService, "_booking_context", classmethod(lambda cls, *args, **kwargs: {}))
+    monkeypatch.setattr(service, "_deliver", lambda *args: sent.append("email") or {})
+
+    def broken_sms(*args):
+        sent.append("sms")
+        raise RuntimeError("SMS not enabled on this location")
+
+    monkeypatch.setattr(service, "_deliver_sms", broken_sms)
+    service.send_booking_reminder(booking.id, "day_before")
+    assert sent == ["email", "sms"]
+
+    order.customer_phone = None
+    sent.clear()
+    service.send_booking_reminder(booking.id, "day_before")
+    assert sent == ["email"]
