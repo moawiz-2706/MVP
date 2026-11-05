@@ -520,7 +520,31 @@ class ConfigurationService:
             conditions.append(Calendar.departure_location_id == location_id)
         if is_active is not None:
             conditions.append(Calendar.is_active.is_(is_active))
-        return list(self.db.scalars(select(Calendar).where(*conditions).order_by(Calendar.name)))
+        calendars = list(self.db.scalars(select(Calendar).where(*conditions).order_by(Calendar.name)))
+        self._attach_rate_summaries(calendars)
+        return calendars
+
+    def _attach_rate_summaries(self, calendars: list[Calendar]) -> None:
+        """Set lowest_rate_minor / active_rate_count / single_rate_name on each calendar."""
+        if not calendars:
+            return
+        rows = self.db.execute(
+            select(CalendarRate.calendar_id, CalendarRate.price_minor, CalendarRate.name_snapshot).where(
+                CalendarRate.operator_id == self.operator_id,
+                CalendarRate.calendar_id.in_([calendar.id for calendar in calendars]),
+                CalendarRate.is_active.is_(True),
+                CalendarRate.deleted_at.is_(None),
+            )
+        ).all()
+        by_calendar: dict[uuid.UUID, list[tuple[int, str]]] = {}
+        for calendar_id, price_minor, name in rows:
+            by_calendar.setdefault(calendar_id, []).append((price_minor, name))
+        for calendar in calendars:
+            rates = by_calendar.get(calendar.id, [])
+            # Plain (unmapped) attributes read by CalendarRead; never persisted.
+            setattr(calendar, "lowest_rate_minor", min(price for price, _ in rates) if rates else None)
+            setattr(calendar, "active_rate_count", len(rates))
+            setattr(calendar, "single_rate_name", rates[0][1] if len(rates) == 1 else None)
 
     def create_calendar(self, data: CalendarCreate) -> Calendar:
         self._validate_calendar_refs(data.calendar_category_id, data.departure_location_id)

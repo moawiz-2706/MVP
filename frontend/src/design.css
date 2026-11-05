@@ -173,6 +173,15 @@
 [data-theme="dark"] .fc .fc-daygrid-day-number, [data-theme="dark"] .fc .fc-col-header-cell-cushion { color: #a7b2bd; }
 [data-theme="dark"] .fc .fc-day-today .fc-daygrid-day-number { color: #0f1720; }
 
+/* Departures and scroll rows */
+.departures-header h1 { font-size: 24px; font-weight: 650; letter-spacing: -.02em; }
+.departures-header p { font-size: 13.5px; }
+.departure-title strong { white-space: normal; overflow: visible; align-items: flex-start; line-height: 1.35; }
+.departure-title strong > :first-child { margin-top: 6px; flex: 0 0 auto; }
+.tabs, .settings-nav, .status-chips, .dashboard-metrics { scrollbar-width: none; }
+.tabs::-webkit-scrollbar, .settings-nav::-webkit-scrollbar, .status-chips::-webkit-scrollbar, .dashboard-metrics::-webkit-scrollbar { display: none; }
+.tabs { overflow-y: hidden; }
+
 /* Tablet and phone */
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; }
@@ -220,4 +229,16 @@
   .mobile-agenda-booking strong { font-size: 13.5px; }
   .mobile-agenda-booking small, .mobile-agenda-more, .mobile-agenda-empty { font-size: 12.5px; }
   .mobile-agenda-card, .mobile-customer-card, .mobile-staff-card, .mobile-calendar-card { border-radius: var(--radius); box-shadow: var(--shadow-xs); }
+  .page-header > .button, .page-header > .toolbar { width: 100%; }
+  .desktop-calendar-table { display: none; }
+  .mobile-calendar-list { padding: 10px; }
+  .mobile-calendar-card { margin-bottom: 10px; padding: 14px; }
+  .mobile-calendar-card:last-child { margin-bottom: 0; }
+  .mobile-calendar-meta { font-size: 12px; gap: 10px; }
+  .mobile-calendar-meta strong { font-size: 13.5px; }
+  .mobile-calendar-actions .button { flex: 1 1 0; }
+  .dashboard-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; margin-right: 0; }
+  .dashboard-metric { flex: none; min-width: 0; }
+  .departures-header { flex-wrap: wrap; }
+  .departures-header h1 { font-size: 22px; }
 }

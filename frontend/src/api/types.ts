@@ -92,6 +92,9 @@ export interface Calendar extends Entity {
   public_booking_mode: string;
   booking_cutoff_minutes: number | null;
   call_to_book_phone: string | null;
+  lowest_rate_minor?: number | null;
+  active_rate_count?: number;
+  single_rate_name?: string | null;
 }
 export interface CalendarHour extends Entity { calendar_id: Id; day_of_week: number; start_time: string; end_time: string }
 export interface CalendarDateHour extends Entity { calendar_id: Id; start_date: string; end_date: string; start_time: string; end_time: string }

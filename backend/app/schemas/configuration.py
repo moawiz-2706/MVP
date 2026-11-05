@@ -198,6 +198,11 @@ class CalendarRead(EntityModel):
     public_booking_mode: str
     booking_cutoff_minutes: int | None
     call_to_book_phone: str | None
+    # Filled by the calendar list only: a price summary of the active rates so
+    # the list shows "from $X" without one rates request per calendar.
+    lowest_rate_minor: int | None = None
+    active_rate_count: int = 0
+    single_rate_name: str | None = None
 
 
 class CalendarHourWrite(BaseModel):
