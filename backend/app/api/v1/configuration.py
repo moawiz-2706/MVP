@@ -1,7 +1,8 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.app_session import CurrentPrincipal, SessionPrincipal
@@ -38,6 +39,7 @@ from app.schemas.configuration import (
     ResourceUpdate,
 )
 from app.services.configuration_service import ConfigurationService
+from app.services.ghl_media_service import MAX_IMAGE_BYTES, GHLMediaService
 
 router = APIRouter(tags=["configuration"])
 DB = Annotated[Session, Depends(get_db)]
@@ -175,6 +177,35 @@ def list_calendars(
     is_active: bool | None = None,
 ):
     return service(db, principal).list_calendars(category_id, departure_location_id, is_active)
+
+
+class MediaImport(BaseModel):
+    url: str = Field(min_length=8, max_length=2_000)
+
+
+class MediaStored(BaseModel):
+    url: str
+
+
+@router.post("/media/upload", response_model=MediaStored)
+async def upload_media(principal: CurrentPrincipal, db: DB, file: UploadFile = File(...)):
+    """Store a calendar photo or video in HighLevel Media Storage; returns its link."""
+    require_admin(principal)
+    content = await file.read(MAX_IMAGE_BYTES + 1)
+    return MediaStored(
+        url=GHLMediaService(db, principal.operator_id).upload(
+            filename=file.filename or "passport-media",
+            content=content,
+            content_type=file.content_type or "",
+        )
+    )
+
+
+@router.post("/media/import", response_model=MediaStored)
+def import_media(data: MediaImport, principal: CurrentPrincipal, db: DB):
+    """Copy a public image or video link into HighLevel Media Storage."""
+    require_admin(principal)
+    return MediaStored(url=GHLMediaService(db, principal.operator_id).import_url(data.url))
 
 
 @router.post("/calendars", response_model=CalendarRead, status_code=status.HTTP_201_CREATED)

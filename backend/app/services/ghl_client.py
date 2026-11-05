@@ -115,6 +115,57 @@ class GHLClient:
             json=json,
         )
 
+    def upload_media(
+        self,
+        *,
+        name: str,
+        content: bytes,
+        content_type: str,
+    ) -> dict[str, Any]:
+        """Upload a file to the location's Media Storage (POST /medias/upload-file).
+
+        Returns HighLevel's response, which carries `fileId` and `url`.
+        """
+        path = "/medias/upload-file"
+        url = f"{self.settings.ghl_api_base_url.rstrip('/')}{path}"
+        data = {"name": name, "hosted": "false"}
+        files = {"file": (name, content, content_type)}
+        token = self._load_token()
+        for attempt in range(2):
+            try:
+                response = httpx.post(
+                    url,
+                    data=data,
+                    files=files,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json",
+                        "Version": "2021-07-28",
+                    },
+                    timeout=60,
+                )
+            except httpx.TransportError as exc:
+                raise GHLAPIError("HighLevel media upload failed temporarily") from exc
+            if response.status_code == 401 and attempt == 0:
+                token = self._load_token(force_refresh=True)
+                continue
+            if response.is_error:
+                try:
+                    detail = response.json()
+                except ValueError:
+                    detail = response.text[:1000]
+                logger.error("HighLevel media upload failed status=%s", response.status_code)
+                raise GHLAPIError(
+                    f"HighLevel media upload failed ({response.status_code}): {detail}",
+                    status_code=response.status_code,
+                    permanent=response.status_code in {401, 403, 404, 422},
+                )
+            try:
+                return response.json()
+            except ValueError:
+                return {}
+        raise GHLAPIError("HighLevel authorization failed", status_code=401, permanent=True)
+
     def post_workflow_trigger(self, target_url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute a Marketplace Custom Trigger at the targetUrl HighLevel issued.
 

@@ -52,6 +52,7 @@ def _public_calendar(
         booking_instructions=calendar.booking_instructions,
         hero_image_url=calendar.hero_image_url,
         gallery_image_urls=calendar.gallery_image_urls or [],
+        video_url=calendar.video_url,
         duration_minutes=calendar.duration_minutes,
         base_price_minor=calendar.base_price_minor,
         from_price_minor=from_price_minor,
@@ -340,3 +341,11 @@ def public_custom_fields(
             .order_by(BookingCustomFieldDefinition.created_at)
         )
     ]
+
+
+@router.get("/party/{token}")
+def public_party(token: str, db: Annotated[Session, Depends(get_db)]):
+    """Waiver links for everyone in a booking, opened from the staff QR code."""
+    from app.services.party_service import PartyService
+
+    return PartyService(db).view(token)

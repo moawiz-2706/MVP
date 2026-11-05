@@ -242,3 +242,50 @@
   .departures-header { flex-wrap: wrap; }
   .departures-header h1 { font-size: 22px; }
 }
+
+/* ---------- Calendar photos and video ---------- */
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 6px 0 10px; }
+.media-tile { position: relative; margin: 0; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; border: 1px solid var(--line, #e3e7e6); background: #f4f6f6; }
+.media-tile.hero { grid-column: span 2; grid-row: span 2; }
+.media-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.media-tile figcaption { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+.media-tile-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
+.media-tile-actions .icon-button { width: 28px; height: 28px; min-height: 28px; background: rgba(255,255,255,.92); }
+.media-add { display: grid; gap: 8px; }
+.media-add-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.media-add-row > .button { display: inline-flex; gap: 6px; align-items: center; }
+.media-link { flex: 1 1 260px; display: flex; gap: 6px; align-items: center; border: 1px solid var(--line, #d9dfde); border-radius: 8px; padding: 0 0 0 10px; background: #fff; }
+.media-link input { flex: 1; border: 0 !important; outline: none; box-shadow: none !important; min-width: 0; padding: 8px 0; background: transparent; }
+.media-link .button { border-radius: 0 7px 7px 0; }
+.media-video { display: grid; gap: 8px; justify-items: start; }
+.media-video iframe, .media-video video { width: 100%; max-width: 560px; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; background: #000; }
+.spin { animation: spin .8s linear infinite; }
+.fh-video { margin-top: 14px; }
+.fh-video iframe, .fh-video video { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 12px; background: #000; display: block; }
+@media (max-width: 620px) { .media-tile.hero { grid-column: span 2; grid-row: auto; } }
+
+/* ---------- Staff booking: several products, guest QR ---------- */
+.staff-step { border-top: 1px solid var(--line, #e3e7e6); margin-top: 16px; padding-top: 14px; }
+.staff-step h2, .guest-qr h2 { font-size: 16px; margin: 0 0 10px; }
+.staff-add { margin-top: 12px; }
+.staff-add .button, .guest-qr .button { display: inline-flex; gap: 6px; align-items: center; justify-content: center; }
+.staff-cart { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; }
+.staff-cart li { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; border: 1px solid var(--line, #e3e7e6); border-radius: 10px; padding: 10px 12px; }
+.staff-cart li > div { display: grid; gap: 2px; min-width: 0; }
+.staff-cart span { color: var(--muted, #5b6664); font-size: 13px; }
+.guest-qr { margin-top: 18px; padding: 16px; border: 1px solid var(--line, #e3e7e6); border-radius: 12px; text-align: center; display: grid; gap: 10px; justify-items: center; }
+.guest-qr p { margin: 0; }
+.qr-code { display: block; background: #fff; border-radius: 8px; }
+.qr-placeholder { background: #f1f4f3; }
+.party-card h1 { margin-bottom: 6px; }
+.party-item { border-top: 1px solid var(--line, #e3e7e6); margin-top: 14px; padding-top: 12px; }
+.party-item header { display: grid; gap: 2px; margin-bottom: 8px; }
+.party-item header span { color: var(--muted, #5b6664); font-size: 13px; }
+.party-wait { display: flex; gap: 6px; align-items: center; }
+.party-guests { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.party-guest { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border: 1px solid var(--line, #d9dfde); border-radius: 10px; color: inherit; text-decoration: none; min-height: 48px; }
+a.party-guest { border-color: var(--accent, #0f766e); }
+a.party-guest:hover { background: #f3faf9; }
+.party-guest span { display: grid; gap: 1px; }
+.party-guest small { color: var(--muted, #5b6664); }
+.party-guest.done { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }

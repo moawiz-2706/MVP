@@ -76,6 +76,7 @@ export interface Calendar extends Entity {
   booking_instructions: string | null;
   hero_image_url: string | null;
   gallery_image_urls: string[];
+  video_url?: string | null;
   is_active: boolean;
   public_booking_enabled: boolean;
   duration_minutes: number;
@@ -248,6 +249,7 @@ export interface PublicCalendar {
   booking_instructions: string | null;
   hero_image_url: string | null;
   gallery_image_urls: string[];
+  video_url?: string | null;
   duration_minutes: number;
   base_price_minor: number;
   from_price_minor?: number | null;

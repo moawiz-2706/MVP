@@ -27,6 +27,7 @@ class PublicCalendar(BaseModel):
     booking_instructions: str | None = None
     hero_image_url: str | None = None
     gallery_image_urls: list[str] = Field(default_factory=list)
+    video_url: str | None = None
     duration_minutes: int
     base_price_minor: int
     # Lowest active rate, the "from" price; None for a calendar without rates.

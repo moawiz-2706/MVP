@@ -29,6 +29,7 @@ from app.schemas.public import PublicCustomField, PublicRate, PublicRateResource
 from app.schemas.staff_booking import StaffBookingContext
 from app.services.availability_service import AvailabilityService
 from app.services.order_service import BookingAttribution, OrderService
+from app.services.party_service import PartyService, order_for_reference
 from app.services.public_access_service import PublicAccessService
 from app.services.stripe_payment_reconciliation_service import StripePaymentReconciliationService
 from app.core.config import Settings, get_settings
@@ -243,3 +244,11 @@ def staff_booking_order_status(
     return OrderService(db, settings)._existing_response(
         order, payment, order.checkout_request_hash or ""
     )
+
+
+@router.post("/{token}/orders/{public_reference}/party-link")
+def staff_booking_party_link(token: str, public_reference: str, db: DB) -> dict[str, str]:
+    """A link (shown as a QR code) where everyone in the party adds their details."""
+    staff = _staff_for_token(db, token)
+    order = order_for_reference(db, staff.operator_id, public_reference)
+    return {"url": PartyService(db).issue_link(order)}

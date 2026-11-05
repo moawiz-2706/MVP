@@ -5,6 +5,24 @@ Notable changes to Passport. Dates are deployment dates (UTC).
 ## Unreleased
 
 ### Added
+- **Staff bookings with several products**: the private staff link now has a
+  booking list, so staff add several calendars, times and rates and take one
+  payment, as on the public booking link.
+- **Guest-details QR code** on a staff booking's confirmation (migration 050):
+  the party scans it and each guest fills in their own waiver (name, date of
+  birth, phone, email). The page only shows waivers; it cannot cancel,
+  reschedule or see payment details, and it lasts as long as a waiver link.
+- **Calendar photos and video** (migration 050): upload photos or paste links
+  in Calendars → Edit; Passport stores a copy in HighLevel Media Storage
+  (needs the `medias.write` scope and a reconnect). A YouTube, Vimeo or short
+  video file shows on the public booking page.
+- **HighLevel contacts from waivers**: phone and date of birth fill in only
+  when the contact has none; every other adult on a waiver gets their own
+  contact, tagged `passport-guest`. US 10-digit phone numbers are accepted.
+- TanMan Charters beach cruises import script
+  (`supabase/manual/2026-11-06_tanman_beach_cruises_import.sql`) and the
+  FareHarbor photo links for every calendar
+  (`docs/integrations/fareharbor/PHOTO_LINKS.md`).
 - HighLevel Marketplace Custom Trigger `passport_booking_created` runtime
   (off until `GHL_WORKFLOW_TRIGGER_ENABLED=true`, after migration 045): the
   Subscription URL callback, durable `booking_created` / `payment_confirmed` /

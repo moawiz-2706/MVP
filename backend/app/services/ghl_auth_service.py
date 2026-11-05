@@ -56,6 +56,8 @@ def requested_scopes(settings: Settings) -> set[str]:
     scopes = required_scopes(settings)
     # Contact custom fields are found by key, so Passport can read their ids.
     scopes.add("locations/customFields.readonly")
+    # Calendar photos and videos are uploaded to the location's Media Storage.
+    scopes.add("medias.write")
     if settings.ghl_workflow_trigger_enabled:
         scopes.add("workflows.readonly")
     if settings.ghl_notifications_enabled:

@@ -9,6 +9,7 @@ import { partnerFromLink } from "./partner";
 import { PublicFrame } from "./OperatorBookingPage";
 import { useEmbed, withEmbed } from "./embed";
 import { formatDay, formatTime, isoDayInZone, safeTimeZone } from "../lib/datetime";
+import { videoSource } from "../lib/video";
 
 interface CartItem { calendar_id: string; start_at: string; units: number; slot: AvailabilitySlot; rate_id?: string; rate?: PublicRate }
 interface Quote { currency: string; subtotal_minor: number; platform_fee_and_taxes_minor: number; customer_total_minor: number; booking_fee_minor?: number; tax_minor?: number }
@@ -187,6 +188,7 @@ export function CalendarBookingPage() {
   const hasRates = rateList.length > 0;
   const selectedCount = Object.values(quantities).reduce((sum, value) => sum + value, 0);
   const photos = [calendar.hero_image_url, ...(calendar.gallery_image_urls || [])].filter((url): url is string => Boolean(url));
+  const video = videoSource(calendar.video_url);
   const lowestPrice = hasRates ? Math.min(...rateList.map((rate) => rate.price_minor)) : calendar.base_price_minor;
   const policy = calendar.booking_policy;
   const requiresPolicyAcceptance = Boolean(policy || online);
@@ -224,6 +226,7 @@ export function CalendarBookingPage() {
           {photos.length > 1 && <div className="fh-thumbs">{photos.map((url, index) => <button key={`${url}-${index}`} type="button" className={index === photo ? "active" : ""} onClick={() => setPhoto(index)} aria-label={`Show photo ${index + 1}`}><img src={url} alt="" loading="lazy" /></button>)}</div>}
         </div>
       ) : <div className="fh-photo fh-photo-fallback">{calendar.name.slice(0, 1)}</div>}
+      {video && <div className="fh-video">{video.kind === "embed" ? <iframe src={video.src} title={`${calendar.name} video`} loading="lazy" allow="encrypted-media; picture-in-picture" allowFullScreen /> : <video src={video.src} controls preload="metadata" playsInline />}</div>}
       <ul className="fh-prices">
         {hasRates ? rateList.map((rate) => <li key={rate.id}><strong>{formatMoney(rate.price_minor, calendar.currency)}</strong><span>{rate.customer_type_plural_name || rate.customer_type_name}</span>{rate.note && <small>{rate.note}</small>}</li>) : <li><strong>{formatMoney(calendar.base_price_minor, calendar.currency)}</strong><span>per booking</span></li>}
       </ul>
