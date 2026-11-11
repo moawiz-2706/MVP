@@ -42,6 +42,11 @@ def _normalized_phone(value: str | None) -> str | None:
     return None
 
 
+def _detail_rank(person) -> tuple[bool, bool]:
+    """Sort key: participants with a date of birth and phone come first."""
+    return (getattr(person, "date_of_birth", None) is None, not getattr(person, "phone", None))
+
+
 def _split_name(name: str) -> tuple[str, str]:
     parts = name.strip().split(maxsplit=1)
     return (parts[0] if parts else name.strip(), parts[1] if len(parts) > 1 else "")
@@ -108,10 +113,10 @@ class GHLContactService:
     @staticmethod
     def _lead(order: BookingOrder, participants: list[BookingParticipant]) -> BookingParticipant | None:
         email = (order.customer_email or "").casefold()
-        return next(
-            (p for p in participants if email and (p.email or "").casefold() == email),
-            None,
-        )
+        matches = [p for p in participants if email and (p.email or "").casefold() == email]
+        # The lead is listed once per product; prefer the copy their waiver
+        # filled in (phone and date of birth).
+        return min(matches, key=_detail_rank, default=None)
 
     def _sync_guests(
         self,

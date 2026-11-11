@@ -105,10 +105,11 @@ def booking_facts(db: Session, order: BookingOrder) -> BookingFacts:
     ) if bookings else []
     # The lead booker is the participant with the order's email, else the first adult.
     email = (order.customer_email or "").casefold()
-    lead = next(
-        (p for p in participants if (p.email or "").casefold() == email and not p.is_minor),
-        next((p for p in participants if not p.is_minor), None),
-    )
+    from app.services.ghl_contact_service import _detail_rank
+
+    # The lead is listed once per product; prefer the copy their waiver filled in.
+    matches = [p for p in participants if (p.email or "").casefold() == email and not p.is_minor]
+    lead = min(matches, key=_detail_rank) if matches else next((p for p in participants if not p.is_minor), None)
     emergency = ""
     if lead is not None and isinstance(lead.emergency_contact, dict):
         emergency = ", ".join(
