@@ -209,3 +209,17 @@ def test_guest_contact_is_linked_to_the_booking_record(monkeypatch):
     monkeypatch.setattr(records.GHLBookingRecordService, "_link_contact", lambda self, loc, rec, contact: linked.append((loc, rec, contact)))
     service._link_guest_to_record("loc-1", SimpleNamespace(booking_id=uuid.uuid4()), "c-guest")
     assert linked == [("loc-1", "rec-1", "c-guest")]
+
+
+def test_lead_listed_on_every_product_is_never_tagged_as_a_guest():
+    """A 2-product booking lists the lead booker twice; neither copy is a guest."""
+    service = GHLContactService.__new__(GHLContactService)
+    calls = []
+    service._upsert = lambda location, **kw: calls.append(kw["email"]) or "id"
+    service._add_tags = lambda *args: None
+    service._link_guest_to_record = lambda *args: None
+    lead_a = SimpleNamespace(id=1, email="Lead@Example.com", is_minor=False, first_name="L", last_name="X", phone=None, date_of_birth=None)
+    lead_b = SimpleNamespace(id=2, email="lead@example.com", is_minor=False, first_name="L", last_name="X", phone=None, date_of_birth=None)
+    guest = SimpleNamespace(id=3, email="guest@example.com", is_minor=False, first_name="G", last_name="Y", phone=None, date_of_birth=None)
+    service._sync_guests("loc-1", [lead_a, lead_b, guest], lead_a, "lead@example.com")
+    assert calls == ["guest@example.com"]

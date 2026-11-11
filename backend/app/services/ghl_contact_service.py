@@ -88,7 +88,7 @@ class GHLContactService:
             customer.ghl_contact_sync_status = "synced"
             customer.ghl_contact_last_error = None
         self.db.commit()
-        self._sync_guests(operator.ghl_location_id, participants, lead)
+        self._sync_guests(operator.ghl_location_id, participants, lead, order.customer_email)
         return contact_id
 
     def _participants(self, order: BookingOrder) -> list[BookingParticipant]:
@@ -118,11 +118,14 @@ class GHLContactService:
         location_id: str,
         participants: list[BookingParticipant],
         lead: BookingParticipant | None,
+        lead_email: str | None = None,
     ) -> None:
         """Give every other adult who signed or was listed on a waiver their own
         Contact. Only details the Contact is missing are filled in; a failure
         for one guest never fails the customer's sync."""
-        seen: set[str] = set()
+        # The lead booker is listed once per product in the order; every copy
+        # is the customer, never a guest.
+        seen: set[str] = {lead_email.strip().casefold()} if lead_email else set()
         for person in participants:
             email = (person.email or "").strip()
             if person is lead or person.is_minor or not email or email.casefold() in seen:
