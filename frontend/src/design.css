@@ -289,3 +289,16 @@ a.party-guest:hover { background: #f3faf9; }
 .party-guest span { display: grid; gap: 1px; }
 .party-guest small { color: var(--muted, #5b6664); }
 .party-guest.done { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
+
+/* ---------- Dark theme: booking summary and selected time ---------- */
+[data-theme="dark"] .staff-booking-summary { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ink); }
+[data-theme="dark"] .staff-booking-summary strong { color: var(--ink); }
+[data-theme="dark"] .staff-booking-summary span { color: var(--muted); }
+[data-theme="dark"] .slot.selected { color: var(--ink); }
+[data-theme="dark"] .slot { color: var(--ink); }
+[data-theme="dark"] .slot span, [data-theme="dark"] .slot-rate-summary { color: var(--muted); }
+[data-theme="dark"] .staff-cart li, [data-theme="dark"] .guest-qr { border-color: var(--line); }
+
+/* Guest-details page heading */
+.party-card .eyebrow { display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #5b6664); font-weight: 600; }
+.party-card h1 { font-size: 26px; line-height: 1.2; margin: 4px 0 8px; }
