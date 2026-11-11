@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.api.v1 import public, staff_booking
+from app.api.v1 import bookings, public, staff_booking
 from app.models.entities import PublicAccessCredential
 from app.services import party_service
 from app.services.party_service import PURPOSE, PartyService
@@ -18,6 +18,8 @@ def test_party_purpose_is_allowed_by_the_model_constraint():
 def test_routes_are_registered():
     assert any(r.path == "/public/party/{token}" for r in public.router.routes)
     assert any(r.path == "/staff-booking/{token}/orders/{public_reference}/party-link" for r in staff_booking.router.routes)
+    # Passport/PWA "New booking" shows the same QR code after booking.
+    assert any(r.path == "/bookings/orders/{public_reference}/party-link" for r in bookings.router.routes)
 
 
 class _Scalars(list):
