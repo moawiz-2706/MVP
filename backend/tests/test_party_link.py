@@ -95,3 +95,32 @@ def test_waiver_guests_are_an_allowed_participant_source():
     assert "'waiver'" in migration.read_text(encoding="utf-8")
     source = (Path(__file__).resolve().parents[1] / "app" / "services" / "waiver_service.py").read_text(encoding="utf-8")
     assert 'source="waiver"' in source
+
+
+def test_signing_fills_missing_details_of_an_already_listed_person():
+    """The lead booker is listed at checkout without phone or birthday; their
+    waiver fills those in instead of being skipped as a duplicate."""
+    from datetime import date
+
+    from app.services.waiver_service import WaiverService
+
+    existing = SimpleNamespace(first_name="Moawiz", last_name="Test", email="m@example.com", phone=None,
+                               date_of_birth=None, is_minor=False, status="active", sequence=1)
+    added = []
+
+    class _DB:
+        def scalars(self, _q):
+            return [existing]
+
+        def add(self, row):
+            added.append(row)
+
+    service = WaiverService.__new__(WaiverService)
+    service.db = _DB()
+    signer = SimpleNamespace(first_name="Moawiz", last_name="Test", email="m@example.com", phone="(941) 555-0199",
+                             date_of_birth=date(1988, 3, 10))
+    data = SimpleNamespace(signer=signer, participants=[])
+    booking = SimpleNamespace(id=uuid.uuid4(), operator_id=uuid.uuid4())
+    service._record_participants(booking, data, date(2026, 11, 20))
+    assert added == []
+    assert existing.phone == "(941) 555-0199" and existing.date_of_birth == date(1988, 3, 10)

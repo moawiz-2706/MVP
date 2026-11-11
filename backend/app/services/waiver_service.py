@@ -258,7 +258,7 @@ class WaiverService:
             )
         )
         known = {
-            (row.first_name.casefold(), row.last_name.casefold())
+            (row.first_name.casefold(), row.last_name.casefold()): row
             for row in existing
             if row.status != "cancelled"
         }
@@ -270,8 +270,20 @@ class WaiverService:
         for person, email, phone in people:
             key = (person.first_name.casefold(), person.last_name.casefold())
             if key in known:
+                # Already listed (for example the lead booker, added at
+                # checkout without these details): fill in only what is
+                # missing, so HighLevel gets the phone and date of birth.
+                row = known[key]
+                if row is not None:
+                    if not row.email and email:
+                        row.email = str(email)
+                    if not row.phone and phone:
+                        row.phone = phone
+                    if row.date_of_birth is None and person.date_of_birth:
+                        row.date_of_birth = person.date_of_birth
+                        row.is_minor = age_on(person.date_of_birth, activity_day) < ADULT_AGE
                 continue
-            known.add(key)
+            known[key] = None
             sequence += 1
             minor = age_on(person.date_of_birth, activity_day) < ADULT_AGE
             self.db.add(

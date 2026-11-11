@@ -209,3 +209,10 @@ def test_guest_contact_is_linked_to_the_booking_record(monkeypatch):
     monkeypatch.setattr(records.GHLBookingRecordService, "_link_contact", lambda self, loc, rec, contact: linked.append((loc, rec, contact)))
     service._link_guest_to_record("loc-1", SimpleNamespace(booking_id=uuid.uuid4()), "c-guest")
     assert linked == [("loc-1", "rec-1", "c-guest")]
+
+
+def test_lead_copy_with_waiver_details_is_preferred():
+    order = SimpleNamespace(customer_email="lead@example.com")
+    bare = SimpleNamespace(email="lead@example.com", phone=None, date_of_birth=None)
+    filled = SimpleNamespace(email="lead@example.com", phone="+19415550199", date_of_birth=date(1988, 3, 10))
+    assert GHLContactService._lead(order, [bare, filled]) is filled
