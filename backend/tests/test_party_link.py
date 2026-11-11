@@ -81,3 +81,17 @@ def test_staff_added_guest_is_sent_to_highlevel(monkeypatch):
     monkeypatch.setattr(records, "enqueue_booking_record_sync", lambda db, settings, o: calls.append(("record", o)))
     service._sync_party_to_ghl(SimpleNamespace(booking_order_id=order.id), "participant:1")
     assert calls == [("contact", order, "participant:1"), ("record", order)]
+
+
+def test_waiver_guests_are_an_allowed_participant_source():
+    """Every waiver signing failed when the database refused source 'waiver'."""
+    from pathlib import Path
+
+    from app.models.entities import BookingParticipant
+
+    texts = [str(getattr(c, "sqltext", "")) for c in BookingParticipant.__table__.constraints]
+    assert any("'waiver'" in text and "'checkout'" in text for text in texts)
+    migration = Path(__file__).resolve().parents[2] / "supabase" / "migrations" / "051_participant_source_waiver.sql"
+    assert "'waiver'" in migration.read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[1] / "app" / "services" / "waiver_service.py").read_text(encoding="utf-8")
+    assert 'source="waiver"' in source

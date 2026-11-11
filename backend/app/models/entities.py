@@ -1599,7 +1599,14 @@ class MigrationImportRow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class BookingParticipant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "booking_participants"
-    __table_args__ = (UniqueConstraint("booking_id", "sequence"),)
+    __table_args__ = (
+        UniqueConstraint("booking_id", "sequence"),
+        # Mirrors migration 051: a signed waiver adds people with source 'waiver'.
+        CheckConstraint(
+            "source IN ('checkout','operator','import','waiver')",
+            name="booking_participants_source_check",
+        ),
+    )
 
     operator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operators.id"), nullable=False, index=True)
     booking_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True)
