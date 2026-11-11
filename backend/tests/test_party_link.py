@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.api.v1 import bookings, public, staff_booking
+from app.api.v1 import bookings, orders, public, staff_booking
 from app.models.entities import PublicAccessCredential
 from app.services import party_service
 from app.services.party_service import PURPOSE, PartyService
@@ -20,6 +20,8 @@ def test_routes_are_registered():
     assert any(r.path == "/staff-booking/{token}/orders/{public_reference}/party-link" for r in staff_booking.router.routes)
     # Passport/PWA "New booking" shows the same QR code after booking.
     assert any(r.path == "/bookings/orders/{public_reference}/party-link" for r in bookings.router.routes)
+    # Shown on the confirmation page after a staff card payment.
+    assert any(r.path == "/public/orders/{public_reference}/party-link" for r in orders.router.routes)
 
 
 class _Scalars(list):
@@ -65,3 +67,17 @@ def test_view_lists_one_link_per_guest_and_hides_unpaid_waivers(monkeypatch):
     assert [g["label"] for g in first["guests"]] == ["Guest 1", "Guest 2"]
     assert first["guests"][0]["signed_by"] == "Amy Lee" and first["guests"][1]["signed"] is False
     assert second["waivers_open"] is False and second["guests"] == []
+
+
+def test_staff_added_guest_is_sent_to_highlevel(monkeypatch):
+    from app.services import ghl_booking_record_service as records
+    from app.services.booking_admin_service import BookingAdminService
+
+    order = SimpleNamespace(id=uuid.uuid4())
+    service = BookingAdminService.__new__(BookingAdminService)
+    service.db = SimpleNamespace(get=lambda model, _id: order)
+    calls = []
+    monkeypatch.setattr(records, "enqueue_contact_refresh", lambda db, settings, o, reason: calls.append(("contact", o, reason)))
+    monkeypatch.setattr(records, "enqueue_booking_record_sync", lambda db, settings, o: calls.append(("record", o)))
+    service._sync_party_to_ghl(SimpleNamespace(booking_order_id=order.id), "participant:1")
+    assert calls == [("contact", order, "participant:1"), ("record", order)]

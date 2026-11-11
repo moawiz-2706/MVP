@@ -3,6 +3,7 @@ import { CheckCircle2, Clock3, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, json } from "../api/client";
+import { GuestDetailsQr } from "../components/GuestDetailsQr";
 import type { AvailabilityResponse } from "../api/types";
 import { formatLongDate, formatTime, isoDayInZone, tomorrowInZone, zoneLabel } from "../lib/datetime";
 
@@ -151,6 +152,7 @@ export function ConfirmationPage() {
             <div className="summary-row total"><span>{cancelled ? "Original total" : "Total paid"}</span><span>{money(order.customer_total_minor, order.currency)}</span></div>
           </div>
           {!cancelled && accessToken && <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #e6e9e8" }}><button className="button secondary" disabled={cancel.isPending} onClick={() => { if (window.confirm("Cancel this reservation? The configured cancellation policy will be applied.")) cancel.mutate(); }}>{cancel.isPending ? "Cancelling…" : "Cancel reservation"}</button>{cancel.error && <div className="error-banner" style={{ marginTop: 10 }}>{cancel.error.message}</div>}</div>}
+          {staffReturn && !cancelled && accessToken && <GuestDetailsQr linkPath={`/public/orders/${encodeURIComponent(order.public_reference)}/party-link?access_token=${encodeURIComponent(accessToken)}`} reference={order.public_reference} />}
           {staffReturn && <StaffActions to={staffReturn} />}
         </section>
       </main>

@@ -140,8 +140,31 @@ class GHLContactService:
                     fill_missing_only=True,
                 )
                 self._add_tags(contact_id, [GUEST_TAG])
+                self._link_guest_to_record(location_id, person, contact_id)
             except Exception:  # noqa: BLE001 - one guest must not block the rest
                 logger.warning("Could not sync HighLevel contact for guest %s", person.id, exc_info=True)
+
+    def _link_guest_to_record(self, location_id: str, person: BookingParticipant, contact_id: str) -> None:
+        """Associate a guest's contact with the booking's Passport Booking record,
+        so the record lists everyone in the party, not only the lead booker."""
+        from app.core.config import get_settings
+        from app.models.entities import GHLBookingRecord
+        from app.services.ghl_booking_record_service import GHLBookingRecordService
+
+        settings = get_settings()
+        if not settings.ghl_booking_record_sync_enabled:
+            return
+        booking = self.db.get(Booking, person.booking_id)
+        record_id = self.db.scalar(
+            select(GHLBookingRecord.ghl_record_id).where(
+                GHLBookingRecord.booking_order_id == booking.booking_order_id
+            )
+        ) if booking else None
+        if not record_id:
+            return  # the record sync links guests once the record exists
+        service = GHLBookingRecordService(self.db, self.operator_id, settings)
+        service.client = self.client
+        service._link_contact(location_id, str(record_id), contact_id)
 
     def _booking_custom_fields(self, order: BookingOrder, facts=None) -> list[dict[str, str]]:
         """Booking details for the contact's "Passport …" custom fields.
