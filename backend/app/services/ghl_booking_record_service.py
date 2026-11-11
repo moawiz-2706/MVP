@@ -170,10 +170,16 @@ class GHLBookingRecordService:
                 self._link_contact(location_id, str(record_id), order.ghl_contact_id)
                 mapping.contact_linked = True
                 mapping.ghl_contact_id = order.ghl_contact_id
+            created_now = mapping.synced_at is None
             mapping.status = "synced"
             mapping.last_error = None
             mapping.synced_at = datetime.now(UTC)
             self.db.commit()
+            if created_now:
+                # Guests whose contacts were made before the record existed
+                # are linked to it by one more contact sync.
+                enqueue_contact_refresh(self.db, self.settings, order, f"record:{record_id}")
+                self.db.commit()
             return str(record_id)
         except Exception as exc:
             mapping.status = "failed"
