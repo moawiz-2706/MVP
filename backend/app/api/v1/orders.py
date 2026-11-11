@@ -190,6 +190,27 @@ def order_status(
     )
 
 
+@router.post("/public/orders/{public_reference}/party-link")
+def public_order_party_link(
+    public_reference: str,
+    db: DB,
+    access_token: Annotated[str | None, Query(min_length=20, max_length=512)] = None,
+) -> dict[str, str]:
+    """Guest-details link (shown as a QR code) for an order the caller can see.
+
+    Used on the confirmation page after a staff card payment; the order's own
+    access token proves the caller may share the party's waiver links.
+    """
+    from app.services.party_service import PartyService
+    from app.services.public_access_service import PublicAccessService
+
+    order = db.scalar(select(BookingOrder).where(BookingOrder.public_reference == public_reference))
+    if order is None or not access_token:
+        raise NotFoundError("Order not found")
+    PublicAccessService(db).verify(access_token, purpose="order_status", order_id=order.id, touch=False)
+    return {"url": PartyService(db).issue_link(order)}
+
+
 @router.post("/public/orders/{public_reference}/cancel", status_code=status.HTTP_204_NO_CONTENT)
 def cancel_public_order(
     public_reference: str,

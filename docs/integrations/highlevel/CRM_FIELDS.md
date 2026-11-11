@@ -39,6 +39,7 @@ Shows the customer's most recent Passport booking.
 | Passport Waiver Expires At | `passport_waiver_expires_at` | When the link stops working, ISO UTC |
 | Passport Emergency Contact | `passport_emergency_contact` | From the lead booker's waiver |
 | Passport Marketing Opt In | `passport_marketing_opt_in` | true / false |
+| Passport Guest List | `passport_guest_list` | Everyone in the party, one per line: name (adult/minor), email, phone. Large text field |
 
 ## Passport Bookings object: fields (object: Passport Booking)
 
@@ -66,10 +67,12 @@ five already exist.
 | Waiver Link | `waiver_link` | Link to the waiver (shows the signed waiver once signed) |
 | Waiver Signed At | `waiver_signed_at` | ISO UTC |
 | Emergency Contact | `emergency_contact` | From the lead booker's waiver |
+| Guest List | `guest_list` | Everyone in the party, one per line: name (adult/minor), email, phone. Large text field |
 
 ## When values update
 
 - **Record and contact:** on booking created, payment confirmed, rescheduled, party size or payment change, and cancelled.
-- **Waiver signed:** the record's waiver fields, plus the contact's date of birth, emergency contact and waiver fields, within about a minute.
+- **Waiver signed:** the record's waiver fields, plus the contact's date of birth, emergency contact and waiver fields, within about a minute. Phone and date of birth are only filled in when the contact has none.
+- **Other guests:** every adult on a waiver (or added by staff in the booking drawer) who gives an email gets their own contact, tagged `passport-guest`, and is linked to the booking's Passport Booking record. The record and the lead contact get the guest list.
 
 Scopes the app needs: `locations/customFields.readonly` (contact field lookup), `objects/schema.readonly` (object field list), `objects/record.readonly`, `objects/record.write`, `associations.readonly`, `associations/relation.write`, plus `contacts.write`. Passport requests them on install and staff PWA sign-in.

@@ -368,8 +368,26 @@ class BookingAdminService:
             self.db.add(participant)
         for key, value in data.model_dump().items():
             setattr(participant, key, value)
+        self.db.flush()
+        self._sync_party_to_ghl(booking, f"participant:{participant.id}:{datetime.now(UTC).timestamp():.0f}")
         self.db.commit()
         return next(item for item in self.list_participants(booking.id) if item["id"] == participant.id)
+
+    def _sync_party_to_ghl(self, booking: Booking, reason: str) -> None:
+        """A guest added or edited by staff reaches HighLevel like a waiver guest:
+        their own contact, and the booking record's guest list."""
+        from app.core.config import get_settings
+        from app.services.ghl_booking_record_service import (
+            enqueue_booking_record_sync,
+            enqueue_contact_refresh,
+        )
+
+        order = self.db.get(BookingOrder, booking.booking_order_id)
+        if order is None:
+            return
+        settings = get_settings()
+        enqueue_contact_refresh(self.db, settings, order, reason)
+        enqueue_booking_record_sync(self.db, settings, order)
 
     def delete_participant(self, booking_id: uuid.UUID, participant_id: uuid.UUID) -> None:
         booking = self._booking(booking_id)
@@ -377,6 +395,8 @@ class BookingAdminService:
         if participant is None:
             raise NotFoundError("Participant not found")
         participant.status = "cancelled"
+        self.db.flush()
+        self._sync_party_to_ghl(booking, f"participant:{participant.id}:removed")
         self.db.commit()
 
     def cancel(self, booking_id: uuid.UUID) -> None:

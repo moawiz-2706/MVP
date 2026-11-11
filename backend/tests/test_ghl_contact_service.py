@@ -167,3 +167,45 @@ def test_one_failing_guest_does_not_stop_the_others():
     ]
     service._sync_guests("loc-1", people, None)
     assert done == ["ok@example.com"]
+
+
+def test_guest_list_names_everyone_active_in_the_party():
+    from app.services.ghl_booking_facts import guest_list
+
+    people = [
+        SimpleNamespace(first_name="Amy", last_name="Lee", is_minor=False, email="amy@example.com", phone="+19415550101", status="active"),
+        SimpleNamespace(first_name="Kid", last_name="Lee", is_minor=True, email=None, phone=None, status="active"),
+        SimpleNamespace(first_name="Gone", last_name="X", is_minor=False, email=None, phone=None, status="cancelled"),
+    ]
+    assert guest_list(people) == "Amy Lee (adult) · amy@example.com · +19415550101\nKid Lee (minor)"
+
+
+def test_guest_list_is_sent_to_the_record_and_the_contact():
+    from app.services.ghl_booking_facts import contact_values, object_properties
+
+    facts = SimpleNamespace(**{name: "" for name in (
+        "booking_reference booking_id booking_status payment_status payment_method invoice_status customer_name "
+        "customer_email customer_phone activity tour_start tour_start_utc tour_end_utc total_amount currency "
+        "source_partner assigned_staff waiver_status waiver_link waiver_signed_at waiver_expires_at emergency_contact"
+    ).split()}, guests=2, marketing_opt_in=False, guest_list="Amy Lee (adult)")
+    assert object_properties(facts)["guest_list"] == "Amy Lee (adult)"
+    assert contact_values(facts)["passport_guest_list"] == "Amy Lee (adult)"
+
+
+def test_guest_contact_is_linked_to_the_booking_record(monkeypatch):
+    from app.services import ghl_booking_record_service as records
+
+    service = GHLContactService.__new__(GHLContactService)
+    service.operator_id = uuid.uuid4()
+    service.client = object()
+    booking = SimpleNamespace(booking_order_id=uuid.uuid4())
+    service.db = SimpleNamespace(get=lambda model, _id: booking, scalar=lambda _q: "rec-1")
+    linked = []
+    monkeypatch.setattr(
+        "app.services.ghl_contact_service.get_settings", lambda: SimpleNamespace(ghl_booking_record_sync_enabled=True), raising=False
+    )
+    monkeypatch.setattr("app.core.config.get_settings", lambda: SimpleNamespace(ghl_booking_record_sync_enabled=True))
+    monkeypatch.setattr(records.GHLBookingRecordService, "__init__", lambda self, db, op, settings: None)
+    monkeypatch.setattr(records.GHLBookingRecordService, "_link_contact", lambda self, loc, rec, contact: linked.append((loc, rec, contact)))
+    service._link_guest_to_record("loc-1", SimpleNamespace(booking_id=uuid.uuid4()), "c-guest")
+    assert linked == [("loc-1", "rec-1", "c-guest")]

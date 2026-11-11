@@ -146,7 +146,7 @@ def test_field_guide_lists_exactly_the_keys_passport_sends():
         "booking_reference booking_id booking_status payment_status payment_method invoice_status customer_name "
         "customer_email customer_phone activity tour_start tour_start_utc tour_end_utc total_amount currency "
         "source_partner assigned_staff waiver_status waiver_link waiver_signed_at waiver_expires_at emergency_contact"
-    ).split()}, guests=0, marketing_opt_in=False)
+    ).split()}, guests=0, marketing_opt_in=False, guest_list="")
     assert documented_object == set(object_properties(facts))
     assert documented_contact == set(contact_values(facts))
     assert BASE_OBJECT_FIELDS <= documented_object

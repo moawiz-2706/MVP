@@ -63,6 +63,8 @@ class BookingFacts:
     emergency_contact: str
     marketing_opt_in: bool
     lead_date_of_birth: date | None
+    # Everyone in the party, one per line: "Name (adult) · email · phone".
+    guest_list: str = ""
 
 
 def booking_facts(db: Session, order: BookingOrder) -> BookingFacts:
@@ -152,7 +154,20 @@ def booking_facts(db: Session, order: BookingOrder) -> BookingFacts:
         emergency_contact=emergency,
         marketing_opt_in=bool(order.marketing_opt_in),
         lead_date_of_birth=lead.date_of_birth if lead else None,
+        guest_list=guest_list(participants),
     )
+
+
+def guest_list(participants) -> str:
+    lines = []
+    for person in participants:
+        if getattr(person, "status", "active") != "active":
+            continue
+        name = f"{person.first_name or ''} {person.last_name or ''}".strip() or "Guest"
+        parts = [f"{name} ({'minor' if person.is_minor else 'adult'})"]
+        parts += [value for value in (person.email, person.phone) if value]
+        lines.append(" · ".join(parts))
+    return "\n".join(lines)
 
 
 def object_properties(facts: BookingFacts) -> dict[str, str]:
@@ -177,6 +192,7 @@ def object_properties(facts: BookingFacts) -> dict[str, str]:
         "waiver_link": facts.waiver_link,
         "waiver_signed_at": facts.waiver_signed_at,
         "emergency_contact": facts.emergency_contact,
+        "guest_list": facts.guest_list,
     }
 
 
@@ -206,4 +222,5 @@ def contact_values(facts: BookingFacts) -> dict[str, str]:
         "passport_waiver_expires_at": facts.waiver_expires_at,
         "passport_emergency_contact": facts.emergency_contact,
         "passport_marketing_opt_in": str(facts.marketing_opt_in).lower(),
+        "passport_guest_list": facts.guest_list,
     }
