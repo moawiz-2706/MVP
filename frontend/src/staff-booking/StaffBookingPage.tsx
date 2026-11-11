@@ -1,9 +1,9 @@
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
-import { Copy, Plus, Share2, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
 import { api, json } from "../api/client";
-import { QrCode } from "../components/QrCode";
+import { GuestDetailsQr } from "../components/GuestDetailsQr";
 import { WaiverModeSelect, type WaiverMode } from "../components/WaiverModeSelect";
 import type { AvailabilityResponse, AvailabilitySlot, Calendar, PublicCustomField, PublicRate } from "../api/types";
 import { formatLongDate, formatTime, tomorrowInZone } from "../lib/datetime";
@@ -17,33 +17,6 @@ interface CartLine { key: string; calendar_id: string; calendar_name: string; cu
 
 function money(value: number, currency = "usd") {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(value / 100);
-}
-
-/** QR code the party scans to add every guest's details and waiver. */
-function GuestDetailsQr({ token, reference }: { token: string; reference: string }) {
-  const link = useQuery({
-    queryKey: ["staff-party-link", token, reference],
-    queryFn: () => api<{ url: string }>(`/staff-booking/${encodeURIComponent(token)}/orders/${encodeURIComponent(reference)}/party-link`, { method: "POST" }),
-    staleTime: Infinity,
-    retry: 1,
-  });
-  const [copied, setCopied] = useState(false);
-  if (link.isLoading) return <div className="loading">Preparing the guest QR code…</div>;
-  if (link.error || !link.data) return <div className="error-banner">The guest QR code couldn't be created. The customer can still add guests from their confirmation email.</div>;
-  const url = link.data.url;
-  const share = async () => {
-    if (navigator.share) { try { await navigator.share({ title: "Add your guest details", url }); return; } catch { /* closed */ } }
-    await navigator.clipboard?.writeText(url); setCopied(true);
-  };
-  return <section className="guest-qr">
-    <h2>Add every guest's details</h2>
-    <p className="muted-note">The customer scans this code, then each guest in the party fills in their own name, date of birth, phone, email and waiver.</p>
-    <QrCode value={url} label={`QR code for booking ${reference} guest details`} />
-    <div className="toolbar" style={{ justifyContent: "center", flexWrap: "wrap" }}>
-      <button type="button" className="button secondary" onClick={share}><Share2 size={15} />Share link</button>
-      <button type="button" className="button secondary" onClick={async () => { await navigator.clipboard?.writeText(url); setCopied(true); }}><Copy size={15} />{copied ? "Copied" : "Copy link"}</button>
-    </div>
-  </section>;
 }
 
 export function StaffBookingPage() {
@@ -163,7 +136,7 @@ export function StaffBookingPage() {
       return <main className="public-main"><div className="public-card staff-booking-mobile-card"><span className="eyebrow">Staff booking</span><h1>Collect card payment</h1><div className="success-banner">Booking {created.public_reference} is reserved and waiting for card payment.</div><p className="muted-note">The client’s card details are entered securely into Stripe. Passport and staff members never see or store the card number.</p><StaffPaymentPanel clientSecret={created.client_secret} returnUrl={returnUrl} onSuccess={() => setPaymentComplete(true)} /></div></main>;
     }
     if (isCard && !cardConfirmed) return <main className="public-main"><div className="public-card staff-booking-mobile-card"><span className="eyebrow">Staff booking</span><h1>Payment setup unavailable</h1><div className="error-banner">Stripe did not return a secure payment form. Do not retry the booking repeatedly; contact the operator and check the payment configuration.</div><p className="muted-note">The booking remains reserved while the payment form is repaired. Do not create a duplicate booking.</p></div></main>;
-    return <main className="public-main"><div className="public-card staff-booking-mobile-card"><span className="eyebrow">Staff booking</span><h1>{created.payment_method === "invoice" ? (created.invoice_url ? "Invoice sent" : "Invoice delivery pending") : "Appointment booked"}</h1>{created.payment_method === "invoice" ? <><div className="success-banner">Booking {created.public_reference} is pending invoice payment.</div><p className="muted-note">{created.invoice_url ? "Stripe has accepted the invoice for delivery to the customer’s email. The appointment will be confirmed automatically after payment." : "The booking is safely held and the invoice delivery job will retry automatically. Check the outbox/worker logs if the customer does not receive it."}</p>{created.invoice_url && <a className="button" href={created.invoice_url} target="_blank" rel="noreferrer">Open invoice</a>}</> : <div className="success-banner">{created.payment_method === "card" ? `Payment received. Booking ${created.public_reference} is confirmed.` : `Booking ${created.public_reference} was created as a free appointment.`}</div>}<GuestDetailsQr token={token} reference={created.public_reference} /><button type="button" className="button" style={{ width: "100%", marginTop: 12 }} onClick={bookAnother}>Book another</button></div></main>;
+    return <main className="public-main"><div className="public-card staff-booking-mobile-card"><span className="eyebrow">Staff booking</span><h1>{created.payment_method === "invoice" ? (created.invoice_url ? "Invoice sent" : "Invoice delivery pending") : "Appointment booked"}</h1>{created.payment_method === "invoice" ? <><div className="success-banner">Booking {created.public_reference} is pending invoice payment.</div><p className="muted-note">{created.invoice_url ? "Stripe has accepted the invoice for delivery to the customer’s email. The appointment will be confirmed automatically after payment." : "The booking is safely held and the invoice delivery job will retry automatically. Check the outbox/worker logs if the customer does not receive it."}</p>{created.invoice_url && <a className="button" href={created.invoice_url} target="_blank" rel="noreferrer">Open invoice</a>}</> : <div className="success-banner">{created.payment_method === "card" ? `Payment received. Booking ${created.public_reference} is confirmed.` : `Booking ${created.public_reference} was created as a free appointment.`}</div>}<GuestDetailsQr linkPath={`/staff-booking/${encodeURIComponent(token)}/orders/${encodeURIComponent(created.public_reference)}/party-link`} reference={created.public_reference} /><button type="button" className="button" style={{ width: "100%", marginTop: 12 }} onClick={bookAnother}>Book another</button></div></main>;
   }
 
   const selectSlot = (value: AvailabilitySlot) => {

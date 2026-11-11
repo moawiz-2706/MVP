@@ -135,6 +135,16 @@ def create_booking(
     )
 
 
+@router.post("/bookings/orders/{public_reference}/party-link")
+def booking_party_link(public_reference: str, principal: CurrentPrincipal, db: DB) -> dict[str, str]:
+    """A link (shown as a QR code) where everyone in the party adds their details."""
+    from app.services.party_service import PartyService, order_for_reference
+
+    require_permission(principal, Permission.OPERATE_BOOKINGS)
+    order = order_for_reference(db, principal.operator_id, public_reference)
+    return {"url": PartyService(db).issue_link(order)}
+
+
 @router.patch("/bookings/{booking_id}", response_model=BookingDetail)
 def update_booking(
     data: BookingUpdate, booking_id: uuid.UUID, principal: CurrentPrincipal, db: DB
