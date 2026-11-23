@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.entities import (
+    OperatorSettings,
     Booking,
     BookingLineItem,
     BookingCustomFieldDefinition,
@@ -50,6 +51,20 @@ from app.services.partner_service import PartnerService, tag_order
 from app.services.stripe_payment_service import StripePaymentService
 from app.utils.identifiers import public_reference
 from app.utils.money import PaymentBreakdown, apply_basis_points, calculate_payment
+
+
+DEFAULT_PAYOUT_SHARE_BPS = 8000
+
+
+def connected_payout_minor(items, payout_share_bps: int) -> int:
+    """The connected account's share: a percentage of the ticket price of each
+    product whose calendar is in the payout split. Booking fees and taxes stay
+    in the main account, as do products on excluded calendars."""
+    return sum(
+        apply_basis_points(item.line_subtotal_minor, payout_share_bps)
+        for item in items
+        if getattr(item.calendar, "payout_included", True)
+    )
 
 
 @dataclass(slots=True)
@@ -342,7 +357,9 @@ class OrderService:
             )
 
     @staticmethod
-    def _quote(prepared: list[PreparedItem]) -> tuple[OrderQuoteResponse, PaymentBreakdown]:
+    def _quote(
+        prepared: list[PreparedItem], payout_share_bps: int | None = None
+    ) -> tuple[OrderQuoteResponse, PaymentBreakdown]:
         quoted_items = [item.quote() for item in prepared]
         subtotal = sum(item.line_subtotal_minor for item in quoted_items)
         booking_fee = sum(item.booking_fee_minor for item in prepared)
@@ -352,6 +369,9 @@ class OrderService:
             subtotal,
             booking_fee_minor=booking_fee if has_explicit_components else None,
             tax_minor=tax if has_explicit_components else None,
+            operator_transfer_minor=(
+                None if payout_share_bps is None else connected_payout_minor(prepared, payout_share_bps)
+            ),
         )
         return (
             OrderQuoteResponse(
@@ -369,7 +389,14 @@ class OrderService:
     def quote(self, operator_slug: str, request: OrderQuoteRequest) -> OrderQuoteResponse:
         operator = self._operator(operator_slug)
         prepared = self._prepare(operator, request.items)
-        return self._quote(prepared)[0]
+        return self._quote(prepared, self._payout_share_bps(operator.id))[0]
+
+    def _payout_share_bps(self, operator_id: uuid.UUID) -> int:
+        """Share of included ticket prices sent to the connected account."""
+        share = self.db.scalar(
+            select(OperatorSettings.payout_share_bps).where(OperatorSettings.operator_id == operator_id)
+        )
+        return DEFAULT_PAYOUT_SHARE_BPS if share is None else share
 
     @staticmethod
     def _request_hash(request: OrderCreateRequest) -> str:
@@ -489,14 +516,16 @@ class OrderService:
         prepared = self._prepare(
             operator, request.items, require_public=not allow_private_operator
         )
-        quote, money = self._quote(prepared)
+        quote, money = self._quote(prepared, self._payout_share_bps(operator.id))
         paid, invoice_mode, card_mode, payment_method = self.payment_mode(
             money.customer_total_minor,
             request.payment_required,
             requested_payment_method=request.payment_method,
             allow_override=allow_payment_override,
         )
-        if card_mode or invoice_mode:
+        # Only bookings that pay something out need a verified connected
+        # account; calendars excluded from the split keep 100% in the main one.
+        if (card_mode or invoice_mode) and money.operator_transfer_minor > 0:
             connection = self.db.scalar(
                 select(StripeConnection).where(
                     StripeConnection.operator_id == operator.id,

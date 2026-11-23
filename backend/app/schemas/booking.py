@@ -131,6 +131,8 @@ class BookingDetail(BookingListItem):
     subtotal_minor: int
     platform_fee_and_taxes_minor: int
     customer_total_minor: int
+    # Stripe split saved when the order was made (whole order).
+    connected_payout_minor: int = 0
     rate_id: uuid.UUID | None
     customer_type_name: str | None
     seat_count: int

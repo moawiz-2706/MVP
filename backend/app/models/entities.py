@@ -98,6 +98,11 @@ class OperatorSettings(TimestampMixin, Base):
     waiver_website: Mapped[str | None] = mapped_column(Text)
     waiver_text: Mapped[str | None] = mapped_column(Text)
     waiver_opt_in_label: Mapped[str | None] = mapped_column(Text)
+    # Share of each included product's ticket price sent to the Stripe
+    # connected account (8000 = 80%); fees and taxes stay in the main account.
+    payout_share_bps: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=8000, server_default="8000"
+    )
 
 
 class MessageTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -205,6 +210,10 @@ class Calendar(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     # YouTube, Vimeo or a direct video-file link (migration 050).
     video_url: Mapped[str | None] = mapped_column(Text)
+    # Part of the connected-account payout split (migration 052).
+    payout_included: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     public_booking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
