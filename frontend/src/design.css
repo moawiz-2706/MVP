@@ -302,3 +302,12 @@ a.party-guest:hover { background: #f3faf9; }
 /* Guest-details page heading */
 .party-card .eyebrow { display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #5b6664); font-weight: 600; }
 .party-card h1 { font-size: 26px; line-height: 1.2; margin: 4px 0 8px; }
+
+/* ---------- Settings → Payments → Payout split ---------- */
+.payout-split { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line, #e3e7e6); }
+.payout-split h2 { margin-bottom: 4px; }
+.payout-example { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; margin: 6px 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft, #eaf5f2); }
+.payout-example span { color: var(--muted, #5b6664); font-size: 13px; }
+.payout-group { border: 1px solid var(--line, #e3e7e6); border-radius: 10px; padding: 8px 12px; margin-top: 10px; }
+.payout-group header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 0 6px; }
+.payout-row { padding: 6px 0; border-top: 1px solid var(--line, #eef0f2); }

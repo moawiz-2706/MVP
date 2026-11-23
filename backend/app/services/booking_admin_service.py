@@ -280,6 +280,7 @@ class BookingAdminService:
             "subtotal_minor": order.subtotal_minor,
             "platform_fee_and_taxes_minor": order.platform_fee_and_taxes_minor,
             "customer_total_minor": order.customer_total_minor,
+            "connected_payout_minor": order.operator_transfer_minor if payment.payment_method != "none" else 0,
             "rate_id": booking.rate_id,
             "customer_type_name": booking.customer_type_name_snapshot,
             "seat_count": booking.seat_count,

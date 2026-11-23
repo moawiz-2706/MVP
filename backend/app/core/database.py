@@ -36,7 +36,7 @@ REQUIRED_PRODUCTION_TABLES = (
     "booking_waivers",
     "booking_line_items",
 )
-REQUIRED_SCHEMA_VERSION = "050_calendar_video"
+REQUIRED_SCHEMA_VERSION = "052_payout_split"
 OUTBOX_STALE_MINUTES = 15
 logger = logging.getLogger("passport.readiness")
 

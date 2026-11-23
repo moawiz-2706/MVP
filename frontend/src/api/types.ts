@@ -136,6 +136,7 @@ export interface SlotCalendar { calendar_id: Id; calendar_name: string; category
 export interface DashboardSlot { start_at: string; calendars: SlotCalendar[] }
 
 export interface BookingDetail extends Booking {
+  connected_payout_minor?: number;
   booking_source?: string | null;
   partner_id?: Id | null;
   partner_split?: PartnerSplit | null;

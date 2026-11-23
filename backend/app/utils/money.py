@@ -30,6 +30,7 @@ def calculate_payment(
     *,
     booking_fee_minor: int | None = None,
     tax_minor: int | None = None,
+    operator_transfer_minor: int | None = None,
 ) -> PaymentBreakdown:
     """Calculate a payment using explicit components or the legacy markup.
 
@@ -48,7 +49,10 @@ def calculate_payment(
     # operator transfer markup. Never persist a transfer larger than the
     # amount charged to the customer, because that would make the retained
     # platform amount negative and violate the booking-order constraint.
-    operator_transfer = min(subtotal_minor + operator_bonus, customer_total)
+    # Passport passes the configured payout split (a share of the ticket
+    # price of included calendars); the markup is only the legacy default.
+    requested = subtotal_minor + operator_bonus if operator_transfer_minor is None else operator_transfer_minor
+    operator_transfer = max(0, min(requested, customer_total))
     return PaymentBreakdown(
         subtotal_minor=subtotal_minor,
         platform_fee_and_taxes_minor=platform_fee,
