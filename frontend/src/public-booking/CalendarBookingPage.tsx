@@ -190,6 +190,9 @@ export function CalendarBookingPage() {
   const photos = [calendar.hero_image_url, ...(calendar.gallery_image_urls || [])].filter((url): url is string => Boolean(url));
   const video = videoSource(calendar.video_url);
   const lowestPrice = hasRates ? Math.min(...rateList.map((rate) => rate.price_minor)) : calendar.base_price_minor;
+  // A rate sold at most once per booking (a whole boat, a private charter) is priced per booking, not per guest.
+  const cheapestRate = hasRates ? rateList.find((rate) => rate.price_minor === lowestPrice) : undefined;
+  const priceUnit = !cheapestRate || cheapestRate.max_units_per_booking === 1 ? "booking" : "guest";
   const policy = calendar.booking_policy;
   const requiresPolicyAcceptance = Boolean(policy || online);
   const legacyMax = liveSlot?.max_bookable_units ?? 1;
@@ -238,7 +241,7 @@ export function CalendarBookingPage() {
           <div><dt><Clock3 size={15} />Duration</dt><dd>{formatDuration(calendar.duration_minutes)}{rateList.some((rate) => rate.duration_minutes && rate.duration_minutes !== calendar.duration_minutes) ? " (longer options available)" : ""}</dd></div>
           {calendar.location && <div><dt><MapPin size={15} />Meeting point</dt><dd>{calendar.location.name}<br />{calendar.location.address}</dd></div>}
           <div><dt><ShieldCheck size={15} />Cancellations</dt><dd>{cancellationCopy(calendar)}</dd></div>
-          <div><dt><Users size={15} />From</dt><dd>{formatMoney(lowestPrice, calendar.currency)} per {hasRates ? "guest" : "booking"}</dd></div>
+          <div><dt><Users size={15} />From</dt><dd>{formatMoney(lowestPrice, calendar.currency)} per {priceUnit}</dd></div>
         </dl>
       </section>
       {calendar.booking_instructions && <section className="fh-section"><h2>Good to know</h2><p className="fh-description">{calendar.booking_instructions}</p></section>}
